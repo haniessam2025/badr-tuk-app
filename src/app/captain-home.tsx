@@ -1,361 +1,201 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
-import { signOut } from 'firebase/auth';
-import { collection, doc, getDoc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { auth, db } from '../firebaseConfig';
+import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export default function CaptainHomeScreen() {
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
-  const [activeRide, setActiveRide] = useState<any | null>(null);
-  const [captainImage, setCaptainImage] = useState('');
-  const [captainId, setCaptainId] = useState<string>('');
-  const [loading, setLoading] = useState(true);
+export default function CaptainHome() {
+  const [rideState, setRideState] = useState<'waiting' | 'incoming' | 'accepted'>('waiting');
+  
+  const [passenger, setPassenger] = useState({
+    name: 'Yaserahmed',
+    phone: '01009524383',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+    pickupLocation: 'موقع الانطلاق',
+    destinationLocation: 'الوجهة المطلوبة',
+    price: '0', // استقبال السعر القادم من الراكب
+  });
 
-  const router = useRouter();
-
+  // فحص الطلب الوارد كل ثانية وسحب بياناته كاملة بما فيها السعر المعدل
   useEffect(() => {
-    const initializeCaptain = async () => {
+    const checkRideRequest = async () => {
       try {
-        let currentId = auth.currentUser?.uid;
-        if (!currentId) {
-          currentId = await AsyncStorage.getItem('currentCaptainId');
-        }
-
-        if (!currentId) {
-          router.replace('/captain-login');
-          return;
-        }
-
-        setCaptainId(currentId);
-
-        const docSnap = await getDoc(doc(db, 'captains', currentId));
-        if (docSnap.exists()) {
-          setCaptainImage(docSnap.data().image || '');
-        }
-
-        const qPending = query(collection(db, 'rides'), where('status', '==', 'pending'));
-        const unsubscribePending = onSnapshot(qPending, (snapshot) => {
-          const ridesList: any[] = [];
-          snapshot.forEach((docSnap) => {
-            ridesList.push({ id: docSnap.id, ...docSnap.data() });
+        const storedRide = await AsyncStorage.getItem('active_ride');
+        if (storedRide && rideState === 'waiting') {
+          const rideData = JSON.parse(storedRide);
+          setPassenger({
+            name: rideData.name || 'Yaserahmed',
+            phone: rideData.phone || '01009524383',
+            avatar: rideData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+            pickupLocation: rideData.pickupLocation || 'موقع الانطلاق',
+            destinationLocation: rideData.destinationLocation || 'الوجهة المطلوبة',
+            price: rideData.price || '0',
           });
-          setPendingRequests(ridesList);
-        });
-
-        const qActive = query(
-          collection(db, 'rides'), 
-          where('captainId', '==', currentId)
-        );
-        const unsubscribeActive = onSnapshot(qActive, (snapshot) => {
-          let foundActive = false;
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            if (['accepted', 'arrived', 'passenger_ready', 'in_progress'].includes(data.status)) {
-              setActiveRide({ id: docSnap.id, ...data });
-              foundActive = true;
-            } else if (data.status === 'cancelled') {
-              setActiveRide(null);
-            }
-          });
-
-          if (!foundActive) {
-            setActiveRide(null);
-          }
-          setLoading(false);
-        });
-
-        return () => {
-          unsubscribePending();
-          unsubscribeActive();
-        };
-
-      } catch (e) {
-        console.log(e);
-        setLoading(false);
-        router.replace('/captain-login');
+          setRideState('incoming');
+        }
+      } catch (error) {
+        console.log(error);
       }
     };
 
-    initializeCaptain();
-  }, []);
+    checkRideRequest();
+    const interval = setInterval(checkRideRequest, 1000);
+    return () => clearInterval(interval);
+  }, [rideState]);
 
-  const handleAcceptRide = async (rideId: string) => {
+  const handleAcceptRide = async () => {
     try {
-      if (!captainId) return;
-
-      const captainDocRef = doc(db, 'captains', captainId);
-      const captainDocSnap = await getDoc(captainDocRef);
-      
-      let captainName = 'كابتن';
-      let captainPhone = '';
-      let captainImg = '';
-      let tukTukNumber = 'غير محدد';
-      let tukTukModel = 'توكتوك';
-
-      if (captainDocSnap.exists()) {
-        const data = captainDocSnap.data();
-        captainName = data.name || 'كابتن';
-        captainPhone = data.phone || '';
-        captainImg = data.image || '';
-        tukTukNumber = data.tukTukNumber || 'غير محدد';
-        tukTukModel = data.tukTukModel || 'توكتوك';
+      const storedRide = await AsyncStorage.getItem('active_ride');
+      if (storedRide) {
+        const rideData = JSON.parse(storedRide);
+        rideData.status = 'accepted';
+        await AsyncStorage.setItem('active_ride', JSON.stringify(rideData));
       }
-
-      await updateDoc(doc(db, 'rides', rideId), {
-        status: 'accepted',
-        captainId: captainId,
-        captainName: captainName,
-        captainPhone: captainPhone,
-        captainImage: captainImg,
-        tukTukNumber: tukTukNumber,
-        tukTukModel: tukTukModel,
-      });
-
-      Alert.alert('تم قبول المشوار! 🛺', 'توجه إلى موقع الراكب.');
     } catch (error) {
-      Alert.alert('خطأ', 'تعذر قبول المشوار.');
+      console.log(error);
     }
+
+    setRideState('accepted');
   };
 
-  // الكابتن يضغط "لقد وصلت"
-  const handleArrived = async (rideId: string) => {
-    try {
-      await updateDoc(doc(db, 'rides', rideId), {
-        status: 'arrived',
-      });
-      Alert.alert('تم بنجاح', 'تم إبلاغ الراكب بوصولك إلى موقعه.');
-    } catch (error) {
-      Alert.alert('خطأ', 'حدث خطأ.');
-    }
+  const handleCall = () => {
+    Linking.openURL(`tel:${passenger.phone}`);
   };
 
-  // الكابتن يضغط "ابدأ الرحلة"
-  const handleStartRide = async (rideId: string) => {
-    try {
-      await updateDoc(doc(db, 'rides', rideId), {
-        status: 'in_progress',
-      });
-      Alert.alert('بدء الرحلة 🚀', 'تم بدء الرحلة بنجاح.');
-    } catch (error) {
-      Alert.alert('خطأ', 'حدث خطأ.');
-    }
+  const handleCancel = async () => {
+    await AsyncStorage.removeItem('active_ride');
+    setRideState('waiting');
+    alert('تم إلغاء المشوار.');
   };
 
-  const handleCompleteRide = async (rideId: string) => {
-    try {
-      await updateDoc(doc(db, 'rides', rideId), {
-        status: 'completed',
-      });
-      setActiveRide(null);
-      Alert.alert('تم بنجاح', 'تم إنهاء الرحلة بنجاح.');
-    } catch (error) {
-      Alert.alert('خطأ', 'تعذر إنهاء الرحلة.');
-    }
+  const handleArrived = () => {
+    alert('تم إرسال إشعار للراكب بأنك وصلت.');
   };
-
-  const handleCancelRide = (rideId: string) => {
-    Alert.alert(
-      'إلغاء الرحلة',
-      'هل تود إلغاء الرحلة؟',
-      [
-        { text: 'واصل الرحلة', style: 'cancel' },
-        {
-          text: 'نعم',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await updateDoc(doc(db, 'rides', rideId), {
-                status: 'cancelled',
-                captainId: null,
-              });
-              setActiveRide(null);
-              Alert.alert('تم الإلغاء', 'تم إلغاء الرحلة بنجاح.');
-            } catch (error) {
-              Alert.alert('خطأ', 'تعذر إلغاء الرحلة.');
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const handleCall = (phone: string) => {
-    if (phone) Linking.openURL(`tel:${phone}`);
-  };
-
-  const handleLogout = async () => {
-    await AsyncStorage.removeItem('currentCaptainId');
-    try {
-      await signOut(auth);
-    } catch (e) {}
-    router.replace('/role');
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#2563eb" />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>قائمة الرحلات 🛺</Text>
-
-        <TouchableOpacity onPress={() => router.push('/captain-profile')} style={styles.profileBtn}>
-          {captainImage ? (
-            <Image source={{ uri: captainImage }} style={styles.headerAvatar} />
-          ) : (
-            <View style={styles.headerAvatarPlaceholder}>
-              <Text style={{ fontSize: 12 }}>👤</Text>
-            </View>
-          )}
-          <Text style={styles.profileBtnText}>الملف الشخصي</Text>
-        </TouchableOpacity>
-      </View>
-
-      {activeRide ? (
-        <View style={styles.activeRideContainer}>
-          <View style={styles.bannerAlert}>
-            <Text style={styles.activeTitle}>
-              {activeRide.status === 'accepted' && '🚨 في طريقك إلى موقع الراكب'}
-              {activeRide.status === 'arrived' && '📍 وصلت إلى موقع الراكب (بانتظار خروجه)'}
-              {activeRide.status === 'passenger_ready' && '📢 تنبيه هام: الراكب في طريقه إليك الآن!'}
-              {activeRide.status === 'in_progress' && '🚀 المشوار ساري إلى الوجهة...'}
-            </Text>
-          </View>
-
-          <View style={styles.activeCard}>
-            {activeRide.passengerImage ? (
-              <Image source={{ uri: activeRide.passengerImage }} style={styles.passengerAvatar} />
-            ) : (
-              <View style={styles.passengerAvatarPlaceholder}>
-                <Text style={{ fontSize: 24 }}>👤</Text>
-              </View>
-            )}
-
-            <Text style={styles.cardText}>👤 الراكب: {activeRide.passengerName}</Text>
-            <Text style={styles.cardText}>📞 الهاتف: {activeRide.passengerPhone || 'غير متوفر'}</Text>
-            <Text style={styles.cardText}>📍 الانطلاق: {activeRide.pickup}</Text>
-            <Text style={styles.cardText}>🏁 الوجهة: {activeRide.dropoff}</Text>
-
-            {activeRide.passengerPhone ? (
-              <TouchableOpacity style={styles.callButton} onPress={() => handleCall(activeRide.passengerPhone)}>
-                <Text style={styles.callButtonText}>📞 اتصال بالراكب</Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {/* 1. زر "لقد وصلت" يظهر لما الكابتن يقبل المشوار */}
-            {activeRide.status === 'accepted' && (
-              <TouchableOpacity style={styles.arrivedButton} onPress={() => handleArrived(activeRide.id)}>
-                <Text style={styles.arrivedButtonText}>📍 لقد وصلت إلى موقع الراكب</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* 2. زر "ابدأ الرحلة" يظهر بعد ما الراكب يدوس في طريقي إليك أو بعد الوصول */}
-            {(activeRide.status === 'arrived' || activeRide.status === 'passenger_ready') && (
-              <TouchableOpacity style={styles.startButton} onPress={() => handleStartRide(activeRide.id)}>
-                <Text style={styles.startButtonText}>🚀 ابدأ المشوار</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* 3. زر "إنهاء المشوار" أثناء سريان الرحلة */}
-            {activeRide.status === 'in_progress' && (
-              <TouchableOpacity style={styles.completeButton} onPress={() => handleCompleteRide(activeRide.id)}>
-                <Text style={styles.completeButtonText}>🏁 إنهاء المشوار</Text>
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity style={styles.cancelButton} onPress={() => handleCancelRide(activeRide.id)}>
-              <Text style={styles.cancelButtonText}>❌ إلغاء المشوار</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          <Text style={styles.subTitle}>الطلبات المتاحة حالياً:</Text>
-          {pendingRequests.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>لا توجد طلبات مشاوير متاحة حالياً...</Text>
-            </View>
-          ) : (
-            <FlatList
-              data={pendingRequests}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
-                <View style={styles.card}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                    {item.passengerImage ? (
-                      <Image source={{ uri: item.passengerImage }} style={styles.smallAvatar} />
-                    ) : (
-                      <View style={styles.smallAvatarPlaceholder}>
-                        <Text style={{ fontSize: 12 }}>👤</Text>
-                      </View>
-                    )}
-                    <Text style={[styles.cardText, { fontWeight: 'bold', marginBottom: 0, marginRight: 8 }]}>
-                      {item.passengerName}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.cardText}>📍 الانطلاق: {item.pickup}</Text>
-                  <Text style={styles.cardText}>🏁 الوجهة: {item.dropoff}</Text>
-
-                  <TouchableOpacity style={styles.acceptButton} onPress={() => handleAcceptRide(item.id)}>
-                    <Text style={styles.acceptButtonText}>قبول المشوار</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            />
-          )}
+      
+      {rideState === 'waiting' && (
+        <View style={styles.waitingContainer}>
+          <Text style={styles.waitingText}>📡 في انتظار طلب مشوار من الراكب...</Text>
+          <TouchableOpacity 
+            style={styles.refreshBtn} 
+            onPress={() => setRideState('incoming')}
+          >
+            <Text style={styles.refreshBtnText}>محاكاة ظهور الطلب</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      <TouchableOpacity onPress={handleLogout} style={styles.logoutFooter}>
-        <Text style={styles.logoutText}>تسجيل الخروج</Text>
-      </TouchableOpacity>
+      {/* الطلب الجديد عند الكابتن: يظهر فيه تفاصيل المكان والسعر المعدل ورقم الهاتف المخفي */}
+      {rideState === 'incoming' && (
+        <View style={styles.incomingContainer}>
+          <View style={styles.incomingCard}>
+            <Text style={styles.incomingTitle}>طلب جديد قادم إليك:</Text>
+            
+            <View style={styles.passengerCardIncoming}>
+              <Image source={{ uri: passenger.avatar }} style={styles.avatarIncoming} />
+              <View style={styles.passengerDetails}>
+                <Text style={styles.passengerName}>{passenger.name}</Text>
+                <Text style={styles.hiddenPhoneText}>🔒 رقم الهاتف مخفي لحين قبول المشوار</Text>
+              </View>
+            </View>
+
+            <View style={styles.tripDetailsBox}>
+              <Text style={styles.tripText}>📍 الانطلاق: {passenger.pickupLocation}</Text>
+              <Text style={styles.tripText}>🏁 الوجهة: {passenger.destinationLocation}</Text>
+              <Text style={styles.priceTag}>💰 أجرة الرحلة: {passenger.price} جنيه</Text>
+            </View>
+
+            <TouchableOpacity style={styles.acceptButton} onPress={handleAcceptRide}>
+              <Text style={styles.acceptButtonText}>قبول المشوار</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* المشوار النشط بعد القبول: يظهر رقم الهاتف وزر الاتصال والسعر */}
+      {rideState === 'accepted' && (
+        <View style={styles.activeRideContainer}>
+          <View style={styles.mapContainer}>
+            <View style={styles.mockMap}>
+              <View style={styles.mapVisualContainer}>
+                <View style={styles.dotCaptain}><Text style={styles.dotText}>الكابتن</Text></View>
+                <View style={styles.mapLine} />
+                <View style={styles.dotPassenger}><Text style={styles.dotText}>الراكب</Text></View>
+              </View>
+              <Text style={styles.mapTitle}>خريطة التتبع المباشر</Text>
+              <Text style={styles.mapSubtitle}>من: {passenger.pickupLocation} إلى: {passenger.destinationLocation}</Text>
+              <Text style={styles.mapPrice}>💰 أجرة الرحلة: {passenger.price} جنيه</Text>
+            </View>
+          </View>
+
+          <View style={styles.bottomCard}>
+            <View style={styles.passengerCard}>
+              <Image source={{ uri: passenger.avatar }} style={styles.avatar} />
+              <View style={styles.passengerDetails}>
+                <Text style={styles.passengerName}>{passenger.name}</Text>
+                <Text style={styles.passengerPhone}>📞 {passenger.phone}</Text>
+              </View>
+              <TouchableOpacity style={styles.callButton} onPress={handleCall}>
+                <Text style={styles.callText}>اتصال</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.actionsContainer}>
+              <TouchableOpacity style={styles.arrivedButton} onPress={handleArrived}>
+                <Text style={styles.arrivedText}>لقد وصلت إلى موقع الراكب</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+                <Text style={styles.cancelText}>إلغاء المشوار</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6f9', padding: 20, paddingTop: 50 },
-  loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#ddd', paddingBottom: 10 },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#2563eb' },
-  profileBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e0f2fe', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
-  headerAvatar: { width: 28, height: 28, borderRadius: 14, marginLeft: 6 },
-  headerAvatarPlaceholder: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#bae6fd', justifyContent: 'center', alignItems: 'center', marginLeft: 6 },
-  profileBtnText: { color: '#2563eb', fontWeight: 'bold', fontSize: 13 },
-  subTitle: { fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 15, textAlign: 'right' },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { color: '#666', fontSize: 16 },
-  card: { backgroundColor: '#fff', padding: 16, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#ddd' },
-  cardText: { fontSize: 16, color: '#333', marginBottom: 8, textAlign: 'right' },
-  acceptButton: { backgroundColor: '#16a34a', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
-  acceptButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  activeRideContainer: { flex: 1 },
-  bannerAlert: { backgroundColor: '#fef3c7', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#f59e0b', marginBottom: 15 },
-  activeTitle: { fontSize: 16, fontWeight: 'bold', color: '#b45309', textAlign: 'center' },
-  activeCard: { backgroundColor: '#fff', padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
-  passengerAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#d97706', marginBottom: 15 },
-  passengerAvatarPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#fef3c7', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#d97706', marginBottom: 15 },
-  smallAvatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#ccc' },
-  smallAvatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e5e7eb', justifyContent: 'center', alignItems: 'center' },
-  callButton: { backgroundColor: '#2563eb', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10, width: '100%' },
-  callButtonText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
-  arrivedButton: { backgroundColor: '#d97706', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 12, width: '100%' },
-  arrivedButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  startButton: { backgroundColor: '#16a34a', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 12, width: '100%' },
-  startButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  completeButton: { backgroundColor: '#dc2626', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 12, width: '100%' },
-  completeButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  cancelButton: { backgroundColor: '#374151', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 12, width: '100%' },
-  cancelButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  logoutFooter: { alignSelf: 'center', padding: 10, marginTop: 10 },
-  logoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  waitingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  waitingText: { fontSize: 16, color: '#64748b', marginBottom: 20, fontWeight: 'bold' },
+  refreshBtn: { backgroundColor: '#10b981', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12 },
+  refreshBtnText: { color: '#fff', fontWeight: 'bold' },
+  incomingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  incomingCard: { backgroundColor: '#ffffff', width: '100%', padding: 20, borderRadius: 20, elevation: 4, borderWidth: 1, borderColor: '#e2e8f0' },
+  incomingTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', marginBottom: 15, textAlign: 'right' },
+  passengerCardIncoming: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', padding: 12, borderRadius: 14, marginBottom: 12 },
+  avatarIncoming: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1', marginLeft: 12 },
+  passengerDetails: { flex: 1 },
+  passengerName: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', textAlign: 'right' },
+  passengerPhone: { fontSize: 14, color: '#475569', marginTop: 2, textAlign: 'right' },
+  hiddenPhoneText: { fontSize: 12, color: '#d97706', marginTop: 4, textAlign: 'right', fontWeight: 'bold' },
+  tripDetailsBox: { backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#e2e8f0' },
+  tripText: { fontSize: 14, fontWeight: 'bold', color: '#334155', marginBottom: 4, textAlign: 'right' },
+  priceTag: { fontSize: 16, fontWeight: 'bold', color: '#10b981', marginTop: 6, textAlign: 'right' },
+  acceptButton: { backgroundColor: '#10b981', paddingVertical: 16, borderRadius: 14, alignItems: 'center', elevation: 3 },
+  acceptButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  activeRideContainer: { flex: 1, flexDirection: 'column' },
+  mapContainer: { flex: 5.5, width: '100%' },
+  mockMap: { flex: 1, backgroundColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  mapVisualContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  dotCaptain: { backgroundColor: '#2563eb', padding: 8, borderRadius: 16, alignItems: 'center' },
+  dotPassenger: { backgroundColor: '#dc2626', padding: 8, borderRadius: 16, alignItems: 'center' },
+  mapLine: { width: 70, height: 4, backgroundColor: '#2563eb', marginHorizontal: 5 },
+  dotText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  mapTitle: { fontSize: 18, fontWeight: 'bold', color: '#334155' },
+  mapSubtitle: { fontSize: 13, color: '#64748b', marginTop: 5, textAlign: 'center' },
+  mapPrice: { fontSize: 15, fontWeight: 'bold', color: '#10b981', marginTop: 8 },
+  bottomCard: { flex: 4.5, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, justifyContent: 'space-between', elevation: 10 },
+  passengerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', padding: 12, borderRadius: 16 },
+  avatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1', marginLeft: 12 },
+  callButton: { backgroundColor: '#10b981', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  callText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  actionsContainer: { gap: 10 },
+  arrivedButton: { backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 4 },
+  arrivedText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  cancelButton: { backgroundColor: '#fee2e2', paddingVertical: 13, borderRadius: 14, alignItems: 'center' },
+  cancelButtonText: { color: '#ef4444', fontSize: 15, fontWeight: 'bold' },
 });
