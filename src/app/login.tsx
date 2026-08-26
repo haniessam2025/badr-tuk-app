@@ -19,7 +19,7 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      // 1. البحث السريع عن المستخدم بالاسم
+      // 1. البحث عن الراكب في فايربيز بالاسم
       const q = query(collection(db, 'passengers'), where('name', '==', name.trim()));
       const querySnapshot = await getDocs(q);
 
@@ -39,8 +39,28 @@ export default function LoginScreen() {
 
       // 2. التحقق من كلمة المرور
       if (userDocData && (userDocData.password === password || password === '123456')) {
+        
+        // 🔥 مسح الذاكرة المؤقتة بالكامل لمنع تداخل بيانات الحسابات القديمة
+        await AsyncStorage.multiRemove([
+          'currentPassengerId',
+          'passenger_profile',
+          'active_ride'
+        ]);
+
+        // حفظ المعرف الجديد وبيانات الراكب الجديد فوراً
         await AsyncStorage.setItem('currentPassengerId', userId);
+
+        const newPassengerProfile = {
+          name: userDocData.name || name.trim(),
+          phone: userDocData.phone || '01000000000',
+          avatar: userDocData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+        };
+
+        await AsyncStorage.setItem('passenger_profile', JSON.stringify(newPassengerProfile));
+
         setLoading(false);
+        
+        // الانتقال لصفحة الراكب مع إعادة توجيه نظيفة
         router.replace('/home');
       } else {
         setLoading(false);

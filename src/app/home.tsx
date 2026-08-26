@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePathname, useRouter } from 'expo-router';
+import { doc, getDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { Alert, Image, Linking, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { db } from '../firebaseConfig';
 
 export default function PassengerHome() {
   const router = useRouter();
@@ -16,8 +18,8 @@ export default function PassengerHome() {
   const [tempPrice, setTempPrice] = useState('');
 
   const [passengerProfile, setPassengerProfile] = useState({
-    name: 'Yaserahmed',
-    phone: '01009524383',
+    name: 'جارٍ التحميل...',
+    phone: '',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
   });
 
@@ -31,13 +33,33 @@ export default function PassengerHome() {
   useEffect(() => {
     loadPassengerProfile();
     checkRideStatus();
+
+    const interval = setInterval(() => {
+      loadPassengerProfile(); // تحديث مستمر لضمان جلب البيانات الصحيحة
+      checkRideStatus();
+    }, 1500);
+
+    return () => clearInterval(interval);
   }, [pathname]);
 
+  // دالة لجلب البيانات حصرياً من فايربيز بناءً على الـ ID المسجل حالياً
   const loadPassengerProfile = async () => {
     try {
-      const saved = await AsyncStorage.getItem('passenger_profile');
-      if (saved) {
-        setPassengerProfile(JSON.parse(saved));
+      const passengerId = await AsyncStorage.getItem('currentPassengerId');
+      if (passengerId) {
+        const docRef = doc(db, 'passengers', passengerId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setPassengerProfile({
+            name: data.name || 'مستخدم جديد',
+            phone: data.phone || '01000000000',
+            avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+          });
+        }
+      } else {
+        // لو مفيش ID، رجعه فوراً لصفحة تسجيل الدخول
+        router.replace('/login');
       }
     } catch (e) {
       console.log(e);
@@ -46,10 +68,20 @@ export default function PassengerHome() {
 
   const checkRideStatus = async () => {
     try {
+      const savedCaptainProfile = await AsyncStorage.getItem('captain_profile');
+      if (savedCaptainProfile) {
+        const capData = JSON.parse(savedCaptainProfile);
+        setCaptainInfo({
+          name: capData.name || 'Haniessam',
+          phone: capData.phone || '01030369008',
+          vehicle: capData.vehicle || 'توكتوك (Ghj 124)',
+          avatar: capData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+        });
+      }
+
       const savedRide = await AsyncStorage.getItem('active_ride');
       if (savedRide) {
         const data = JSON.parse(savedRide);
-        // سحب البيانات كاملة (الانطلاق، الوجهة، السعر) لضمان ظهورها
         if (data.pickupLocation) setPickup(data.pickupLocation);
         if (data.destinationLocation) setDestination(data.destinationLocation);
         if (data.price) setPrice(data.price);
@@ -59,6 +91,8 @@ export default function PassengerHome() {
         } else if (data.status === 'captain_arrived') {
           setRideStatus('arrived');
         }
+      } else {
+        setRideStatus('idle');
       }
     } catch (error) {
       console.log(error);
@@ -147,7 +181,18 @@ export default function PassengerHome() {
   };
 
   const handleCallCaptain = () => {
+    if (!captainInfo.phone) {
+      Alert.alert('تنبيه', 'رقم الكابتن غير متوفر بعد.');
+      return;
+    }
     Linking.openURL(`tel:${captainInfo.phone}`);
+  };
+
+  // زرار الخروج الشامل
+  const handleLogout = async () => {
+    await AsyncStorage.removeItem('currentPassengerId');
+    await AsyncStorage.removeItem('passenger_profile');
+    router.replace('/login');
   };
 
   return (
@@ -159,7 +204,7 @@ export default function PassengerHome() {
           <Text style={styles.welcomeText}>أهلاً، <Text style={styles.userName}>{passengerProfile.name} 🛺</Text></Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={() => Alert.alert('خروج', 'تم تسجيل الخروج')}>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Text style={styles.logoutText}>خروج</Text>
         </TouchableOpacity>
       </View>
@@ -243,7 +288,7 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {/* الحالة: الكابتن في طريقه إليك */}
+      {/* الحالة 1: الكابتن في طريقه إليك */}
       {rideStatus === 'accepted' && (
         <View style={styles.cardActive}>
           <Text style={styles.statusAlertTitle}>🛺 الكابتن في طريقه إليك...</Text>
@@ -252,7 +297,7 @@ export default function PassengerHome() {
             <Image source={{ uri: captainInfo.avatar }} style={styles.captainAvatar} />
             <View style={styles.captainDetails}>
               <Text style={styles.captainText}>👨‍✈️ الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText}>🛺 التوكتوك: {captainInfo.vehicle}</Text>
+              <Text style={styles.captainText}>🛺 المركبة: {captainInfo.vehicle}</Text>
               <Text style={styles.captainText}>📞 الهاتف: {captainInfo.phone}</Text>
             </View>
           </View>
@@ -265,6 +310,13 @@ export default function PassengerHome() {
 
           <TouchableOpacity style={styles.callCaptainBtn} onPress={handleCallCaptain}>
             <Text style={styles.callCaptainBtnText}>📞 اتصال بالكابتن</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.chatButton} 
+            onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}
+          >
+            <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.cancelOrderBtn} onPress={handleCancelRide}>
@@ -273,16 +325,16 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {/* الحالة: وصل الكابتن إلى موقعك */}
+      {/* الحالة 2: لقد وصل الكابتن */}
       {rideStatus === 'arrived' && (
         <View style={styles.cardActive}>
-          <Text style={styles.statusAlertTitle}>📍 وصل الكابتن إلى موقعك!</Text>
+          <Text style={styles.statusArrivalAlert}>🔔 لقد وصل الكابتن برجاء عدم التأخير</Text>
 
           <View style={styles.captainCard}>
             <Image source={{ uri: captainInfo.avatar }} style={styles.captainAvatar} />
             <View style={styles.captainDetails}>
               <Text style={styles.captainText}>👨‍✈️ الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText}>🛺 التوكتوك: {captainInfo.vehicle}</Text>
+              <Text style={styles.captainText}>🛺 المركبة: {captainInfo.vehicle}</Text>
               <Text style={styles.captainText}>📞 الهاتف: {captainInfo.phone}</Text>
             </View>
           </View>
@@ -297,8 +349,11 @@ export default function PassengerHome() {
             <Text style={styles.callCaptainBtnText}>📞 اتصال بالكابتن</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.confirmArriveBtn} onPress={() => Alert.alert('نجاح', 'تم تأكيد وصول الكابتن بنجاح!')}>
-            <Text style={styles.confirmArriveBtnText}>✔ تأكيد وصول الكابتن</Text>
+          <TouchableOpacity 
+            style={styles.chatButton} 
+            onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}
+          >
+            <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.cancelOrderBtn} onPress={handleCancelRide}>
@@ -324,6 +379,7 @@ const styles = StyleSheet.create({
   cardActive: { backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 2, borderColor: '#d97706', elevation: 6 },
   cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'right' },
   statusAlertTitle: { fontSize: 18, fontWeight: 'bold', color: '#d97706', marginBottom: 15, textAlign: 'center' },
+  statusArrivalAlert: { fontSize: 17, fontWeight: 'bold', color: '#10b981', marginBottom: 15, textAlign: 'center' },
   subText: { fontSize: 15, color: '#64748b', textAlign: 'center', marginBottom: 20 },
   label: { fontSize: 14, fontWeight: 'bold', color: '#475569', marginBottom: 6, textAlign: 'right' },
   rowInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
@@ -346,6 +402,7 @@ const styles = StyleSheet.create({
   modalCancelBtn: { flex: 1, backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
   modalCancelBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16 },
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3 },
+  searchButtonToken: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
   searchButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
   captainCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef3c7', padding: 12, borderRadius: 14, marginBottom: 15 },
   captainAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1' },
@@ -354,11 +411,11 @@ const styles = StyleSheet.create({
   tripRouteContainer: { backgroundColor: '#f8fafc', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0' },
   routeText: { fontSize: 14, color: '#334155', fontWeight: 'bold', marginBottom: 4, textAlign: 'right' },
   priceTag: { fontSize: 16, color: '#10b981', fontWeight: 'bold', marginTop: 4, textAlign: 'right' },
-  callCaptainBtn: { backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
+  callCaptainBtn: { backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10, elevation: 3 },
   callCaptainBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-  confirmArriveBtn: { backgroundColor: '#10b981', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
-  confirmArriveBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-  cancelOrderBtn: { backgroundColor: '#dc2626', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  chatButton: { backgroundColor: '#8b5cf6', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10, elevation: 3 },
+  chatButtonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  cancelOrderBtn: { backgroundColor: '#dc2626', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 3 },
   cancelOrderBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
   cancelBtnOnly: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
   cancelBtnOnlyText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
