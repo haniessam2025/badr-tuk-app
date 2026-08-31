@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
 
-export default function LoginScreen() {
+export default function PassengerLoginScreen() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,6 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      // 1. البحث عن الراكب في فايربيز بالاسم
       const q = query(collection(db, 'passengers'), where('name', '==', name.trim()));
       const querySnapshot = await getDocs(q);
 
@@ -37,17 +36,14 @@ export default function LoginScreen() {
         userId = docSnap.id;
       });
 
-      // 2. التحقق من كلمة المرور
       if (userDocData && (userDocData.password === password || password === '123456')) {
         
-        // 🔥 مسح الذاكرة المؤقتة بالكامل لمنع تداخل بيانات الحسابات القديمة
         await AsyncStorage.multiRemove([
           'currentPassengerId',
           'passenger_profile',
           'active_ride'
         ]);
 
-        // حفظ المعرف الجديد وبيانات الراكب الجديد فوراً
         await AsyncStorage.setItem('currentPassengerId', userId);
 
         const newPassengerProfile = {
@@ -59,9 +55,7 @@ export default function LoginScreen() {
         await AsyncStorage.setItem('passenger_profile', JSON.stringify(newPassengerProfile));
 
         setLoading(false);
-        
-        // الانتقال لصفحة الراكب مع إعادة توجيه نظيفة
-        router.replace('/home');
+        router.replace('/passenger-home'); 
       } else {
         setLoading(false);
         Alert.alert('خطأ', 'كلمة المرور غير صحيحة.');
@@ -69,7 +63,7 @@ export default function LoginScreen() {
 
     } catch (error) {
       setLoading(false);
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول. حاول مرة أخرى.');
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول.');
     }
   };
 
@@ -107,10 +101,6 @@ export default function LoginScreen() {
           <Text style={styles.buttonText}>دخول</Text>
         </TouchableOpacity>
       )}
-
-      <TouchableOpacity onPress={() => router.push('/signup')} style={styles.linkButton}>
-        <Text style={styles.linkText}>ليس لديك حساب؟ تسجيل راكب جديد</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -123,6 +113,4 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 12, fontSize: 16, textAlign: 'right', color: '#333' },
   button: { backgroundColor: '#d97706', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 20 },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  linkButton: { marginTop: 20, alignItems: 'center' },
-  linkText: { color: '#d97706', fontSize: 16, textDecorationLine: 'underline' },
 });

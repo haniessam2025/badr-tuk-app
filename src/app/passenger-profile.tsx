@@ -1,14 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { auth, db } from '../firebaseConfig';
 
 export default function PassengerProfile() {
   const router = useRouter();
-  const [name, setName] = useState('Yaserahmed');
-  const [phone, setPhone] = useState('01009524383');
-  const [avatar, setAvatar] = useState('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [avatar, setAvatar] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -16,47 +20,125 @@ export default function PassengerProfile() {
 
   const loadProfile = async () => {
     try {
-      const saved = await AsyncStorage.getItem('passenger_profile');
-      if (saved) {
-        const data = JSON.parse(saved);
-        setName(data.name || 'Yaserahmed');
-        setPhone(data.phone || '01009524383');
-        if (data.avatar) setAvatar(data.avatar);
+      // محاولة جلب البيانات من فايربيز أولاً (لأنها الأدق)
+      const currentUser = auth.currentUser;
+      let uid = currentUser?.uid;
+      
+      // لو لم نجد uid في auth، نجلبه من AsyncStorage
+      if (!uid) {
+         uid = await AsyncStorage.getItem('currentPassengerId');
       }
-    } catch (e) {
-      console.log(e);
+
+      if (uid) {
+        const docRef = doc(db, 'passengers', uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setName(data.name || '');
+          setPhone(data.phone || '');
+          // توحيد اسم الصورة سواء كانت مسجلة باسم avatar أو image
+          const imageUrl = data.avatar || data.image || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150';
+          setAvatar(imageUrl);
+          
+          // تحديث التخزين المحلي بالبيانات الجديدة القادمة من السيرفر
+          await AsyncStorage.setItem('passenger_profile', JSON.stringify({
+            name: data.name,
+            phone: data.phone,
+            avatar: imageUrl
+          }));
+        }
+      } else {
+        // حالة احتياطية: جلب البيانات من التخزين المحلي إذا لم يكن هناك اتصال
+        const saved = await AsyncStorage.getItem('passenger_profile');
+        if (saved) {
+          const data = JSON.parse(saved);
+          setName(data.name || '');
+          setPhone(data.phone || '');
+          if (data.avatar) setAvatar(data.avatar);
+        }
+      }
+    } catch (error) {
+      console.log('خطأ في جلب الملف الشخصي:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // دالة فتح معرض صور الموبايل لتغيير الصورة الشخصية مباشرة
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 1,
+      quality: 0.5, // تقليل الجودة لتصغير حجم النص (Base64)
+      base64: true, // تفعيل ميزة Base64 المأخوذة من الكود الجديد
     });
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      setAvatar(result.assets[0].uri);
+    if (!result.canceled && result.assets && result.assets[0].base64) {
+      // تحويل الصورة لنص متوافق ليتم حفظه في قاعدة البيانات مباشرة
+      const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      setAvatar(base64Image);
     }
   };
 
   const handleSave = async () => {
-    const profileData = { name, phone, avatar };
-    await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
-    Alert.alert('تم بنجاح 🎯', 'تم تحديث الملف الشخصي بنجاح.');
-    router.back();
+    if (!name || !phone) {
+      Alert.alert('تنبيه', 'يجب إدخال الاسم ورقم الهاتف.');
+      return;
+    }
+
+    setUpdating(true);
+    try {
+      const currentUser = auth.currentUser;
+      let uid = currentUser?.uid;
+      
+      if (!uid) {
+         uid = await AsyncStorage.getItem('currentPassengerId');
+      }
+
+      const profileData = { 
+        name: name.trim(), 
+        phone: phone.trim(), 
+        avatar: avatar 
+      };
+
+      // 1. التحديث المحلي
+      await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
+
+      // 2. التحديث في فايربيز
+      if (uid) {
+        const docRef = doc(db, 'passengers', uid);
+        await updateDoc(docRef, profileData);
+      }
+
+      Alert.alert('تم بنجاح 🎯', 'تم تحديث الملف الشخصي بنجاح.');
+      router.back();
+    } catch (error) {
+      console.error(error);
+      Alert.alert('خطأ 🛑', 'حدثت مشكلة أثناء حفظ البيانات.');
+    } finally {
+      setUpdating(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9' }}>
+        <ActivityIndicator size="large" color="#d97706" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>⚙️ تعديل الملف الشخصي للراكب</Text>
 
-      {/* الصورة مع زرار التغيير المباشر من الموبايل */}
       <View style={styles.avatarContainer}>
         <TouchableOpacity onPress={pickImage}>
-          <Image source={{ uri: avatar }} style={styles.avatar} />
+          <Image 
+            source={{ uri: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150' }} 
+            style={styles.avatar} 
+          />
           <View style={styles.cameraBadge}>
             <Text style={styles.cameraBadgeText}>📷 تغيير</Text>
           </View>
@@ -82,9 +164,13 @@ export default function PassengerProfile() {
         placeholderTextColor="#94a3b8" 
       />
 
-      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-        <Text style={styles.saveButtonText}>حفظ التعديلات</Text>
-      </TouchableOpacity>
+      {updating ? (
+        <ActivityIndicator size="large" color="#d97706" style={{ marginTop: 20 }} />
+      ) : (
+        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+          <Text style={styles.saveButtonText}>حفظ التعديلات</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

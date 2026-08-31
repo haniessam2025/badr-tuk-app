@@ -1,16 +1,18 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export default function ChoiceScreen() {
+export default function PassengerChoice() {
   const router = useRouter();
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>حساب الراكب</Text>
-      <TouchableOpacity style={styles.button} onPress={() => router.push('/signup')}>
+      
+      <TouchableOpacity style={styles.button} onPress={() => router.push('/passenger-signup')}>
         <Text style={styles.buttonText}>تسجيل جديد</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.button, styles.loginButton]} onPress={() => router.push('/login')}>
+      
+      <TouchableOpacity style={[styles.button, styles.loginButton]} onPress={() => router.push('/passenger-login')}>
         <Text style={styles.buttonText}>تسجيل الدخول</Text>
       </TouchableOpacity>
     </View>

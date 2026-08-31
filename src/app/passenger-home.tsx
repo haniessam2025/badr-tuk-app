@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Linking, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
 
@@ -30,19 +30,21 @@ export default function PassengerHome() {
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
   });
 
-  useEffect(() => {
-    loadPassengerProfile();
-    checkRideStatus();
+  useFocusEffect(
+    useCallback(() => {
+      loadPassengerProfile();
+      checkRideStatus();
+    }, [])
+  );
 
+  useEffect(() => {
     const interval = setInterval(() => {
-      loadPassengerProfile(); // تحديث مستمر لضمان جلب البيانات الصحيحة
       checkRideStatus();
     }, 1500);
 
     return () => clearInterval(interval);
   }, [pathname]);
 
-  // دالة لجلب البيانات حصرياً من فايربيز بناءً على الـ ID المسجل حالياً
   const loadPassengerProfile = async () => {
     try {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
@@ -54,12 +56,11 @@ export default function PassengerHome() {
           setPassengerProfile({
             name: data.name || 'مستخدم جديد',
             phone: data.phone || '01000000000',
-            avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+            avatar: data.avatar || data.image || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
           });
         }
       } else {
-        // لو مفيش ID، رجعه فوراً لصفحة تسجيل الدخول
-        router.replace('/login');
+        router.replace('/passenger-login');
       }
     } catch (e) {
       console.log(e);
@@ -130,10 +131,15 @@ export default function PassengerHome() {
 
   const saveNewPrice = async () => {
     const newNum = parseInt(tempPrice) || 0;
-    if (newNum < calculatedBasePrice) {
-      Alert.alert('تنبيه 🛑', `عذراً، لا يمكن جعل السعر أقل من السعر العادل للرحلة (${calculatedBasePrice} جنيه). يمكنك زيادته فقط لجذب الكابتن!`);
+    
+    // تم التعديل للسماح بخصم يصل إلى 20%
+    const minAllowedPrice = Math.floor(calculatedBasePrice * 0.80);
+
+    if (newNum < minAllowedPrice) {
+      Alert.alert('تنبيه 🛑', `عذراً، لا يمكن أن يقل السعر عن ${minAllowedPrice} جنيه.`);
       return;
     }
+    
     setPrice(tempPrice);
     setIsEditModalVisible(false);
 
@@ -188,11 +194,10 @@ export default function PassengerHome() {
     Linking.openURL(`tel:${captainInfo.phone}`);
   };
 
-  // زرار الخروج الشامل
   const handleLogout = async () => {
     await AsyncStorage.removeItem('currentPassengerId');
     await AsyncStorage.removeItem('passenger_profile');
-    router.replace('/login');
+    router.replace('/passenger-login');
   };
 
   return (
@@ -250,12 +255,11 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {/* نافذة تعديل السعر */}
       <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>✏️ تعديل سعر الرحلة</Text>
-            <Text style={styles.modalSubtitle}>يمكنك زيادة السعر فقط لجذب الكابتن بسرعة:</Text>
+            <Text style={styles.modalSubtitle}>يمكنك تعديل السعر (الحد الأدنى المسموح به {Math.floor(calculatedBasePrice * 0.80)} جنيه):</Text>
 
             <TextInput
               style={styles.modalInput}
@@ -288,7 +292,6 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {/* الحالة 1: الكابتن في طريقه إليك */}
       {rideStatus === 'accepted' && (
         <View style={styles.cardActive}>
           <Text style={styles.statusAlertTitle}>🛺 الكابتن في طريقه إليك...</Text>
@@ -325,7 +328,6 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {/* الحالة 2: لقد وصل الكابتن */}
       {rideStatus === 'arrived' && (
         <View style={styles.cardActive}>
           <Text style={styles.statusArrivalAlert}>🔔 لقد وصل الكابتن برجاء عدم التأخير</Text>
