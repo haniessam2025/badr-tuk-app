@@ -51,7 +51,8 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 25}
       style={styles.container}
     >
       <View style={styles.header}>
@@ -112,7 +113,18 @@ const styles = StyleSheet.create({
   timeText: { fontSize: 10, marginTop: 4, textAlign: 'left' },
   myTimeText: { color: '#93c5fd' },
   otherTimeText: { color: '#94a3b8' },
-  inputContainer: { flexDirection: 'row', padding: 12, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#e2e8f0', alignItems: 'center' },
+  
+  // التعديل هنا: تم زيادة الرفع من 35 إلى 85 بيكسل للأندرويد
+  inputContainer: { 
+    flexDirection: 'row', 
+    padding: 12, 
+    paddingBottom: Platform.OS === 'android' ? 85 : 45, 
+    backgroundColor: '#ffffff', 
+    borderTopWidth: 1, 
+    borderTopColor: '#e2e8f0', 
+    alignItems: 'center' 
+  },
+  
   input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 10, fontSize: 14, textAlign: 'right', color: '#0f172a', marginLeft: 10 },
   sendButton: { backgroundColor: '#10b981', paddingVertical: 11, paddingHorizontal: 16, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   sendButtonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
