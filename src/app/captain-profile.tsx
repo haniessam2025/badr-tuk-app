@@ -1,54 +1,88 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { db } from '../firebaseConfig';
 
 export default function CaptainProfile() {
   const router = useRouter();
-  const [name, setName] = useState('Haniessam');
-  const [phone, setPhone] = useState('01030369008');
-  const [vehicle, setVehicle] = useState('توكتوك (Ghj 124)');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [vehicle, setVehicle] = useState('');
   const [avatar, setAvatar] = useState('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
 
   useEffect(() => {
-    loadProfile();
+    loadProfileFromFirebase();
   }, []);
 
-  const loadProfile = async () => {
+  const loadProfileFromFirebase = async () => {
     try {
-      const saved = await AsyncStorage.getItem('captain_profile');
-      if (saved) {
-        const data = JSON.parse(saved);
-        setName(data.name || 'Haniessam');
-        setPhone(data.phone || '01030369008');
-        setVehicle(data.vehicle || 'توكتوك (Ghj 124)');
-        if (data.avatar) setAvatar(data.avatar);
+      const captainId = await AsyncStorage.getItem('currentCaptainId');
+      if (captainId) {
+        const docRef = doc(db, 'captains', captainId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setName(data.name || '');
+          setPhone(data.phone || '');
+          setVehicle(data.tukTukNumber || data.vehicle || '');
+          if (data.profileImage) {
+            setAvatar(data.profileImage);
+          } else if (data.avatar) {
+            setAvatar(data.avatar);
+          }
+        }
       }
     } catch (e) {
       console.log(e);
     }
   };
 
-  // اختيار صورة من ألبوم الموبايل للكابتن
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 1,
+      quality: 0.2, // ضغط عالي عشان نتجنب تجاوز مساحة 1 ميجا في فايربيس
+      base64: true, // مهم جداً: استخراج كود الصورة بدل المسار المحلي
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setAvatar(result.assets[0].uri);
+      const base64String = result.assets[0].base64;
+      // تجهيز الكود عشان يتقري كصورة في أي موبايل تاني
+      const imageUri = `data:image/jpeg;base64,${base64String}`;
+      setAvatar(imageUri);
     }
   };
 
   const handleSave = async () => {
-    const profileData = { name, phone, vehicle, avatar };
-    await AsyncStorage.setItem('captain_profile', JSON.stringify(profileData));
-    Alert.alert('تم بنجاح 🎯', 'تم تحديث الملف الشخصي للكابتن.');
-    router.back();
+    try {
+      const captainId = await AsyncStorage.getItem('currentCaptainId');
+      if (!captainId) {
+        Alert.alert('خطأ', 'لم يتم العثور على معرف الكابتن.');
+        return;
+      }
+
+      const profileData = {
+        name,
+        phone,
+        tukTukNumber: vehicle,
+        profileImage: avatar,
+      };
+
+      const docRef = doc(db, 'captains', captainId);
+      await updateDoc(docRef, profileData);
+
+      const localData = { name, phone, vehicle, avatar };
+      await AsyncStorage.setItem('captain_profile', JSON.stringify(localData));
+
+      Alert.alert('تم بنجاح 🎯', 'تم تحديث الملف الشخصي للكابتن وحفظ الصورة في قاعدة البيانات.');
+      router.back();
+    } catch (error: any) {
+      Alert.alert('خطأ في الحفظ', error?.message || 'حدثت مشكلة أثناء تحديث البيانات.');
+    }
   };
 
   return (
@@ -92,11 +126,11 @@ export default function CaptainProfile() {
         placeholderTextColor="#94a3b8" 
       />
 
-    <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-      <Text style={styles.saveButtonText}>حفظ التعديلات</Text>
-    </TouchableOpacity>
-  </View>
-);
+      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <Text style={styles.saveButtonText}>حفظ التعديلات</Text>
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

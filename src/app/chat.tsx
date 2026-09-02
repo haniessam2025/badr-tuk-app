@@ -1,83 +1,254 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { addDoc, collection, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { db } from '../firebaseConfig';
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { senderType } = useLocalSearchParams(); // لتمييز ما إذا كان المرسل "passenger" أو "captain"
+  const { senderType } = useLocalSearchParams(); 
+  
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
+  const [rideId, setRideId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    loadMessages();
-    const interval = setInterval(loadMessages, 1000); // تحديث لحظي للرسائل كل ثانية
-    return () => clearInterval(interval);
+    loadActiveRide();
   }, []);
 
-  const loadMessages = async () => {
+  const loadActiveRide = async () => {
     try {
-      const storedChat = await AsyncStorage.getItem('ride_chat');
-      if (storedChat) {
-        setMessages(JSON.parse(storedChat));
+      const savedRide = await AsyncStorage.getItem('active_ride');
+      if (savedRide) {
+        const rideData = JSON.parse(savedRide);
+        if (rideData && rideData.id) {
+          setRideId(rideData.id);
+          markMessagesAsRead(rideData.id);
+          listenToMessages(rideData.id);
+          return;
+        }
       }
+
+      let userId = '';
+      let field = '';
+      if (senderType === 'passenger') {
+        userId = await AsyncStorage.getItem('currentPassengerId') || '';
+        field = 'passengerId';
+      } else {
+        userId = await AsyncStorage.getItem('currentCaptainId') || '';
+        field = 'captainId';
+      }
+
+      if (userId) {
+        const q = query(collection(db, 'rides'), where(field, '==', userId));
+        const snap = await getDocs(q);
+        const activeDoc = snap.docs.find(d => ['accepted', 'captain_arrived'].includes(d.data().status));
+        
+        if (activeDoc) {
+          setRideId(activeDoc.id);
+          markMessagesAsRead(activeDoc.id);
+          listenToMessages(activeDoc.id);
+          return;
+        }
+      }
+
+      setLoading(false);
+      Alert.alert('تنبيه', 'لم نتمكن من العثور على رحلة نشطة لبدء الشات.');
     } catch (e) {
       console.log(e);
+      setLoading(false);
     }
+  };
+
+  const markMessagesAsRead = async (id: string) => {
+    try {
+      const rideRef = doc(db, 'rides', id);
+      if (senderType === 'passenger') {
+        await updateDoc(rideRef, { unreadCountPassenger: 0 });
+      } else {
+        await updateDoc(rideRef, { unreadCountCaptain: 0 });
+      }
+    } catch (error) {
+      console.log('Error resetting unread count:', error);
+    }
+  };
+
+  const listenToMessages = (id: string) => {
+    const messagesRef = collection(db, 'rides', id, 'messages');
+    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMessages(msgs);
+      setLoading(false);
+      
+      setTimeout(() => {
+        if (msgs.length > 0) {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }
+      }, 200);
+    });
+
+    return unsubscribe;
   };
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
+    
+    if (!rideId) {
+      Alert.alert('خطأ', 'جاري تحميل بيانات الرحلة، جرب ثانية...');
+      return;
+    }
 
-    const newMessage = {
-      id: Date.now().toString(),
-      sender: senderType === 'captain' ? 'captain' : 'passenger',
-      text: inputText,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    const messageText = inputText.trim();
+    setInputText(''); 
+
+    try {
+      const messagesRef = collection(db, 'rides', rideId, 'messages');
+      await addDoc(messagesRef, {
+        text: messageText,
+        sender: senderType,
+        timestamp: new Date().getTime(),
+      });
+
+      const rideRef = doc(db, 'rides', rideId);
+      const rideSnap = await getDoc(rideRef);
+      
+      if (rideSnap.exists()) {
+        const rideData = rideSnap.data();
+        let targetToken = '';
+        let newUnreadCount = 1;
+        let senderNameStr = senderType === 'passenger' ? 'الراكب' : 'الكابتن';
+
+        if (senderType === 'passenger') {
+          newUnreadCount = (rideData.unreadCountCaptain || 0) + 1;
+          await updateDoc(rideRef, { unreadCountCaptain: increment(1) });
+          targetToken = rideData.captainPushToken; 
+        } else {
+          newUnreadCount = (rideData.unreadCountPassenger || 0) + 1;
+          await updateDoc(rideRef, { unreadCountPassenger: increment(1) });
+          targetToken = rideData.passengerPushToken; 
+        }
+
+        if (targetToken) {
+          sendPushNotification(targetToken, senderNameStr, messageText, newUnreadCount);
+        }
+      }
+    } catch (error) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الرسالة.');
+    }
+  };
+
+  const sendPushNotification = async (expoPushToken: string, title: string, body: string, badgeCount: number) => {
+    const message = {
+      to: expoPushToken,
+      sound: 'default',
+      title: `رسالة جديدة من ${title} 💬`,
+      body: body,
+      badge: badgeCount, 
+      data: { route: 'chat' },
     };
 
     try {
-      const storedChat = await AsyncStorage.getItem('ride_chat');
-      const currentMessages = storedChat ? JSON.parse(storedChat) : [];
-      const updatedMessages = [...currentMessages, newMessage];
-      
-      await AsyncStorage.setItem('ride_chat', JSON.stringify(updatedMessages));
-      setMessages(updatedMessages);
-      setInputText('');
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+      });
+    } catch (error) {
+      console.log('Notification Error:', error);
+    }
+  };
+
+  // دالة تشغيل المكالمة المجانية عبر ZegoCloud
+  const makeFreeCall = async () => {
+    try {
+      const myId = senderType === 'passenger' 
+        ? await AsyncStorage.getItem('currentPassengerId') 
+        : await AsyncStorage.getItem('currentCaptainId');
+        
+      const myProfileStr = senderType === 'passenger' 
+        ? await AsyncStorage.getItem('passenger_profile') 
+        : await AsyncStorage.getItem('captain_profile');
+        
+      const myName = myProfileStr ? JSON.parse(myProfileStr).name : (senderType === 'passenger' ? 'راكب' : 'كابتن');
+
+      if (!rideId) {
+        Alert.alert('خطأ', 'رقم الرحلة غير متوفر للمكالمة.');
+        return;
+      }
+
+      router.push({
+        pathname: '/voice-call',
+        params: {
+          rideId: rideId,
+          userName: myName,
+          userId: myId || 'user_123'
+        }
+      });
     } catch (e) {
       console.log(e);
     }
   };
 
+  const renderMessage = ({ item }: { item: any }) => {
+    const isMe = item.sender === senderType;
+    return (
+      <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.otherMessage]}>
+        <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
+          {item.text}
+        </Text>
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#2563eb" />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 25}
-      style={styles.container}
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
     >
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>⬅ رجوع</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>رجوع ⬅️</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>💬 محادثة الرحلة الفورية</Text>
+        <Text style={styles.headerTitle}>
+          {senderType === 'passenger' ? 'مراسلة الكابتن 🛺' : 'مراسلة الراكب 👤'}
+        </Text>
+        
+        {/* زرار المكالمة المجانية المباشر في الهيدر */}
+        <TouchableOpacity style={styles.callHeaderBtn} onPress={makeFreeCall}>
+          <Text style={styles.callHeaderBtnText}>📞 اتصال مجاني</Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
+        ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.id}
+        renderItem={renderMessage}
         contentContainerStyle={styles.chatList}
-        renderItem={({ item }) => {
-          const isMe = item.sender === (senderType === 'captain' ? 'captain' : 'passenger');
-          return (
-            <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.otherMessage]}>
-              <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
-                {item.text}
-              </Text>
-              <Text style={[styles.timeText, isMe ? styles.myTimeText : styles.otherTimeText]}>
-                {item.time}
-              </Text>
-            </View>
-          );
+        showsVerticalScrollIndicator={false}
+        onContentSizeChange={() => {
+          if (messages.length > 0) {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }
         }}
       />
 
@@ -88,9 +259,10 @@ export default function ChatScreen() {
           placeholderTextColor="#94a3b8"
           value={inputText}
           onChangeText={setInputText}
+          multiline
         />
         <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-          <Text style={styles.sendButtonText}>إرسال ✈️</Text>
+          <Text style={styles.sendButtonText}>إرسال 🚀</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -98,34 +270,46 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9' },
   container: { flex: 1, backgroundColor: '#f1f5f9' },
-  header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', padding: 15, paddingTop: 45, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', elevation: 2 },
-  backBtn: { paddingVertical: 5, paddingHorizontal: 10, backgroundColor: '#f1f5f9', borderRadius: 8 },
-  backBtnText: { fontWeight: 'bold', color: '#334155' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', flex: 1, textAlign: 'center', marginRight: 40 },
-  chatList: { padding: 15, paddingBottom: 20 },
-  messageBubble: { maxWidth: '75%', padding: 12, borderRadius: 16, marginBottom: 12, elevation: 1 },
-  myMessage: { backgroundColor: '#2563eb', alignSelf: 'flex-end', borderBottomRightRadius: 2 },
-  otherMessage: { backgroundColor: '#ffffff', alignSelf: 'flex-start', borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#e2e8f0' },
-  messageText: { fontSize: 15, textAlign: 'right' },
-  myMessageText: { color: '#ffffff' },
-  otherMessageText: { color: '#1e293b' },
-  timeText: { fontSize: 10, marginTop: 4, textAlign: 'left' },
-  myTimeText: { color: '#93c5fd' },
-  otherTimeText: { color: '#94a3b8' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: 15, paddingTop: 40, elevation: 3 },
+  backButton: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 8 },
+  backButtonText: { color: '#0f172a', fontWeight: 'bold', fontSize: 13 },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
+  callHeaderBtn: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  callHeaderBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
   
-  // التعديل هنا: تم زيادة الرفع من 35 إلى 85 بيكسل للأندرويد
+  chatList: { padding: 15, paddingBottom: 130 }, 
+  
+  messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 16, marginBottom: 10 },
+  myMessage: { alignSelf: 'flex-start', backgroundColor: '#2563eb', borderBottomLeftRadius: 4 },
+  otherMessage: { alignSelf: 'flex-end', backgroundColor: '#e2e8f0', borderBottomRightRadius: 4 },
+  
+  messageText: { fontSize: 16, lineHeight: 22 },
+  myMessageText: { color: '#ffffff', textAlign: 'left' },
+  otherMessageText: { color: '#0f172a', textAlign: 'right' },
+  
   inputContainer: { 
-    flexDirection: 'row', 
-    padding: 12, 
-    paddingBottom: Platform.OS === 'android' ? 85 : 45, 
+    flexDirection: 'row-reverse', 
+    alignItems: 'center', 
+    padding: 10, 
     backgroundColor: '#ffffff', 
-    borderTopWidth: 1, 
-    borderTopColor: '#e2e8f0', 
-    alignItems: 'center' 
+    borderWidth: 1, 
+    borderColor: '#e2e8f0',
+    borderRadius: 20, 
+    marginHorizontal: 15, 
+    marginBottom: 90, 
+    elevation: 5, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    position: 'absolute', 
+    bottom: 0, 
+    left: 0, 
+    right: 0,
   },
-  
-  input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 10, fontSize: 14, textAlign: 'right', color: '#0f172a', marginLeft: 10 },
-  sendButton: { backgroundColor: '#10b981', paddingVertical: 11, paddingHorizontal: 16, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  sendButtonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 20, paddingHorizontal: 15, paddingTop: 12, paddingBottom: 12, fontSize: 16, textAlign: 'right', maxHeight: 100, marginLeft: 10 },
+  sendButton: { backgroundColor: '#10b981', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 20, justifyContent: 'center' },
+  sendButtonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
 });

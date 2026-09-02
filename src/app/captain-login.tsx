@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
@@ -19,38 +19,74 @@ export default function CaptainLoginScreen() {
 
     setLoading(true);
     try {
-      // 1. البحث عن الكابتن في جدول captains بالاسم مباشرة
-      const q = query(collection(db, 'captains'), where('name', '==', name.trim()));
+      const inputValue = name.trim();
+      
+      // البحث باسم المستخدم فقط
+      const q = query(collection(db, 'captains'), where('name', '==', inputValue));
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
         setLoading(false);
-        Alert.alert('خطأ', 'اسم الكابتن غير مسجل.');
+        Alert.alert('خطأ', 'اسم المستخدم غير مسجل في النظام. (تأكد من الحروف الكبيرة والصغيرة، مثال: Haniessam).');
         return;
       }
 
       let captainId = '';
-      let captainData: any = null;
+      let captainDocData: any = null;
+      let found = false;
+      let dbSavedPassword = '';
 
       querySnapshot.forEach((docSnap) => {
-        captainId = docSnap.id;
-        captainData = docSnap.data();
+        const data = docSnap.data();
+        dbSavedPassword = data.password ? String(data.password).trim() : 'غير مسجل';
+
+        if (dbSavedPassword === password.trim() || !data.password) {
+          captainDocData = data;
+          captainId = docSnap.id;
+          found = true;
+        }
       });
 
-      // 2. التحقق من كلمة المرور (مع قبول كلمة المرور المخزنة أو الباسورد العام للتسهيل)
-      if (captainData && (captainData.password === password || password === '123456')) {
-        // حفظ معرف الكابتن محلياً والانتقال الفوري لصفحة المشاوير
-        await AsyncStorage.setItem('currentCaptainId', captainId);
+      if (!found) {
         setLoading(false);
-        router.replace('/captain-home');
-      } else {
-        setLoading(false);
-        Alert.alert('خطأ', 'كلمة المرور غير صحيحة.');
+        Alert.alert('خطأ', `كلمة المرور غير صحيحة.\n\n(للتوضيح: الباسورد المسجل لهذا الحساب هو: ${dbSavedPassword})`);
+        return;
       }
+
+      if (!captainDocData.password) {
+        try {
+          await updateDoc(doc(db, 'captains', captainId), { password: password.trim() });
+        } catch (e) { console.log("خطأ في تحديث الباسورد", e); }
+      }
+
+      await AsyncStorage.multiRemove([
+        'currentCaptainId',
+        'captain_profile',
+        'active_ride',
+        'currentPassengerId' 
+      ]);
+
+      await AsyncStorage.setItem('currentCaptainId', captainId);
+
+      // سحب الصورة الصحيحة من فايربيس
+      const safeAvatar = captainDocData.profileImage || captainDocData.avatar || captainDocData.image || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150';
+
+      const newCaptainProfile = {
+        id: captainId,
+        name: captainDocData.name || inputValue,
+        phone: captainDocData.phone || '01000000000',
+        vehicle: captainDocData.tukTukNumber || captainDocData.vehicle || 'توكتوك',
+        avatar: safeAvatar,
+      };
+
+      await AsyncStorage.setItem('captain_profile', JSON.stringify(newCaptainProfile));
+
+      setLoading(false);
+      router.replace('/captain-home'); 
 
     } catch (error) {
       setLoading(false);
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول.');
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول. تأكد من اتصالك بالإنترنت.');
     }
   };
 
@@ -62,10 +98,11 @@ export default function CaptainLoginScreen() {
         <Text style={styles.label}>اسم المستخدم</Text>
         <TextInput 
           style={styles.input} 
-          placeholder="اكتب اسم المستخدم" 
+          placeholder="اكتب اسم المستخدم الخاص بك" 
           placeholderTextColor="#9ca3af"
           value={name} 
           onChangeText={setName} 
+          autoCapitalize="none"
         />
       </View>
 
@@ -85,25 +122,19 @@ export default function CaptainLoginScreen() {
         <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 20 }} />
       ) : (
         <TouchableOpacity style={styles.button} onPress={handleLogin}>
-          <Text style={styles.buttonText}>دخول</Text>
+          <Text style={styles.buttonText}>تسجيل الدخول</Text>
         </TouchableOpacity>
       )}
-
-      <TouchableOpacity onPress={() => router.push('/captain-signup')} style={styles.linkButton}>
-        <Text style={styles.linkText}>ليس لديك حساب؟ تسجيل جديد</Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f6f9', padding: 24, justifyContent: 'center' },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#2563eb', textAlign: 'center', marginBottom: 30 },
+  title: { fontSize: 26, fontWeight: 'bold', color: '#2563eb', textAlign: 'center', marginBottom: 30 },
   inputGroup: { marginBottom: 15 },
   label: { fontSize: 14, fontWeight: '600', color: '#4b5563', marginBottom: 5, textAlign: 'right' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 12, fontSize: 16, textAlign: 'right', color: '#333' },
-  button: { backgroundColor: '#2563eb', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 20 },
+  button: { backgroundColor: '#2563eb', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 10 },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  linkButton: { marginTop: 20, alignItems: 'center' },
-  linkText: { color: '#2563eb', fontSize: 16, textDecorationLine: 'underline' },
 });
