@@ -1,116 +1,137 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
 
-export default function PassengerLoginScreen() {
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function PassengerLogin() {
   const router = useRouter();
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  const handleLogin = async () => {
-    if (!name.trim() || !password.trim()) {
-      Alert.alert('خطأ', 'يرجى إدخال اسم المستخدم وكلمة المرور.');
+  // التحقق لو الراكب مسجل دخول قبل كده عشان ندخله مباشرة
+  useEffect(() => {
+    const checkExistingLogin = async () => {
+      const passengerId = await AsyncStorage.getItem('currentPassengerId');
+      if (passengerId) {
+        router.replace('/passenger-home');
+      } else {
+        setCheckingAuth(false);
+      }
+    };
+    checkExistingLogin();
+  }, []);
+
+  const handleQuickLogin = async () => {
+    if (!name.trim() || !phone.trim()) {
+      Alert.alert('تنبيه', 'برجاء كتابة الاسم ورقم الهاتف للمتابعة.');
+      return;
+    }
+
+    if (phone.length < 10) {
+      Alert.alert('تنبيه', 'برجاء إدخال رقم هاتف صحيح.');
       return;
     }
 
     setLoading(true);
+
     try {
-      const q = query(collection(db, 'passengers'), where('name', '==', name.trim()));
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
-        setLoading(false);
-        Alert.alert('خطأ', 'اسم المستخدم غير مسجل.');
-        return;
-      }
-
-      let userId = '';
-      let userDocData: any = null;
-
-      querySnapshot.forEach((docSnap) => {
-        userDocData = docSnap.data();
-        userId = docSnap.id;
+      // إنشاء حساب سريع للراكب في فايربيس بدون باسورد
+      const newPassengerRef = await addDoc(collection(db, 'passengers'), {
+        name: name.trim(),
+        phone: phone.trim(),
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150', // صورة افتراضية
+        createdAt: serverTimestamp(),
       });
 
-      if (userDocData && (userDocData.password === password || password === '123456')) {
-        
-        await AsyncStorage.multiRemove([
-          'currentPassengerId',
-          'passenger_profile',
-          'active_ride'
-        ]);
+      const profileData = {
+        id: newPassengerRef.id,
+        name: name.trim(),
+        phone: phone.trim(),
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'
+      };
 
-        await AsyncStorage.setItem('currentPassengerId', userId);
+      // حفظ البيانات في ذاكرة الهاتف
+      await AsyncStorage.setItem('currentPassengerId', newPassengerRef.id);
+      await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
 
-        const newPassengerProfile = {
-          name: userDocData.name || name.trim(),
-          phone: userDocData.phone || '01000000000',
-          avatar: userDocData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-        };
-
-        await AsyncStorage.setItem('passenger_profile', JSON.stringify(newPassengerProfile));
-
-        setLoading(false);
-        router.replace('/passenger-home'); 
-      } else {
-        setLoading(false);
-        Alert.alert('خطأ', 'كلمة المرور غير صحيحة.');
-      }
-
+      // التوجيه للصفحة الرئيسية
+      router.replace('/passenger-home');
     } catch (error) {
+      console.log(error);
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء الدخول، تأكد من اتصالك بالإنترنت.');
       setLoading(false);
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول.');
     }
   };
 
+  if (checkingAuth) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#d97706" />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>تسجيل دخول الراكب 🛺</Text>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+      style={styles.container}
+    >
+      <View style={styles.content}>
+        <Text style={styles.title}>أهلاً بك في تطبيق التوكتوك 🛺</Text>
+        <Text style={styles.subtitle}>أدخل بياناتك لطلب مشوارك فوراً بدون تعقيد</Text>
 
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>اسم المستخدم</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholder="اكتب اسم المستخدم الخاص بك" 
-          placeholderTextColor="#9ca3af"
-          value={name} 
-          onChangeText={setName} 
-        />
-      </View>
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>الاسم</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="اكتب اسمك هنا"
+            value={name}
+            onChangeText={setName}
+            textAlign="right"
+          />
+        </View>
 
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>كلمة المرور</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholder="كلمة المرور" 
-          placeholderTextColor="#9ca3af"
-          secureTextEntry 
-          value={password} 
-          onChangeText={setPassword} 
-        />
-      </View>
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>رقم الهاتف</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="مثال: 01012345678"
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+            textAlign="right"
+          />
+        </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#d97706" style={{ marginTop: 20 }} />
-      ) : (
-        <TouchableOpacity style={styles.button} onPress={handleLogin}>
-          <Text style={styles.buttonText}>دخول</Text>
+        <TouchableOpacity 
+          style={styles.loginButton} 
+          onPress={handleQuickLogin}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <Text style={styles.loginButtonText}>دخول سريع 🚀</Text>
+          )}
         </TouchableOpacity>
-      )}
-    </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6f9', padding: 24, justifyContent: 'center' },
-  title: { fontSize: 26, fontWeight: 'bold', color: '#d97706', textAlign: 'center', marginBottom: 30 },
-  inputGroup: { marginBottom: 15 },
-  label: { fontSize: 14, fontWeight: '600', color: '#4b5563', marginBottom: 5, textAlign: 'right' },
-  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 12, fontSize: 16, textAlign: 'right', color: '#333' },
-  button: { backgroundColor: '#d97706', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 20 },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' },
+  content: { flex: 1, justifyContent: 'center', padding: 20 },
+  title: { fontSize: 26, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: '#64748b', textAlign: 'center', marginBottom: 40 },
+  inputContainer: { marginBottom: 20 },
+  label: { fontSize: 16, fontWeight: 'bold', color: '#334155', marginBottom: 8, textAlign: 'right' },
+  input: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 15, fontSize: 16, color: '#0f172a' },
+  loginButton: { backgroundColor: '#d97706', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 2 },
+  loginButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
 });
