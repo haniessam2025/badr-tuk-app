@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
 
 export default function ChatScreen() {
@@ -14,10 +14,33 @@ export default function ChatScreen() {
   const [rideId, setRideId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
+  // حالة لمراقبة الكيبورد (مفتوحة ولا مقفولة)
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+  
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     loadActiveRide();
+
+    // تشغيل مراقب الكيبورد لضبط حركة المستطيل
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const keyboardDidShowListener = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+      // النزول لآخر رسالة تلقائياً أول ما الكيبورد تفتح
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+    const keyboardDidHideListener = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   const loadActiveRide = async () => {
@@ -46,7 +69,7 @@ export default function ChatScreen() {
       if (userId) {
         const q = query(collection(db, 'rides'), where(field, '==', userId));
         const snap = await getDocs(q);
-        const activeDoc = snap.docs.find(d => ['accepted', 'captain_arrived'].includes(d.data().status));
+        const activeDoc = snap.docs.find(d => ['accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress'].includes(d.data().status));
         
         if (activeDoc) {
           setRideId(activeDoc.id);
@@ -138,6 +161,11 @@ export default function ChatScreen() {
           sendPushNotification(targetToken, senderNameStr, messageText, newUnreadCount);
         }
       }
+      
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الرسالة.');
     }
@@ -168,7 +196,6 @@ export default function ChatScreen() {
     }
   };
 
-  // دالة تشغيل المكالمة المجانية عبر ZegoCloud
   const makeFreeCall = async () => {
     try {
       const myId = senderType === 'passenger' 
@@ -219,10 +246,11 @@ export default function ChatScreen() {
   }
 
   return (
+    // استخدام الشاشة بالكامل داخل الكيبورد عشان نزق كل حاجة فوق بشكل إجباري وسليم
     <KeyboardAvoidingView 
       style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -231,8 +259,6 @@ export default function ChatScreen() {
         <Text style={styles.headerTitle}>
           {senderType === 'passenger' ? 'مراسلة الكابتن 🛺' : 'مراسلة الراكب 👤'}
         </Text>
-        
-        {/* زرار المكالمة المجانية المباشر في الهيدر */}
         <TouchableOpacity style={styles.callHeaderBtn} onPress={makeFreeCall}>
           <Text style={styles.callHeaderBtnText}>📞 اتصال مجاني</Text>
         </TouchableOpacity>
@@ -252,7 +278,13 @@ export default function ChatScreen() {
         }}
       />
 
-      <View style={styles.inputContainer}>
+      {/* المستطيل اللي بيرتفع وينزل مع الكيبورد */}
+      <View style={[
+        styles.inputContainer, 
+        // لو الكيبورد مفتوحة، المستطيل هينزل يرسى عليها بمسافة 10 بس عشان تشوف الكلام
+        // لو مقفولة، هيترفع 45 بيكسل (حوالي 3 سطور)
+        { marginBottom: isKeyboardVisible ? (Platform.OS === 'ios' ? 10 : 5) : 45 }
+      ]}>
         <TextInput
           style={styles.input}
           placeholder="اكتب رسالتك هنا..."
@@ -272,14 +304,19 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9' },
   container: { flex: 1, backgroundColor: '#f1f5f9' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: 15, paddingTop: 40, elevation: 3 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: 15, paddingTop: Platform.OS === 'android' ? 45 : 45, elevation: 3 },
   backButton: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 8 },
   backButtonText: { color: '#0f172a', fontWeight: 'bold', fontSize: 13 },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
-  callHeaderBtn: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  callHeaderBtn: { backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   callHeaderBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
   
-  chatList: { padding: 15, paddingBottom: 130 }, 
+  chatList: { 
+    padding: 15, 
+    paddingBottom: 20,
+    flexGrow: 1, 
+    justifyContent: 'flex-end' 
+  }, 
   
   messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 16, marginBottom: 10 },
   myMessage: { alignSelf: 'flex-start', backgroundColor: '#2563eb', borderBottomLeftRadius: 4 },
@@ -291,25 +328,41 @@ const styles = StyleSheet.create({
   
   inputContainer: { 
     flexDirection: 'row-reverse', 
-    alignItems: 'center', 
+    alignItems: 'flex-end', 
     padding: 10, 
     backgroundColor: '#ffffff', 
     borderWidth: 1, 
     borderColor: '#e2e8f0',
-    borderRadius: 20, 
-    marginHorizontal: 15, 
-    marginBottom: 90, 
-    elevation: 5, 
-    shadowColor: '#000', 
+    borderRadius: 25, // شكل الكبسولة الأنيق
+    marginHorizontal: 15,
+    elevation: 3, // ظل خفيف بيدي شكل طافي شيك جداً
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    position: 'absolute', 
-    bottom: 0, 
-    left: 0, 
-    right: 0,
+    shadowRadius: 3,
   },
-  input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 20, paddingHorizontal: 15, paddingTop: 12, paddingBottom: 12, fontSize: 16, textAlign: 'right', maxHeight: 100, marginLeft: 10 },
-  sendButton: { backgroundColor: '#10b981', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 20, justifyContent: 'center' },
+  input: { 
+    flex: 1, 
+    backgroundColor: '#f8fafc', 
+    borderWidth: 1, 
+    borderColor: '#cbd5e1', 
+    borderRadius: 20, 
+    paddingHorizontal: 15, 
+    paddingTop: 10, 
+    paddingBottom: 10, 
+    fontSize: 16, 
+    textAlign: 'right', 
+    maxHeight: 120, 
+    minHeight: 45,
+    marginLeft: 10 
+  },
+  sendButton: { 
+    backgroundColor: '#10b981', 
+    height: 45, 
+    paddingHorizontal: 20, 
+    borderRadius: 20, 
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
   sendButtonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
 });

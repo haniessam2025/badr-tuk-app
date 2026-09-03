@@ -1,18 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
 
 export default function PassengerLogin() {
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // التحقق لو الراكب مسجل دخول قبل كده عشان ندخله مباشرة
+  // التحقق مما إذا كان الراكب مسجل الدخول مسبقاً
   useEffect(() => {
     const checkExistingLogin = async () => {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
@@ -25,44 +25,48 @@ export default function PassengerLogin() {
     checkExistingLogin();
   }, []);
 
-  const handleQuickLogin = async () => {
-    if (!name.trim() || !phone.trim()) {
-      Alert.alert('تنبيه', 'برجاء كتابة الاسم ورقم الهاتف للمتابعة.');
-      return;
-    }
-
-    if (phone.length < 10) {
-      Alert.alert('تنبيه', 'برجاء إدخال رقم هاتف صحيح.');
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) {
+      Alert.alert('تنبيه', 'برجاء إدخال اسم المستخدم وكلمة المرور.');
       return;
     }
 
     setLoading(true);
 
     try {
-      // إنشاء حساب سريع للراكب في فايربيس بدون باسورد
-      const newPassengerRef = await addDoc(collection(db, 'passengers'), {
-        name: name.trim(),
-        phone: phone.trim(),
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150', // صورة افتراضية
-        createdAt: serverTimestamp(),
-      });
+      // البحث عن الراكب في قاعدة البيانات باستخدام حقل 'name' المطابق لاسم المستخدم
+      const q = query(
+        collection(db, 'passengers'), 
+        where('name', '==', username.trim()), 
+        where('password', '==', password.trim())
+      );
+      
+      const querySnapshot = await getDocs(q);
 
-      const profileData = {
-        id: newPassengerRef.id,
-        name: name.trim(),
-        phone: phone.trim(),
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'
-      };
+      if (!querySnapshot.empty) {
+        const passengerDoc = querySnapshot.docs[0];
+        const data = passengerDoc.data();
 
-      // حفظ البيانات في ذاكرة الهاتف
-      await AsyncStorage.setItem('currentPassengerId', newPassengerRef.id);
-      await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
+        const profileData = {
+          id: passengerDoc.id,
+          name: data.name || username.trim(),
+          phone: data.phone || '',
+          avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'
+        };
 
-      // التوجيه للصفحة الرئيسية
-      router.replace('/passenger-home');
+        // حفظ بيانات الدخول في ذاكرة الهاتف
+        await AsyncStorage.setItem('currentPassengerId', passengerDoc.id);
+        await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
+
+        // التوجيه للصفحة الرئيسية
+        router.replace('/passenger-home');
+      } else {
+        Alert.alert('خطأ', 'اسم المستخدم أو كلمة المرور غير صحيحة.');
+      }
     } catch (error) {
       console.log(error);
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء الدخول، تأكد من اتصالك بالإنترنت.');
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول، تأكد من اتصالك بالإنترنت.');
+    } finally {
       setLoading(false);
     }
   };
@@ -81,41 +85,44 @@ export default function PassengerLogin() {
       style={styles.container}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>أهلاً بك في تطبيق التوكتوك 🛺</Text>
-        <Text style={styles.subtitle}>أدخل بياناتك لطلب مشوارك فوراً بدون تعقيد</Text>
+        <Text style={styles.title}>تسجيل دخول الراكب 🛺</Text>
+        <Text style={styles.subtitle}>أدخل بيانات حسابك للمتابعة</Text>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>الاسم</Text>
+          <Text style={styles.label}>اسم المستخدم</Text>
           <TextInput
             style={styles.input}
-            placeholder="اكتب اسمك هنا"
-            value={name}
-            onChangeText={setName}
+            placeholder="اكتب اسم المستخدم"
+            placeholderTextColor="#94a3b8"
+            value={username}
+            onChangeText={setUsername}
             textAlign="right"
+            autoCapitalize="none"
           />
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>رقم الهاتف</Text>
+          <Text style={styles.label}>كلمة المرور</Text>
           <TextInput
             style={styles.input}
-            placeholder="مثال: 01012345678"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
+            placeholder="اكتب كلمة المرور"
+            placeholderTextColor="#94a3b8"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
             textAlign="right"
           />
         </View>
 
         <TouchableOpacity 
           style={styles.loginButton} 
-          onPress={handleQuickLogin}
+          onPress={handleLogin}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <Text style={styles.loginButtonText}>دخول سريع 🚀</Text>
+            <Text style={styles.loginButtonText}>تسجيل الدخول</Text>
           )}
         </TouchableOpacity>
       </View>
