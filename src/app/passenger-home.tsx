@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
@@ -11,18 +12,21 @@ const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpaci
 export default function PassengerHome() {
   const router = useRouter();
   const pathname = usePathname();
+  
   const [pickup, setPickup] = useState('');
-  
   const [pickupCoords, setPickupCoords] = useState<{latitude: number, longitude: number} | null>(null);
-  
   const [destinations, setDestinations] = useState<string[]>(['']);
+  
+  // --- حالة نوع المركبة المطلوبة ---
+  const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt'>('tuktuk_alt');
+  
   const [price, setPrice] = useState('');
   const [passengerCount, setPassengerCount] = useState('1'); 
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
   const [notes, setNotes] = useState('');
   
-  const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'arrived' | 'passenger_on_the_way' | 'in_progress'>('idle');
+  const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'arrived' | 'passenger_on_the_way' | 'waiting_for_scan' | 'in_progress'>('idle');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
@@ -39,6 +43,10 @@ export default function PassengerHome() {
   const [ratingReason, setRatingReason] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [rideToRate, setRideToRate] = useState<any>(null);
+
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [scanned, setScanned] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const chatPulseAnim = useRef(new Animated.Value(0)).current; 
@@ -86,7 +94,6 @@ export default function PassengerHome() {
           const pName = data.name || 'مستخدم جديد';
           const freshAvatar = getValidAvatar(data.avatar || data.image);
           setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar, averageRating: Number(avgRate), ratingCount: rCount });
-          
           if (savedProfile) {
             const parsed = JSON.parse(savedProfile);
             parsed.name = pName; parsed.avatar = freshAvatar;
@@ -113,7 +120,7 @@ export default function PassengerHome() {
       }
       docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
       
-      const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress'].includes(d.status));
+      const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
 
       if (activeRide) {
         setCurrentRideId(activeRide.id); 
@@ -129,11 +136,12 @@ export default function PassengerHome() {
         
         if (activeRide.status === 'pending') {
           setRideStatus('searching'); setOffers(activeRide.offers || []);
-        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress'].includes(activeRide.status)) {
+        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
           setRideStatus(
             activeRide.status === 'accepted' ? 'accepted' : 
             activeRide.status === 'captain_arrived' ? 'arrived' : 
             activeRide.status === 'passenger_on_the_way' ? 'passenger_on_the_way' : 
+            activeRide.status === 'waiting_for_scan' ? 'waiting_for_scan' :
             'in_progress'
           );
           setCaptainInfo({
@@ -157,11 +165,12 @@ export default function PassengerHome() {
         if (firebaseData.status === 'pending') { setRideStatus('searching'); setOffers(firebaseData.offers || []); }
         setUnreadChatCount(firebaseData.unreadCountPassenger || 0);
 
-        if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress'].includes(firebaseData.status)) {
+        if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(firebaseData.status)) {
           setRideStatus(
             firebaseData.status === 'accepted' ? 'accepted' : 
             firebaseData.status === 'captain_arrived' ? 'arrived' : 
             firebaseData.status === 'passenger_on_the_way' ? 'passenger_on_the_way' : 
+            firebaseData.status === 'waiting_for_scan' ? 'waiting_for_scan' :
             'in_progress'
           );
           setPrice(firebaseData.price ? String(firebaseData.price) : '');
@@ -172,7 +181,6 @@ export default function PassengerHome() {
         } else if (firebaseData.status === 'completed') {
           setRideToRate({ ...firebaseData, id: currentRideId });
           setIsRatingModalVisible(true);
-
           AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle');
           setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage('');
         } else if (firebaseData.status === 'canceled') {
@@ -190,16 +198,14 @@ export default function PassengerHome() {
     const unsubscribeMsgs = onSnapshot(q, (snap) => {
       if (!snap.empty) {
         const msg = snap.docs[0].data();
-        if (msg.sender === 'captain') {
-          setLatestMessage(msg.text);
-        }
+        if (msg.sender === 'captain') setLatestMessage(msg.text);
       }
     });
     return () => unsubscribeMsgs();
   }, [currentRideId]);
 
   useEffect(() => {
-    if (rideStatus === 'arrived') {
+    if (rideStatus === 'arrived' || rideStatus === 'waiting_for_scan') {
       Animated.loop(
         Animated.sequence([ 
           Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: false }), 
@@ -218,9 +224,7 @@ export default function PassengerHome() {
         Animated.timing(toastOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
         Animated.timing(toastTranslateY, { toValue: 0, duration: 300, useNativeDriver: true })
       ]).start();
-
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      
       toastTimer.current = setTimeout(() => {
         Animated.parallel([
           Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
@@ -229,7 +233,6 @@ export default function PassengerHome() {
       }, 2000);
     }
     prevUnreadRef.current = unreadChatCount;
-
     if (unreadChatCount > 0) {
       Animated.loop(
         Animated.sequence([
@@ -238,13 +241,37 @@ export default function PassengerHome() {
         ])
       ).start();
     } else {
-      chatPulseAnim.stopAnimation();
-      chatPulseAnim.setValue(0);
+      chatPulseAnim.stopAnimation(); chatPulseAnim.setValue(0);
     }
   }, [unreadChatCount]);
 
   const backgroundColorInterpolate = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#064e3b', '#10b981'] });
   const chatBackgroundColor = chatPulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#8b5cf6', '#0f172a'] });
+
+  const openScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const { status } = await requestCameraPermission();
+      if (status !== 'granted') { Alert.alert('تنبيه', 'نحتاج صلاحية الكاميرا لمسح الكود لتأكيد بدء الرحلة.'); return; }
+    }
+    setScanned(false); setIsScannerVisible(true);
+  };
+
+  const handleBarCodeScanned = async ({ data }: { data: string }) => {
+    setScanned(true);
+    try {
+      const qrData = JSON.parse(data);
+      if (qrData.rideId === currentRideId) {
+        const rideDoc = await getDoc(doc(db, 'rides', currentRideId));
+        if (rideDoc.exists() && rideDoc.data().qrSecret === qrData.token) {
+          await updateDoc(doc(db, 'rides', currentRideId), { status: 'in_progress' });
+          setIsScannerVisible(false);
+          Alert.alert('رحلة سعيدة 🚙', 'تم تأكيد الكود بنجاح والرحلة بدأت الآن!');
+        } else {
+          Alert.alert('خطأ ❌', 'الكود غير مطابق لهذه الرحلة', [{ text: 'إعادة المحاولة', onPress: () => setScanned(false) }]);
+        }
+      } else { Alert.alert('خطأ ❌', 'هذا الكود لا يخص هذه الرحلة', [{ text: 'إعادة المحاولة', onPress: () => setScanned(false) }]); }
+    } catch (error) { Alert.alert('خطأ', 'الكود الممسوح غير صالح', [{ text: 'حسناً', onPress: () => setScanned(false) }]); }
+  };
 
   const handleGetCurrentLocation = async () => {
     setIsFetchingLocation(true);
@@ -266,10 +293,12 @@ export default function PassengerHome() {
     setIsFetchingLocation(false);
   };
 
-  const updatePriceCalculation = (pickupText: string, dests: string[]) => {
+  // --- تحديث حساب السعر بناءً على نوع المركبة ---
+  const updatePriceCalculation = (pickupText: string, dests: string[], vType: string = requestedVehicleType) => {
     const validDests = dests.filter(d => d.trim().length > 0);
     if (pickupText.trim().length > 0 && validDests.length > 0) {
-      let base = 15 + ((validDests.length - 1) * 10);
+      // السيارة أغلى من بديل التوكتوك
+      let base = vType === 'car' ? 25 + ((validDests.length - 1) * 15) : 15 + ((validDests.length - 1) * 10);
       setCalculatedBasePrice(base);
       setBasePriceForSuggestions(base);
       setPrice(base.toString());
@@ -281,16 +310,12 @@ export default function PassengerHome() {
   };
 
   const handlePickupChange = (text: string) => {
-    setPickup(text);
-    setPickupCoords(null); 
-    updatePriceCalculation(text, destinations);
+    setPickup(text); setPickupCoords(null); updatePriceCalculation(text, destinations);
   };
 
   const handleDestinationChange = (text: string, index: number) => {
-    const newDests = [...destinations];
-    newDests[index] = text;
-    setDestinations(newDests);
-    updatePriceCalculation(pickup, newDests);
+    const newDests = [...destinations]; newDests[index] = text;
+    setDestinations(newDests); updatePriceCalculation(pickup, newDests);
   };
 
   const addDestinationField = () => {
@@ -300,8 +325,7 @@ export default function PassengerHome() {
 
   const removeDestinationField = (index: number) => {
     const newDests = destinations.filter((_, i) => i !== index);
-    setDestinations(newDests);
-    updatePriceCalculation(pickup, newDests);
+    setDestinations(newDests); updatePriceCalculation(pickup, newDests);
   };
 
   const openEditPriceModal = () => {
@@ -314,9 +338,7 @@ export default function PassengerHome() {
     const minAllowedPrice = Math.floor(calculatedBasePrice * 0.80);
     const savedNewPrice = parseInt(tempPrice) || 0;
     if (savedNewPrice < minAllowedPrice) { Alert.alert('تنبيه 🛑', `لا يمكن أن يقل السعر عن ${minAllowedPrice} جنيه.`); return; }
-    setPrice(tempPrice);
-    setBasePriceForSuggestions(savedNewPrice);
-    setIsEditModalVisible(false);
+    setPrice(tempPrice); setBasePriceForSuggestions(savedNewPrice); setIsEditModalVisible(false);
     try {
       const savedRide = await AsyncStorage.getItem('active_ride');
       if (savedRide) {
@@ -337,32 +359,22 @@ export default function PassengerHome() {
     if (!finalPickupCoords) {
       try {
         const geocoded = await Location.geocodeAsync(pickup);
-        if (geocoded.length > 0) {
-          finalPickupCoords = { latitude: geocoded[0].latitude, longitude: geocoded[0].longitude };
-        }
+        if (geocoded.length > 0) finalPickupCoords = { latitude: geocoded[0].latitude, longitude: geocoded[0].longitude };
       } catch (error) { console.log("Geocode error", error); }
     }
 
     try {
       const rideData = {
         passengerId: passengerProfile.id || await AsyncStorage.getItem('currentPassengerId'), 
-        name: passengerProfile.name, 
-        phone: passengerProfile.phone, 
+        name: passengerProfile.name, phone: passengerProfile.phone, 
         avatar: getValidAvatar(passengerProfile.avatar),
-        passengerRating: passengerProfile.averageRating,
-        passengerRatingCount: passengerProfile.ratingCount,
-        pickupLocation: pickup, 
-        pickupCoords: finalPickupCoords, 
-        destinationsList: validDests, 
-        destinationLocation: validDests.join(' ➡️ '), 
-        passengers: passengerCount, 
-        price: price,
-        notes: notes.trim(), 
-        offers: [], 
-        status: 'pending', 
-        timestamp: new Date().getTime(), 
-        unreadCountPassenger: 0, 
-        unreadCountCaptain: 0
+        passengerRating: passengerProfile.averageRating, passengerRatingCount: passengerProfile.ratingCount,
+        pickupLocation: pickup, pickupCoords: finalPickupCoords, 
+        destinationsList: validDests, destinationLocation: validDests.join(' ➡️ '), 
+        passengers: passengerCount, price: price, notes: notes.trim(), 
+        requestedVehicleType, // إرسال نوع المركبة المختارة
+        offers: [], status: 'pending', timestamp: new Date().getTime(), 
+        unreadCountPassenger: 0, unreadCountCaptain: 0
       };
       const docRef = await addDoc(collection(db, 'rides'), rideData);
       await AsyncStorage.setItem('active_ride', JSON.stringify({ ...rideData, id: docRef.id }));
@@ -398,26 +410,15 @@ export default function PassengerHome() {
   const submitRating = async () => {
     if (rating === 0) { Alert.alert('تنبيه', 'برجاء اختيار عدد النجوم أولاً.'); return; }
     if (rating < 5 && ratingReason.trim() === '') { Alert.alert('تنبيه', 'برجاء كتابة سبب التقييم لكي نتمكن من مساعدتك وتطوير الخدمة.'); return; }
-
     try {
       await addDoc(collection(db, 'ratings'), {
-        rideId: rideToRate?.id || 'unknown',
-        passengerId: passengerProfile.id || 'unknown',
-        passengerName: passengerProfile.name,
-        captainId: rideToRate?.captainId || 'unknown',
-        captainName: rideToRate?.captainName || 'كابتن',
-        rating: rating,
-        reason: rating === 5 ? 'ممتاز' : ratingReason.trim(),
-        timestamp: new Date().getTime(),
-        type: 'passenger_rating_captain'
+        rideId: rideToRate?.id || 'unknown', passengerId: passengerProfile.id || 'unknown', passengerName: passengerProfile.name,
+        captainId: rideToRate?.captainId || 'unknown', captainName: rideToRate?.captainName || 'كابتن', rating: rating,
+        reason: rating === 5 ? 'ممتاز' : ratingReason.trim(), timestamp: new Date().getTime(), type: 'passenger_rating_captain'
       });
-
       setRatingSubmitted(true);
-      setTimeout(() => {
-        setIsRatingModalVisible(false); setRating(0); setRatingReason(''); setRatingSubmitted(false); setRideToRate(null);
-      }, 2500);
-
-    } catch (error) { console.log(error); Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال التقييم.'); }
+      setTimeout(() => { setIsRatingModalVisible(false); setRating(0); setRatingReason(''); setRatingSubmitted(false); setRideToRate(null); }, 2500);
+    } catch (error) { Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال التقييم.'); }
   };
 
   const handleCallClick = () => {
@@ -440,19 +441,14 @@ export default function PassengerHome() {
         </Animated.View>
       )}
 
-      {/* الهيدر بعد التعديل لعرض الاسم و 5 نجوم التقييم بدون أرقام */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.userInfo} onPress={() => router.push('/passenger-profile')}>
           <Image source={{ uri: passengerProfile.avatar }} style={styles.profileAvatar} />
           <View>
-            <Text style={styles.headerPassengerName} numberOfLines={1}>
-              {passengerProfile.name ? passengerProfile.name.split(' ')[0] : 'مستخدم'}
-            </Text>
+            <Text style={styles.headerPassengerName} numberOfLines={1}>{passengerProfile.name ? passengerProfile.name.split(' ')[0] : 'مستخدم'}</Text>
             <View style={{ flexDirection: 'row-reverse', marginTop: 2, marginRight: 8 }}>
               {[1, 2, 3, 4, 5].map((star) => (
-                <Text key={star} style={{ fontSize: 14, color: star <= Math.round(passengerProfile.averageRating) ? '#f59e0b' : '#cbd5e1' }}>
-                  ★
-                </Text>
+                <Text key={star} style={{ fontSize: 14, color: star <= Math.round(passengerProfile.averageRating) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
               ))}
             </View>
           </View>
@@ -463,6 +459,18 @@ export default function PassengerHome() {
       {rideStatus === 'idle' && (
         <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={styles.cardTitle}>اطلب مشوارك الآن:</Text>
+
+          {/* --- أزرار اختيار نوع المركبة --- */}
+          <Text style={styles.label}>🚖 اختر نوع المركبة</Text>
+          <View style={styles.vehicleTypeTabs}>
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>🚗 سيارة</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('tuktuk_alt'); updatePriceCalculation(pickup, destinations, 'tuktuk_alt'); }}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'tuktuk_alt' && styles.vTypeTextActive]}>🛺 بديل توكتوك</Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={styles.label}>📍 موقع الانطلاق الحالي</Text>
           <View style={styles.rowInputContainer}>
             <TextInput style={styles.inputWithButton} placeholder="اكتب مكان الانطلاق" placeholderTextColor="#94a3b8" value={pickup} onChangeText={handlePickupChange} />
@@ -509,7 +517,6 @@ export default function PassengerHome() {
                 const suggestedPrice = Math.round(basePriceForSuggestions * multiplier);
                 const isSelected = price === suggestedPrice.toString();
                 const percentage = Math.round((multiplier - 1) * 100);
-                
                 return (
                   <TouchableOpacity key={index} style={[styles.suggestionBtn, isSelected && styles.suggestionBtnActive]} onPress={() => setPrice(suggestedPrice.toString())}>
                     <Text style={[styles.suggestionText, isSelected && styles.suggestionTextActive]}>{suggestedPrice} ج</Text>
@@ -524,6 +531,7 @@ export default function PassengerHome() {
         </ScrollView>
       )}
 
+      {/* باقي الواجهة كما هي (شاشة البحث، شاشة الرحلة الجارية، كاميرا הQR، المودالز) */}
       {rideStatus === 'searching' && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📡 جاري استقبال العروض...</Text>
@@ -534,16 +542,11 @@ export default function PassengerHome() {
                   <Image source={{uri: getValidAvatar(offer.captainAvatar)}} style={styles.offerAvatar} />
                   <View style={styles.offerDetails}>
                     <Text style={styles.offerName}>{offer.captainName}</Text>
-                    
-                    {/* عرض 5 نجوم لتقييم الكابتن بدون أرقام */}
                     <View style={{ flexDirection: 'row-reverse', marginTop: 2 }}>
                       {[1, 2, 3, 4, 5].map((star) => (
-                        <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>
-                          ★
-                        </Text>
+                        <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
                       ))}
                     </View>
-
                     <Text style={styles.offerVehicle}>🛺 {offer.captainVehicle}</Text>
                     <Text style={styles.offerPrice}>{offer.price} جنيه</Text>
                   </View>
@@ -556,11 +559,11 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'arrived' || rideStatus === 'in_progress') && (
+      {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'in_progress') && (
         <Animated.View style={[
           styles.cardActive, 
-          rideStatus === 'arrived' && styles.cardArrivalPulse,
-          rideStatus === 'arrived' && { backgroundColor: backgroundColorInterpolate }
+          (rideStatus === 'arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse,
+          (rideStatus === 'arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }
         ]}>
           {rideStatus === 'arrived' ? (
             <>
@@ -568,9 +571,10 @@ export default function PassengerHome() {
               <Text style={styles.statusArrivalAlert}>لقد وصل الكابتن إلى نقطة الإقلال وهو في انتظارك الآن.</Text>
             </>
           ) : (
-            <Text style={styles.statusAlertTitle}>
+            <Text style={[styles.statusAlertTitle, rideStatus === 'waiting_for_scan' && { color: '#ffffff' }]}>
               {rideStatus === 'accepted' ? '🛺 الكابتن في طريقه إليك...' 
                 : rideStatus === 'passenger_on_the_way' ? '✅ أنت الآن في طريقك للكابتن'
+                : rideStatus === 'waiting_for_scan' ? '📱 الكابتن في انتظارك لمسح الكود'
                 : '🛺 الرحلة جارية الآن'}
             </Text>
           )}
@@ -588,6 +592,13 @@ export default function PassengerHome() {
               <Text style={styles.captainText}>🛺 المركبة: {captainInfo.vehicle}</Text>
             </View>
           </View>
+
+          {rideStatus === 'waiting_for_scan' && (
+            <TouchableOpacity style={styles.scanBtn} onPress={openScanner}>
+              <Text style={styles.scanBtnText}>📷 امسح كود الكابتن لبدء الرحلة</Text>
+            </TouchableOpacity>
+          )}
+
           <ScrollView style={styles.tripRouteContainer} showsVerticalScrollIndicator={false}>
             <Text style={styles.routeText}>📍 الانطلاق: {pickup}</Text>
             {destinations.map((d, i) => (
@@ -604,10 +615,10 @@ export default function PassengerHome() {
 
           <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 10 }}>
             <TouchableOpacity style={[styles.callCaptainBtn, { flex: 1, marginLeft: 5 }]} onPress={handleCallClick}>
-              <Text style={styles.callCaptainBtnText}>📞 اتصال بالكابتن</Text>
+              <Text style={styles.callCaptainBtnText}>📞 اتصال</Text>
             </TouchableOpacity>
             <AnimatedTouchableOpacity style={[styles.chatButton, { flex: 1, marginRight: 5, backgroundColor: unreadChatCount > 0 ? chatBackgroundColor : '#8b5cf6' }]} onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}>
-              <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
+              <Text style={styles.chatButtonText}>💬 مراسلة</Text>
               {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
             </AnimatedTouchableOpacity>
           </View>
@@ -618,7 +629,16 @@ export default function PassengerHome() {
         </Animated.View>
       )}
 
-      {/* --- شاشة التقييم --- */}
+      <Modal visible={isScannerVisible} transparent={true} animationType="slide">
+        <View style={styles.modalOverlayQR}>
+          <Text style={styles.qrHeader}>وجه الكاميرا نحو كود الكابتن 📷</Text>
+          <View style={styles.qrScannerBox}>
+            <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} />
+          </View>
+          <TouchableOpacity style={styles.cancelScanBtn} onPress={() => setIsScannerVisible(false)}><Text style={styles.cancelScanBtnText}>إلغاء</Text></TouchableOpacity>
+        </View>
+      </Modal>
+
       <Modal visible={isRatingModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.ratingModalContent}>
@@ -626,7 +646,6 @@ export default function PassengerHome() {
               <>
                 <Text style={styles.modalTitle}>كيف كانت الرحلة؟ 🛺</Text>
                 <Text style={styles.modalSubtitle}>تقييمك للكابتن يساعدنا في تحسين الخدمة</Text>
-
                 <View style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity key={star} onPress={() => setRating(star)}>
@@ -634,58 +653,27 @@ export default function PassengerHome() {
                     </TouchableOpacity>
                   ))}
                 </View>
-
                 {rating === 5 && <Text style={styles.thankYouFiveStars}>شكراً لك! 🤩</Text>}
-
                 {rating > 0 && rating < 5 && (
                   <TextInput style={styles.reasonInput} placeholder="ما هو سبب تقييمك؟ (إلزامي)" placeholderTextColor="#94a3b8" value={ratingReason} onChangeText={setRatingReason} multiline={true} />
                 )}
-
                 {rating > 0 && (
-                  <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}>
-                    <Text style={styles.submitRatingBtnText}>إرسال التقييم</Text>
-                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}><Text style={styles.submitRatingBtnText}>إرسال التقييم</Text></TouchableOpacity>
                 )}
               </>
             ) : (
-              <View style={styles.successRatingContainer}>
-                <Text style={styles.successRatingIcon}>✅</Text>
-                <Text style={styles.successRatingText}>نشكرك على تقييمك لمساعدتنا في تطوير الخدمة</Text>
-              </View>
+              <View style={styles.successRatingContainer}><Text style={styles.successRatingIcon}>✅</Text><Text style={styles.successRatingText}>نشكرك على تقييمك لمساعدتنا في تطوير الخدمة</Text></View>
             )}
           </View>
         </View>
       </Modal>
       
       <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>✏️ تعديل سعر الرحلة</Text>
-            <Text style={styles.modalSubtitle}>يمكنك تعديل السعر (الحد الأدنى {Math.floor(calculatedBasePrice * 0.80)} جنيه):</Text>
-            <TextInput style={styles.modalInput} value={tempPrice} onChangeText={setTempPrice} keyboardType="numeric" placeholder="اكتب السعر الجديد" placeholderTextColor="#94a3b8" />
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveNewPrice}><Text style={styles.modalSaveBtnText}>حفظ</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEditModalVisible(false)}><Text style={styles.modalCancelBtnText}>إلغاء</Text></TouchableOpacity>
-            </View>
-          </View>
-        </View>
+        <View style={styles.modalOverlay}><View style={styles.modalContent}><Text style={styles.modalTitle}>✏️ تعديل سعر الرحلة</Text><Text style={styles.modalSubtitle}>يمكنك تعديل السعر (الحد الأدنى {Math.floor(calculatedBasePrice * 0.80)} جنيه):</Text><TextInput style={styles.modalInput} value={tempPrice} onChangeText={setTempPrice} keyboardType="numeric" placeholder="اكتب السعر الجديد" placeholderTextColor="#94a3b8" /><View style={styles.modalButtonsRow}><TouchableOpacity style={styles.modalSaveBtn} onPress={saveNewPrice}><Text style={styles.modalSaveBtnText}>حفظ</Text></TouchableOpacity><TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEditModalVisible(false)}><Text style={styles.modalCancelBtnText}>إلغاء</Text></TouchableOpacity></View></View></View>
       </Modal>
 
       <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.callModalContent}>
-            <Text style={styles.modalTitle}>📞 اختر طريقة الاتصال</Text>
-            <TouchableOpacity style={styles.regularCallBtn} onPress={makeRegularCall}>
-              <Text style={styles.regularCallBtnText}>📱 مكالمة عادية (شبكة المحمول)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
-              <Text style={styles.freeCallBtnText}>🌐 مكالمة مجانية (داخل التطبيق)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}>
-              <Text style={styles.cancelCallBtnText}>إلغاء</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <View style={styles.modalOverlay}><View style={styles.callModalContent}><Text style={styles.modalTitle}>📞 اختر طريقة الاتصال</Text><TouchableOpacity style={styles.regularCallBtn} onPress={makeRegularCall}><Text style={styles.regularCallBtnText}>📱 مكالمة عادية (شبكة المحمول)</Text></TouchableOpacity><TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}><Text style={styles.freeCallBtnText}>🌐 مكالمة مجانية (داخل التطبيق)</Text></TouchableOpacity><TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}><Text style={styles.cancelCallBtnText}>إلغاء</Text></TouchableOpacity></View></View>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -709,13 +697,19 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'right' },
   cardActive: { flex: 1, backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 2, borderColor: '#d97706', elevation: 6, marginBottom: 10 },
   cardArrivalPulse: { flex: 1, borderRadius: 20, padding: 20, borderWidth: 3, borderColor: '#047857', elevation: 10, shadowColor: '#000000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 5, marginBottom: 10 },
-  
   superArrivalTitle: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', marginBottom: 8, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 2 },
   statusArrivalAlert: { fontSize: 16, fontWeight: 'bold', color: '#f8fafc', marginBottom: 15, textAlign: 'center' },
   statusAlertTitle: { fontSize: 18, fontWeight: 'bold', color: '#d97706', marginBottom: 15, textAlign: 'center' },
   subText: { fontSize: 15, color: '#64748b', textAlign: 'center', marginBottom: 20 },
   label: { fontSize: 14, fontWeight: 'bold', color: '#475569', marginBottom: 6, textAlign: 'right' },
   
+  // تنسيقات أزرار اختيار نوع المركبة
+  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 15, marginBottom: 20 },
+  vTypeBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 12, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' },
+  vTypeBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 2 },
+  vTypeText: { fontSize: 15, fontWeight: 'bold', color: '#64748b' },
+  vTypeTextActive: { color: '#2563eb' },
+
   rowInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   inputWithButton: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right', marginLeft: 8 },
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },
@@ -760,7 +754,6 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 20, borderRadius: 20, elevation: 5 },
   callModalContent: { backgroundColor: '#ffffff', width: '85%', padding: 20, borderRadius: 20, elevation: 5, alignItems: 'center' },
-  
   ratingModalContent: { backgroundColor: '#ffffff', width: '95%', padding: 25, borderRadius: 24, elevation: 5, alignItems: 'center' },
   starsRow: { flexDirection: 'row-reverse', justifyContent: 'center', marginVertical: 15, gap: 10 },
   starText: { fontSize: 45 },
@@ -771,7 +764,6 @@ const styles = StyleSheet.create({
   successRatingContainer: { alignItems: 'center', paddingVertical: 20 },
   successRatingIcon: { fontSize: 50, marginBottom: 15 },
   successRatingText: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', lineHeight: 28 },
-
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 10, textAlign: 'center' },
   modalSubtitle: { fontSize: 13, color: '#64748b', marginBottom: 15, textAlign: 'center' },
   modalInput: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 16, fontWeight: 'bold', color: '#0f172a', textAlign: 'center', marginBottom: 20 },
@@ -805,4 +797,11 @@ const styles = StyleSheet.create({
   badgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
   cancelOrderBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 1 },
   cancelOrderBtnText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
+  scanBtn: { backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15, borderWidth: 2, borderColor: '#bfdbfe' },
+  scanBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  modalOverlayQR: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  qrHeader: { color: '#ffffff', fontSize: 20, fontWeight: 'bold', marginBottom: 30 },
+  qrScannerBox: { width: 300, height: 300, borderRadius: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#10b981', elevation: 10 },
+  cancelScanBtn: { marginTop: 40, paddingVertical: 12, paddingHorizontal: 30, backgroundColor: '#ef4444', borderRadius: 10 },
+  cancelScanBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 }
 });
