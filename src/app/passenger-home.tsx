@@ -50,7 +50,7 @@ export default function PassengerHome() {
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
 
-  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جارٍ التحميل...', phone: '', avatar: DEFAULT_AVATAR });
+  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جارٍ التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0 });
   const [captainInfo, setCaptainInfo] = useState({ name: 'كابتن', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR });
 
   const getValidAvatar = (imgStr: any) => {
@@ -67,10 +67,17 @@ export default function PassengerHome() {
     try {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
       if (passengerId) {
+        const ratingQ = query(collection(db, 'ratings'), where('passengerId', '==', passengerId));
+        const ratingSnap = await getDocs(ratingQ);
+        let sum = 0;
+        ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
+        const rCount = ratingSnap.docs.length;
+        const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : 5;
+
         const savedProfile = await AsyncStorage.getItem('passenger_profile');
         if (savedProfile) {
           const parsed = JSON.parse(savedProfile);
-          setPassengerProfile({ id: passengerId, name: parsed.name || 'مستخدم جديد', phone: parsed.phone || '', avatar: getValidAvatar(parsed.avatar) });
+          setPassengerProfile({ id: passengerId, name: parsed.name || 'مستخدم جديد', phone: parsed.phone || '', avatar: getValidAvatar(parsed.avatar), averageRating: Number(avgRate), ratingCount: rCount });
         }
         const docRef = doc(db, 'passengers', passengerId);
         const docSnap = await getDoc(docRef);
@@ -78,7 +85,7 @@ export default function PassengerHome() {
           const data = docSnap.data();
           const pName = data.name || 'مستخدم جديد';
           const freshAvatar = getValidAvatar(data.avatar || data.image);
-          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar });
+          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar, averageRating: Number(avgRate), ratingCount: rCount });
           
           if (savedProfile) {
             const parsed = JSON.parse(savedProfile);
@@ -326,7 +333,6 @@ export default function PassengerHome() {
     
     setRideStatus('searching'); setOffers([]); 
     
-    // محاولة تحويل اسم المكان لإحداثيات لو الراكب كتبه بإيده ومداش على زرار GPS
     let finalPickupCoords = pickupCoords;
     if (!finalPickupCoords) {
       try {
@@ -343,8 +349,10 @@ export default function PassengerHome() {
         name: passengerProfile.name, 
         phone: passengerProfile.phone, 
         avatar: getValidAvatar(passengerProfile.avatar),
+        passengerRating: passengerProfile.averageRating,
+        passengerRatingCount: passengerProfile.ratingCount,
         pickupLocation: pickup, 
-        pickupCoords: finalPickupCoords, // إرسال الإحداثيات النهائية
+        pickupCoords: finalPickupCoords, 
         destinationsList: validDests, 
         destinationLocation: validDests.join(' ➡️ '), 
         passengers: passengerCount, 
@@ -432,10 +440,22 @@ export default function PassengerHome() {
         </Animated.View>
       )}
 
+      {/* الهيدر بعد التعديل لعرض الاسم و 5 نجوم التقييم بدون أرقام */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.userInfo} onPress={() => router.push('/passenger-profile')}>
           <Image source={{ uri: passengerProfile.avatar }} style={styles.profileAvatar} />
-          <Text style={styles.welcomeText}>أهلاً، <Text style={styles.userName}>{passengerProfile.name} 🛺</Text></Text>
+          <View>
+            <Text style={styles.headerPassengerName} numberOfLines={1}>
+              {passengerProfile.name ? passengerProfile.name.split(' ')[0] : 'مستخدم'}
+            </Text>
+            <View style={{ flexDirection: 'row-reverse', marginTop: 2, marginRight: 8 }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Text key={star} style={{ fontSize: 14, color: star <= Math.round(passengerProfile.averageRating) ? '#f59e0b' : '#cbd5e1' }}>
+                  ★
+                </Text>
+              ))}
+            </View>
+          </View>
         </TouchableOpacity>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}><Text style={styles.logoutText}>خروج</Text></TouchableOpacity>
       </View>
@@ -514,6 +534,16 @@ export default function PassengerHome() {
                   <Image source={{uri: getValidAvatar(offer.captainAvatar)}} style={styles.offerAvatar} />
                   <View style={styles.offerDetails}>
                     <Text style={styles.offerName}>{offer.captainName}</Text>
+                    
+                    {/* عرض 5 نجوم لتقييم الكابتن بدون أرقام */}
+                    <View style={{ flexDirection: 'row-reverse', marginTop: 2 }}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>
+                          ★
+                        </Text>
+                      ))}
+                    </View>
+
                     <Text style={styles.offerVehicle}>🛺 {offer.captainVehicle}</Text>
                     <Text style={styles.offerPrice}>{offer.price} جنيه</Text>
                   </View>
@@ -540,8 +570,8 @@ export default function PassengerHome() {
           ) : (
             <Text style={styles.statusAlertTitle}>
               {rideStatus === 'accepted' ? '🛺 الكابتن في طريقه إليك...' 
-               : rideStatus === 'passenger_on_the_way' ? '✅ أنت الآن في طريقك للكابتن'
-               : '🛺 الرحلة جارية الآن'}
+                : rideStatus === 'passenger_on_the_way' ? '✅ أنت الآن في طريقك للكابتن'
+                : '🛺 الرحلة جارية الآن'}
             </Text>
           )}
 
@@ -663,11 +693,10 @@ export default function PassengerHome() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f1f5f9', padding: 15, paddingTop: 40 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 12, borderRadius: 16, marginBottom: 20, elevation: 2 },
-  userInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 12, borderRadius: 16, marginBottom: 20, elevation: 2 },
+  userInfo: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1 },
   profileAvatar: { width: 45, height: 45, borderRadius: 22.5, backgroundColor: '#cbd5e1', marginLeft: 10 },
-  welcomeText: { fontSize: 16, color: '#334155' },
-  userName: { fontWeight: 'bold', color: '#d97706' },
+  headerPassengerName: { fontSize: 14, fontWeight: 'bold', color: '#1e293b', marginRight: 8, textAlign: 'right' },
   logoutButton: { backgroundColor: '#fee2e2', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
   logoutText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
   
@@ -680,10 +709,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'right' },
   cardActive: { flex: 1, backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 2, borderColor: '#d97706', elevation: 6, marginBottom: 10 },
   cardArrivalPulse: { flex: 1, borderRadius: 20, padding: 20, borderWidth: 3, borderColor: '#047857', elevation: 10, shadowColor: '#000000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 5, marginBottom: 10 },
-  cardInProgress: { flex: 1, backgroundColor: '#eff6ff', borderRadius: 20, padding: 20, borderWidth: 2, borderColor: '#3b82f6', elevation: 6, marginBottom: 10 },
   
-  inProgressTitle: { fontSize: 22, fontWeight: 'bold', color: '#1d4ed8', marginBottom: 5, textAlign: 'center' },
-  inProgressSub: { fontSize: 15, fontWeight: 'bold', color: '#2563eb', marginBottom: 20, textAlign: 'center' },
   superArrivalTitle: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', marginBottom: 8, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 2 },
   statusArrivalAlert: { fontSize: 16, fontWeight: 'bold', color: '#f8fafc', marginBottom: 15, textAlign: 'center' },
   statusAlertTitle: { fontSize: 18, fontWeight: 'bold', color: '#d97706', marginBottom: 15, textAlign: 'center' },
@@ -694,7 +720,6 @@ const styles = StyleSheet.create({
   inputWithButton: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right', marginLeft: 8 },
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },
   myLocationBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  input: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, marginBottom: 15, color: '#0f172a', textAlign: 'right' },
   
   destRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   inputDest: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right' },
@@ -723,12 +748,14 @@ const styles = StyleSheet.create({
   offersContainer: { maxHeight: 300, marginBottom: 15 },
   offerCard: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#cbd5e1' },
   offerAvatar: { width: 55, height: 55, borderRadius: 27.5, marginLeft: 12, backgroundColor: '#e2e8f0' },
-  offerDetails: { flex: 1 },
+  offerDetails: { flex: 1, alignItems: 'flex-end' },
   offerName: { fontSize: 15, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
   offerVehicle: { fontSize: 13, color: '#64748b', textAlign: 'right', marginTop: 2 },
   offerPrice: { fontSize: 16, fontWeight: 'bold', color: '#10b981', textAlign: 'right', marginTop: 4 },
   acceptOfferBtn: { backgroundColor: '#10b981', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
   acceptOfferBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  cancelBtnOnly: { backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  cancelBtnOnlyText: { color: '#dc2626', fontWeight: 'bold', fontSize: 15 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 20, borderRadius: 20, elevation: 5 },
@@ -765,7 +792,6 @@ const styles = StyleSheet.create({
   captainAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1' },
   captainDetails: { flex: 1, marginHorizontal: 15 },
   captainText: { fontSize: 14, fontWeight: 'bold', color: '#1e293b', marginBottom: 2, textAlign: 'right' },
-  phoneText: { fontSize: 14, fontWeight: 'bold', color: '#2563eb', marginBottom: 2, textAlign: 'right', marginTop: 3 },
   tripRouteContainer: { maxHeight: 150, backgroundColor: '#f8fafc', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0' },
   routeText: { fontSize: 14, color: '#334155', fontWeight: 'bold', marginBottom: 4, textAlign: 'right' },
   priceTag: { fontSize: 16, color: '#10b981', fontWeight: 'bold', marginTop: 4, textAlign: 'right' },

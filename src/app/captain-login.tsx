@@ -12,13 +12,17 @@ export default function CaptainLogin() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // التحقق التلقائي: لو الكابتن مسجل دخول قبل كده، هيدخل مباشرة بدون ما يكتب حاجة
+  // التحقق التلقائي: لو مسجل دخول هيدخل فوراً
   useEffect(() => {
     const checkExistingLogin = async () => {
-      const captainId = await AsyncStorage.getItem('currentCaptainId');
-      if (captainId) {
-        router.replace('/captain-home');
-      } else {
+      try {
+        const captainId = await AsyncStorage.getItem('currentCaptainId');
+        if (captainId) {
+          router.replace('/captain-home');
+        } else {
+          setCheckingAuth(false);
+        }
+      } catch (error) {
         setCheckingAuth(false);
       }
     };
@@ -26,19 +30,28 @@ export default function CaptainLogin() {
   }, []);
 
   const handleLogin = async () => {
-    if (!name.trim() || !password.trim()) {
+    const trimmedName = name.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedName || !trimmedPassword) {
       Alert.alert('تنبيه', 'برجاء إدخال الاسم وكلمة المرور.');
       return;
+    }
+
+    // --- التحقق من حساب الإدارة (يتم توجيهه للوحة التحكم فوراً) ---
+    if (trimmedName.toLowerCase() === 'admin' && trimmedPassword === 'admin123') {
+      router.replace('/admin-dashboard');
+      return; // بنوقف الكود هنا عشان ميكملش ويروح يدور في فايربيز
     }
 
     setLoading(true);
 
     try {
-      // البحث عن الكابتن في قاعدة البيانات باستخدام الاسم
+      // لو مش أدمن، هيبحث عن الكابتن في قاعدة البيانات
       const q = query(
         collection(db, 'captains'), 
-        where('name', '==', name.trim()), 
-        where('password', '==', password.trim())
+        where('name', '==', trimmedName), 
+        where('password', '==', trimmedPassword)
       );
       
       const querySnapshot = await getDocs(q);
@@ -54,16 +67,23 @@ export default function CaptainLogin() {
           return;
         }
 
+        // التأكد إن الحساب تم تفعيله
+        if (data.status === 'pending_approval') {
+          setLoading(false);
+          Alert.alert('قيد المراجعة ⏳', 'حسابك ما زال قيد المراجعة وتدقيق المستندات من الإدارة.');
+          return;
+        }
+
         const profileData = {
           id: captainDoc.id,
-          name: data.name || name.trim(),
+          name: data.name || trimmedName,
           phone: data.phone || '',
           vehicle: data.tukTukNumber || data.vehicle || 'توكتوك',
           avatar: data.profileImage || data.avatar || data.image || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
           walletBalance: data.walletBalance || 0 
         };
 
-        // حفظ البيانات في الذاكرة لتفعيل الدخول التلقائي في المرات القادمة
+        // حفظ البيانات محلياً
         await AsyncStorage.setItem('currentCaptainId', captainDoc.id);
         await AsyncStorage.setItem('captain_profile', JSON.stringify(profileData));
 
@@ -88,10 +108,7 @@ export default function CaptainLogin() {
   }
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-      style={styles.container}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.title}>تسجيل دخول الكابتن 🛺</Text>
         <Text style={styles.subtitle}>أدخل بيانات حسابك لاستقبال الطلبات</Text>
@@ -105,6 +122,8 @@ export default function CaptainLogin() {
             value={name}
             onChangeText={setName}
             textAlign="right"
+            autoCapitalize="none" // يمنع تكبير أول حرف تلقائياً
+            autoCorrect={false}
           />
         </View>
 
@@ -118,14 +137,11 @@ export default function CaptainLogin() {
             onChangeText={setPassword}
             secureTextEntry
             textAlign="right"
+            autoCapitalize="none"
           />
         </View>
 
-        <TouchableOpacity 
-          style={styles.loginButton} 
-          onPress={handleLogin}
-          disabled={loading}
-        >
+        <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#000000" />
           ) : (
@@ -133,7 +149,6 @@ export default function CaptainLogin() {
           )}
         </TouchableOpacity>
 
-        {/* لينك للذهاب لشاشة إنشاء حساب جديد */}
         <TouchableOpacity style={styles.registerRedirect} onPress={() => router.push('/captain-register')}>
           <Text style={styles.registerRedirectText}>ليس لديك حساب؟ <Text style={styles.registerLink}>سجل ككابتن جديد</Text></Text>
         </TouchableOpacity>
