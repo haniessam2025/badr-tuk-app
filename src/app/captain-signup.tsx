@@ -1,164 +1,237 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { auth, db } from '../firebaseConfig';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { db } from '../firebaseConfig';
 
-export default function CaptainSignupScreen() {
+export default function CaptainRegister() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  // البيانات النصية
   const [name, setName] = useState('');
-  const [nationalId, setNationalId] = useState('');
   const [phone, setPhone] = useState('');
-  const [tukTukNumber, setTukTukNumber] = useState('');
-  const [tukTukModel, setTukTukModel] = useState('');
+  const [vehicle, setVehicle] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [image, setImage] = useState('');
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
-  const pickImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.5,
-      base64: true,
-    });
+  // الصور
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [idFront, setIdFront] = useState<string | null>(null);
+  const [idBack, setIdBack] = useState<string | null>(null);
+  const [vehicleImage, setVehicleImage] = useState<string | null>(null);
 
-    if (!result.canceled && result.assets && result.assets[0].base64) {
-      const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-      setImage(base64Image);
-    }
+  // دالة فتح الكاميرا أو الاستوديو مع ضغط الصورة العالي
+  const pickImage = async (setImageState: React.Dispatch<React.SetStateAction<string | null>>, title: string) => {
+    Alert.alert(
+      `إرفاق ${title}`,
+      'اختر من أين تريد إرفاق الصورة',
+      [
+        {
+          text: '📸 التقاط بالكاميرا',
+          onPress: async () => {
+            const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+            if (permissionResult.granted === false) {
+              Alert.alert('تنبيه', 'يجب السماح بالوصول للكاميرا.');
+              return;
+            }
+            let result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              quality: 0.05, // تم تقليل الجودة لـ 5% لتصغير حجم البيانات
+              base64: true,
+            });
+            if (!result.canceled && result.assets[0].base64) {
+              setImageState(`data:image/jpeg;base64,${result.assets[0].base64}`);
+            }
+          }
+        },
+        {
+          text: '🖼️ اختيار من الاستوديو',
+          onPress: async () => {
+            let result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              quality: 0.05, // تم تقليل الجودة لـ 5% لتصغير حجم البيانات
+              base64: true,
+            });
+            if (!result.canceled && result.assets[0].base64) {
+              setImageState(`data:image/jpeg;base64,${result.assets[0].base64}`);
+            }
+          }
+        },
+        { text: 'إلغاء', style: 'cancel' }
+      ]
+    );
   };
 
-  const handleSignup = async () => {
-    if (!name || !nationalId || !phone || !tukTukNumber || !password || !confirmPassword) {
-      Alert.alert('خطأ', 'يرجى ملء جميع الحقول الإلزامية.');
+  const handleRegister = async () => {
+    if (!name || !phone || !vehicle || !password || !confirmPassword) {
+      Alert.alert('بيانات ناقصة', 'برجاء ملء جميع الحقول النصية المطلوبة.');
       return;
     }
 
-    if (nationalId.length !== 14) {
-      Alert.alert('خطأ', 'الرقم القومي يجب أن يكون 14 رقماً.');
+    if (!idFront || !idBack || !vehicleImage) {
+      Alert.alert('صور ناقصة', 'برجاء إرفاق صور البطاقة (الوجه والظهر) وصورة التوكتوك لتوثيق حسابك.');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('خطأ', 'كلمة المرور غير متطابقة.');
+      Alert.alert('خطأ', 'كلمتا المرور غير متطابقتين، برجاء التأكد والمحاولة مرة أخرى.');
       return;
     }
 
     setLoading(true);
     try {
-      const fakeEmail = `${phone.trim()}_captain@badrcute.com`;
-      const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
-      const user = userCredential.user;
-
-      await setDoc(doc(db, 'captains', user.uid), {
-        uid: user.uid,
-        name: name.trim(),
-        nationalId: nationalId.trim(),
-        phone: phone.trim(),
-        tukTukNumber: tukTukNumber.trim(),
-        tukTukModel: tukTukModel.trim() || 'توكتوك قياسي',
-        image: image || '',
-        createdAt: new Date(),
+      await addDoc(collection(db, 'captains'), {
+        name,
+        phone,
+        vehicle,
+        password, 
+        avatar: avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', 
+        idFront,
+        idBack,
+        vehicleImage,
+        isOnline: false,
+        walletBalance: 0, 
+        status: 'pending_approval', 
+        createdAt: serverTimestamp(),
       });
 
-      Alert.alert('تم بنجاح', 'تم إنشاء حساب الكابتن بنجاح.');
-      router.replace('/captain-home');
-
-    } catch (error: any) {
-      let errorMessage = 'حدث خطأ أثناء التسجيل.';
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'رقم الهاتف مستخدم من قبل.';
-      }
-      Alert.alert('خطأ', errorMessage);
-    } finally {
       setLoading(false);
+      Alert.alert(
+        'تم التسجيل بنجاح! 🎉',
+        'تم رفع بياناتك وصورك بأمان. جاري مراجعة حسابك من قبل الإدارة وسيمكنك تسجيل الدخول قريباً.',
+        [{ text: 'حسناً، للانتقال لشاشة الدخول', onPress: () => router.replace('/captain-login') }]
+      );
+    } catch (error: any) {
+      setLoading(false);
+      Alert.alert('سبب الخطأ الحقيقي 🚨', error.message || 'حدثت مشكلة أثناء إنشاء الحساب، تأكد من اتصالك بالإنترنت.');
+      console.log("Firebase Error: ", error);
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContainer}>
-      <View style={styles.container}>
-        <Text style={styles.title}>تسجيل كابتن جديد 👨‍✈️🛺</Text>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>انضم إلينا ككابتن 🛺</Text>
+          <Text style={styles.headerSubtitle}>قم بتعبئة بياناتك وإرفاق الأوراق المطلوبة</Text>
+        </View>
 
-        <TouchableOpacity onPress={pickImage} style={styles.imageContainer}>
-          {image ? (
-            <Image source={{ uri: image }} style={styles.avatar} />
+        <View style={styles.avatarContainer}>
+          <TouchableOpacity onPress={() => pickImage(setAvatar, 'الصورة الشخصية')} style={styles.avatarPicker}>
+            {avatar ? (
+              <Image source={{ uri: avatar }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarPlaceholderText}>صورة شخصية (اختياري)</Text>
+            )}
+            <View style={styles.avatarBadge}><Text style={styles.badgeText}>📷</Text></View>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionTitle}>البيانات الأساسية</Text>
+        <TextInput style={styles.input} placeholder="الاسم ثلاثي" placeholderTextColor="#94a3b8" value={name} onChangeText={setName} />
+        <TextInput style={styles.input} placeholder="رقم الهاتف (واتساب)" placeholderTextColor="#94a3b8" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+        <TextInput style={styles.input} placeholder="رقم وموديل التوكتوك (مثال: بجاج 2022 - أ ب ج 123)" placeholderTextColor="#94a3b8" value={vehicle} onChangeText={setVehicle} />
+
+        <Text style={styles.sectionTitle}>الأوراق الرسمية (مطلوب)</Text>
+        
+        <TouchableOpacity style={styles.cardPlaceholder} onPress={() => pickImage(setIdFront, 'وجه البطاقة')}>
+          {idFront ? (
+            <Image source={{ uri: idFront }} style={styles.cardImage} />
           ) : (
-            <View style={styles.placeholderImage}>
-              <Text style={styles.placeholderText}>اختياري: صورتك الشخصية 📷</Text>
+            <View style={styles.placeholderContent}>
+              <Text style={styles.placeholderIcon}>🪪</Text>
+              <Text style={styles.placeholderText}>اضغط لتصوير وجه البطاقة</Text>
             </View>
           )}
         </TouchableOpacity>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>اسم الكابتن</Text>
-          <TextInput style={styles.input} placeholder="اكتب اسمك الكامل" placeholderTextColor="#9ca3af" value={name} onChangeText={setName} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>الرقم القومي (14 رقم)</Text>
-          <TextInput style={styles.input} placeholder="الرقم القومي" placeholderTextColor="#9ca3af" keyboardType="numeric" maxLength={14} value={nationalId} onChangeText={setNationalId} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>رقم الهاتف</Text>
-          <TextInput style={styles.input} placeholder="رقم الهاتف للتواصل والدخول" placeholderTextColor="#9ca3af" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>رقم لوحة التوكتوك</Text>
-          <TextInput style={styles.input} placeholder="مثال: أ ب ج 123" placeholderTextColor="#9ca3af" value={tukTukNumber} onChangeText={setTukTukNumber} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>موديل أو لون التوكتوك</Text>
-          <TextInput style={styles.input} placeholder="مثال: باجاج أصفر موديل 2024" placeholderTextColor="#9ca3af" value={tukTukModel} onChangeText={setTukTukModel} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>كلمة المرور</Text>
-          <TextInput style={styles.input} placeholder="كلمة المرور" placeholderTextColor="#9ca3af" secureTextEntry value={password} onChangeText={setPassword} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>تأكيد كلمة المرور</Text>
-          <TextInput style={styles.input} placeholder="أعد إدخال كلمة المرور" placeholderTextColor="#9ca3af" secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} />
-        </View>
-
-        {loading ? (
-          <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 20 }} />
-        ) : (
-          <TouchableOpacity style={styles.button} onPress={handleSignup}>
-            <Text style={styles.buttonText}>تسجيل الكابتن</Text>
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity onPress={() => router.push('/captain-login')} style={styles.linkButton}>
-          <Text style={styles.linkText}>لديك حساب بالفعل؟ تسجيل الدخول</Text>
+        <TouchableOpacity style={styles.cardPlaceholder} onPress={() => pickImage(setIdBack, 'ظهر البطاقة')}>
+          {idBack ? (
+            <Image source={{ uri: idBack }} style={styles.cardImage} />
+          ) : (
+            <View style={styles.placeholderContent}>
+              <Text style={styles.placeholderIcon}>🪪</Text>
+              <Text style={styles.placeholderText}>اضغط لتصوير ظهر البطاقة</Text>
+            </View>
+          )}
         </TouchableOpacity>
-      </View>
-    </ScrollView>
+
+        <TouchableOpacity style={[styles.cardPlaceholder, { height: 180 }]} onPress={() => pickImage(setVehicleImage, 'صورة التوكتوك')}>
+          {vehicleImage ? (
+            <Image source={{ uri: vehicleImage }} style={styles.cardImage} />
+          ) : (
+            <View style={styles.placeholderContent}>
+              <Text style={styles.placeholderIcon}>🛺</Text>
+              <Text style={styles.placeholderText}>اضغط لتصوير التوكتوك بوضوح</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <Text style={styles.sectionTitle}>إعدادات الأمان</Text>
+        <TextInput style={styles.input} placeholder="كلمة المرور" placeholderTextColor="#94a3b8" secureTextEntry value={password} onChangeText={setPassword} />
+        <TextInput style={styles.input} placeholder="تأكيد كلمة المرور" placeholderTextColor="#94a3b8" secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} />
+
+        <TouchableOpacity style={styles.registerButton} onPress={handleRegister} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#000" />
+          ) : (
+            <Text style={styles.registerButtonText}>إنشاء حساب وتوثيق البيانات</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.loginRedirect} onPress={() => router.push('/captain-login')}>
+          <Text style={styles.loginRedirectText}>لديك حساب بالفعل؟ <Text style={styles.loginLink}>تسجيل الدخول</Text></Text>
+        </TouchableOpacity>
+
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollContainer: { flexGrow: 1, backgroundColor: '#f4f6f9' },
-  container: { flex: 1, backgroundColor: '#f4f6f9', padding: 24, justifyContent: 'center' },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#2563eb', textAlign: 'center', marginBottom: 20 },
-  imageContainer: { alignSelf: 'center', marginBottom: 20 },
-  avatar: { width: 90, height: 90, borderRadius: 45, borderWidth: 2, borderColor: '#2563eb' },
-  placeholderImage: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#e5e7eb', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db' },
-  placeholderText: { fontSize: 10, color: '#6b7280', textAlign: 'center', padding: 5 },
-  inputGroup: { marginBottom: 15 },
-  label: { fontSize: 14, fontWeight: '600', color: '#4b5563', marginBottom: 5, textAlign: 'right' },
-  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 12, fontSize: 16, textAlign: 'right', color: '#333' },
-  button: { backgroundColor: '#2563eb', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 20 },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  linkButton: { marginTop: 20, alignItems: 'center' },
-  linkText: { color: '#2563eb', fontSize: 16, textDecorationLine: 'underline' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  scrollContent: { padding: 20, paddingBottom: 40, paddingTop: 60 },
+  header: { alignItems: 'center', marginBottom: 25 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#1e293b', marginBottom: 5 },
+  headerSubtitle: { fontSize: 14, color: '#64748b' },
+  
+  avatarContainer: { alignItems: 'center', marginBottom: 20 },
+  avatarPicker: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#cbd5e1', position: 'relative' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 50 },
+  avatarPlaceholderText: { fontSize: 12, color: '#64748b', textAlign: 'center', padding: 5 },
+  avatarBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#ffffff', borderRadius: 15, padding: 4, elevation: 2 },
+  badgeText: { fontSize: 16 },
+
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#334155', marginBottom: 12, textAlign: 'right', marginTop: 10 },
+  input: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 15, color: '#0f172a', textAlign: 'right', elevation: 1 },
+  
+  cardPlaceholder: { 
+    width: '100%', 
+    height: 160, 
+    backgroundColor: '#f1f5f9', 
+    borderWidth: 2, 
+    borderColor: '#cbd5e1', 
+    borderStyle: 'dashed', 
+    borderRadius: 16, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginBottom: 15,
+    overflow: 'hidden'
+  },
+  cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  placeholderContent: { alignItems: 'center' },
+  placeholderIcon: { fontSize: 35, marginBottom: 8 },
+  placeholderText: { fontSize: 14, color: '#64748b', fontWeight: 'bold' },
+
+  registerButton: { backgroundColor: '#eab308', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 3 },
+  registerButtonText: { color: '#000000', fontSize: 18, fontWeight: 'bold' },
+  
+  loginRedirect: { marginTop: 20, alignItems: 'center' },
+  loginRedirectText: { fontSize: 15, color: '#64748b' },
+  loginLink: { color: '#2563eb', fontWeight: 'bold' },
 });

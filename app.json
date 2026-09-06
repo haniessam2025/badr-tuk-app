@@ -8,7 +8,8 @@
     "scheme": "badrtukapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.haniessam.badrtukapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +19,12 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.haniessam.badrtukapp"
+      "package": "com.haniessam.badrtukapp",
+      "config": {
+        "googleMaps": {
+          "apiKey": ""
+        }
+      }
     },
     "web": {
       "output": "static",
@@ -32,6 +38,12 @@
           "backgroundColor": "#208AEF",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysPermission": "Allow $(PRODUCT_NAME) to access your location."
         }
       ]
     ],

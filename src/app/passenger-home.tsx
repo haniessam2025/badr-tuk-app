@@ -13,17 +13,16 @@ export default function PassengerHome() {
   const pathname = usePathname();
   const [pickup, setPickup] = useState('');
   
-  const [destinations, setDestinations] = useState<string[]>(['']);
+  const [pickupCoords, setPickupCoords] = useState<{latitude: number, longitude: number} | null>(null);
   
+  const [destinations, setDestinations] = useState<string[]>(['']);
   const [price, setPrice] = useState('');
   const [passengerCount, setPassengerCount] = useState('1'); 
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
-  
   const [notes, setNotes] = useState('');
   
   const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'arrived' | 'passenger_on_the_way' | 'in_progress'>('idle');
-  
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
@@ -31,23 +30,27 @@ export default function PassengerHome() {
 
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState(''); 
-  
   const [isCallModalVisible, setIsCallModalVisible] = useState(false);
   const [phoneToCall, setPhoneToCall] = useState('');
   const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+
+  const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [ratingReason, setRatingReason] = useState('');
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [rideToRate, setRideToRate] = useState<any>(null);
 
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const chatPulseAnim = useRef(new Animated.Value(0)).current; 
   const toastOpacity = useRef(new Animated.Value(0)).current; 
   const toastTranslateY = useRef(new Animated.Value(-10)).current; 
-
   const [toastVisible, setToastVisible] = useState(false);
   const prevUnreadRef = useRef(0);
   const toastTimer = useRef<any>(null);
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
 
-  const [passengerProfile, setPassengerProfile] = useState({ name: 'جارٍ التحميل...', phone: '', avatar: DEFAULT_AVATAR });
+  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جارٍ التحميل...', phone: '', avatar: DEFAULT_AVATAR });
   const [captainInfo, setCaptainInfo] = useState({ name: 'كابتن', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR });
 
   const getValidAvatar = (imgStr: any) => {
@@ -67,7 +70,7 @@ export default function PassengerHome() {
         const savedProfile = await AsyncStorage.getItem('passenger_profile');
         if (savedProfile) {
           const parsed = JSON.parse(savedProfile);
-          setPassengerProfile({ name: parsed.name || 'مستخدم جديد', phone: parsed.phone || '', avatar: getValidAvatar(parsed.avatar) });
+          setPassengerProfile({ id: passengerId, name: parsed.name || 'مستخدم جديد', phone: parsed.phone || '', avatar: getValidAvatar(parsed.avatar) });
         }
         const docRef = doc(db, 'passengers', passengerId);
         const docSnap = await getDoc(docRef);
@@ -75,7 +78,7 @@ export default function PassengerHome() {
           const data = docSnap.data();
           const pName = data.name || 'مستخدم جديد';
           const freshAvatar = getValidAvatar(data.avatar || data.image);
-          setPassengerProfile({ name: pName, phone: data.phone || '01000000000', avatar: freshAvatar });
+          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar });
           
           if (savedProfile) {
             const parsed = JSON.parse(savedProfile);
@@ -108,6 +111,7 @@ export default function PassengerHome() {
       if (activeRide) {
         setCurrentRideId(activeRide.id); 
         setPickup(activeRide.pickupLocation || ''); 
+        if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
         if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
           setDestinations(activeRide.destinationsList);
         } else {
@@ -158,9 +162,15 @@ export default function PassengerHome() {
             name: firebaseData.captainName || 'كابتن', phone: firebaseData.captainPhone || 'غير مسجل',
             vehicle: firebaseData.captainVehicle || 'توكتوك', avatar: getValidAvatar(firebaseData.captainAvatar),
           });
-        } else if (firebaseData.status === 'completed' || firebaseData.status === 'canceled') {
+        } else if (firebaseData.status === 'completed') {
+          setRideToRate({ ...firebaseData, id: currentRideId });
+          setIsRatingModalVisible(true);
+
           AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle');
-          setPickup(''); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); setNotes('');
+          setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage('');
+        } else if (firebaseData.status === 'canceled') {
+          AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle');
+          setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage('');
         }
       }
     });
@@ -226,15 +236,8 @@ export default function PassengerHome() {
     }
   }, [unreadChatCount]);
 
-  const backgroundColorInterpolate = pulseAnim.interpolate({ 
-    inputRange: [0, 1], 
-    outputRange: ['#064e3b', '#10b981'] 
-  });
-
-  const chatBackgroundColor = chatPulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['#8b5cf6', '#0f172a'] 
-  });
+  const backgroundColorInterpolate = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#064e3b', '#10b981'] });
+  const chatBackgroundColor = chatPulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#8b5cf6', '#0f172a'] });
 
   const handleGetCurrentLocation = async () => {
     setIsFetchingLocation(true);
@@ -243,7 +246,10 @@ export default function PassengerHome() {
       if (!servicesEnabled) { Alert.alert('تنبيه 📍', 'الـ GPS مغلق. برجاء سحب الشاشة وتفعيله.'); setIsFetchingLocation(false); return; }
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') { Alert.alert('صلاحية مفقودة 🛑', 'برجاء السماح للتطبيق بالوصول لموقعك.'); setIsFetchingLocation(false); return; }
+      
       let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setPickupCoords({ latitude: location.coords.latitude, longitude: location.coords.longitude });
+
       let geocode = await Location.reverseGeocodeAsync({ latitude: location.coords.latitude, longitude: location.coords.longitude });
       if (geocode && geocode.length > 0) {
         const place = geocode[0]; const address = [place.street, place.subregion || place.district, place.city].filter(Boolean).join('، ');
@@ -269,6 +275,7 @@ export default function PassengerHome() {
 
   const handlePickupChange = (text: string) => {
     setPickup(text);
+    setPickupCoords(null); 
     updatePriceCalculation(text, destinations);
   };
 
@@ -280,11 +287,8 @@ export default function PassengerHome() {
   };
 
   const addDestinationField = () => {
-    if (destinations.length < 3) {
-      setDestinations([...destinations, '']);
-    } else {
-      Alert.alert('تنبيه', 'الحد الأقصى 3 وجهات في الطلب الواحد.');
-    }
+    if (destinations.length < 3) setDestinations([...destinations, '']);
+    else Alert.alert('تنبيه', 'الحد الأقصى 3 وجهات في الطلب الواحد.');
   };
 
   const removeDestinationField = (index: number) => {
@@ -302,16 +306,10 @@ export default function PassengerHome() {
   const saveNewPrice = async () => {
     const minAllowedPrice = Math.floor(calculatedBasePrice * 0.80);
     const savedNewPrice = parseInt(tempPrice) || 0;
-    
-    if (savedNewPrice < minAllowedPrice) { 
-      Alert.alert('تنبيه 🛑', `لا يمكن أن يقل السعر عن ${minAllowedPrice} جنيه.`); 
-      return; 
-    }
-    
+    if (savedNewPrice < minAllowedPrice) { Alert.alert('تنبيه 🛑', `لا يمكن أن يقل السعر عن ${minAllowedPrice} جنيه.`); return; }
     setPrice(tempPrice);
     setBasePriceForSuggestions(savedNewPrice);
     setIsEditModalVisible(false);
-    
     try {
       const savedRide = await AsyncStorage.getItem('active_ride');
       if (savedRide) {
@@ -327,13 +325,26 @@ export default function PassengerHome() {
     if (!pickup || validDests.length === 0 || !price) { Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً.'); return; }
     
     setRideStatus('searching'); setOffers([]); 
+    
+    // محاولة تحويل اسم المكان لإحداثيات لو الراكب كتبه بإيده ومداش على زرار GPS
+    let finalPickupCoords = pickupCoords;
+    if (!finalPickupCoords) {
+      try {
+        const geocoded = await Location.geocodeAsync(pickup);
+        if (geocoded.length > 0) {
+          finalPickupCoords = { latitude: geocoded[0].latitude, longitude: geocoded[0].longitude };
+        }
+      } catch (error) { console.log("Geocode error", error); }
+    }
+
     try {
       const rideData = {
-        passengerId: await AsyncStorage.getItem('currentPassengerId'), 
+        passengerId: passengerProfile.id || await AsyncStorage.getItem('currentPassengerId'), 
         name: passengerProfile.name, 
         phone: passengerProfile.phone, 
         avatar: getValidAvatar(passengerProfile.avatar),
         pickupLocation: pickup, 
+        pickupCoords: finalPickupCoords, // إرسال الإحداثيات النهائية
         destinationsList: validDests, 
         destinationLocation: validDests.join(' ➡️ '), 
         passengers: passengerCount, 
@@ -367,15 +378,38 @@ export default function PassengerHome() {
 
   const notifyPassengerOnTheWay = async () => {
     if (!currentRideId) return;
-    try {
-      await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' });
-    } catch (error) { console.log(error); }
+    try { await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); } catch (error) { console.log(error); }
   };
 
   const handleCancelRide = async () => {
     try { if (currentRideId) await updateDoc(doc(db, 'rides', currentRideId), { status: 'canceled' }); } catch (e) {}
-    await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setPickup(''); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); 
+    await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); 
     setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setNotes(''); setLatestMessage('');
+  };
+
+  const submitRating = async () => {
+    if (rating === 0) { Alert.alert('تنبيه', 'برجاء اختيار عدد النجوم أولاً.'); return; }
+    if (rating < 5 && ratingReason.trim() === '') { Alert.alert('تنبيه', 'برجاء كتابة سبب التقييم لكي نتمكن من مساعدتك وتطوير الخدمة.'); return; }
+
+    try {
+      await addDoc(collection(db, 'ratings'), {
+        rideId: rideToRate?.id || 'unknown',
+        passengerId: passengerProfile.id || 'unknown',
+        passengerName: passengerProfile.name,
+        captainId: rideToRate?.captainId || 'unknown',
+        captainName: rideToRate?.captainName || 'كابتن',
+        rating: rating,
+        reason: rating === 5 ? 'ممتاز' : ratingReason.trim(),
+        timestamp: new Date().getTime(),
+        type: 'passenger_rating_captain'
+      });
+
+      setRatingSubmitted(true);
+      setTimeout(() => {
+        setIsRatingModalVisible(false); setRating(0); setRatingReason(''); setRatingSubmitted(false); setRideToRate(null);
+      }, 2500);
+
+    } catch (error) { console.log(error); Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال التقييم.'); }
   };
 
   const handleCallClick = () => {
@@ -391,10 +425,13 @@ export default function PassengerHome() {
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {toastVisible && (
+        <Animated.View style={[styles.toastContainer, { opacity: toastOpacity, transform: [{ translateY: toastTranslateY }] }]}>
+          <Text style={styles.toastText}>💬 رسالة جديدة من الكابتن</Text>
+        </Animated.View>
+      )}
+
       <View style={styles.header}>
         <TouchableOpacity style={styles.userInfo} onPress={() => router.push('/passenger-profile')}>
           <Image source={{ uri: passengerProfile.avatar }} style={styles.profileAvatar} />
@@ -404,12 +441,7 @@ export default function PassengerHome() {
       </View>
 
       {rideStatus === 'idle' && (
-        <ScrollView 
-          style={styles.card} 
-          contentContainerStyle={{ paddingBottom: 60 }} 
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={styles.cardTitle}>اطلب مشوارك الآن:</Text>
           <Text style={styles.label}>📍 موقع الانطلاق الحالي</Text>
           <View style={styles.rowInputContainer}>
@@ -422,25 +454,15 @@ export default function PassengerHome() {
           <Text style={styles.label}>🏁 الوجهات المطلوبة</Text>
           {destinations.map((dest, index) => (
             <View key={index} style={styles.destRow}>
-              <TextInput 
-                style={styles.inputDest} 
-                placeholder={`الوجهة رقم ${index + 1}`} 
-                placeholderTextColor="#94a3b8" 
-                value={dest} 
-                onChangeText={(text) => handleDestinationChange(text, index)} 
-              />
+              <TextInput style={styles.inputDest} placeholder={`الوجهة رقم ${index + 1}`} placeholderTextColor="#94a3b8" value={dest} onChangeText={(text) => handleDestinationChange(text, index)} />
               {index > 0 && (
-                <TouchableOpacity style={styles.removeDestBtn} onPress={() => removeDestinationField(index)}>
-                  <Text style={styles.removeDestBtnText}>❌</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={styles.removeDestBtn} onPress={() => removeDestinationField(index)}><Text style={styles.removeDestBtnText}>❌</Text></TouchableOpacity>
               )}
             </View>
           ))}
 
           {destinations.length < 3 && (
-            <TouchableOpacity style={styles.addDestBtn} onPress={addDestinationField}>
-              <Text style={styles.addDestBtnText}>➕ إضافة وجهة أخرى</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.addDestBtn} onPress={addDestinationField}><Text style={styles.addDestBtnText}>➕ إضافة وجهة أخرى</Text></TouchableOpacity>
           )}
           
           <Text style={styles.label}>👥 عدد الركاب</Text>
@@ -453,14 +475,7 @@ export default function PassengerHome() {
           </View>
 
           <Text style={styles.label}>📝 ملاحظات للكابتن (اختياري)</Text>
-          <TextInput 
-            style={styles.notesInput} 
-            placeholder="مثال: ممنوع التدخين، معايا أغراض..." 
-            placeholderTextColor="#94a3b8" 
-            value={notes} 
-            onChangeText={setNotes} 
-            multiline={true}
-          />
+          <TextInput style={styles.notesInput} placeholder="مثال: ممنوع التدخين، معايا أغراض..." placeholderTextColor="#94a3b8" value={notes} onChangeText={setNotes} multiline={true} />
           
           <Text style={styles.label}>💰 أجرة الرحلة المقترحة</Text>
           <View style={[styles.priceDisplayContainer, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
@@ -476,17 +491,9 @@ export default function PassengerHome() {
                 const percentage = Math.round((multiplier - 1) * 100);
                 
                 return (
-                  <TouchableOpacity 
-                    key={index} 
-                    style={[styles.suggestionBtn, isSelected && styles.suggestionBtnActive]} 
-                    onPress={() => setPrice(suggestedPrice.toString())}
-                  >
-                    <Text style={[styles.suggestionText, isSelected && styles.suggestionTextActive]}>
-                      {suggestedPrice} ج
-                    </Text>
-                    <Text style={[styles.suggestionSubText, isSelected && styles.suggestionSubTextActive]}>
-                      +{percentage}%
-                    </Text>
+                  <TouchableOpacity key={index} style={[styles.suggestionBtn, isSelected && styles.suggestionBtnActive]} onPress={() => setPrice(suggestedPrice.toString())}>
+                    <Text style={[styles.suggestionText, isSelected && styles.suggestionTextActive]}>{suggestedPrice} ج</Text>
+                    <Text style={[styles.suggestionSubText, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -519,11 +526,24 @@ export default function PassengerHome() {
         </View>
       )}
 
-      {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way') && (
-        <View style={styles.cardActive}>
-          <Text style={styles.statusAlertTitle}>
-            {rideStatus === 'accepted' ? '🛺 الكابتن في طريقه إليك...' : '✅ أنت الآن في طريقك للكابتن (أنا نازل)'}
-          </Text>
+      {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'arrived' || rideStatus === 'in_progress') && (
+        <Animated.View style={[
+          styles.cardActive, 
+          rideStatus === 'arrived' && styles.cardArrivalPulse,
+          rideStatus === 'arrived' && { backgroundColor: backgroundColorInterpolate }
+        ]}>
+          {rideStatus === 'arrived' ? (
+            <>
+              <Text style={styles.superArrivalTitle}>🚨 الكابتن وصل! 🚨</Text>
+              <Text style={styles.statusArrivalAlert}>لقد وصل الكابتن إلى نقطة الإقلال وهو في انتظارك الآن.</Text>
+            </>
+          ) : (
+            <Text style={styles.statusAlertTitle}>
+              {rideStatus === 'accepted' ? '🛺 الكابتن في طريقه إليك...' 
+               : rideStatus === 'passenger_on_the_way' ? '✅ أنت الآن في طريقك للكابتن'
+               : '🛺 الرحلة جارية الآن'}
+            </Text>
+          )}
 
           {toastVisible && latestMessage ? (
             <Animated.View style={[styles.inlineToast, { opacity: toastOpacity, transform: [{ translateY: toastTranslateY }] }]}>
@@ -545,99 +565,67 @@ export default function PassengerHome() {
             ))}
             <Text style={styles.priceTag}>💰 السعر النهائي: {price} جنيه</Text>
           </ScrollView>
-          <TouchableOpacity style={styles.callCaptainBtn} onPress={handleCallClick}><Text style={styles.callCaptainBtnText}>📞 اتصال بالكابتن</Text></TouchableOpacity>
-          <AnimatedTouchableOpacity 
-            style={[styles.chatButton, { backgroundColor: unreadChatCount > 0 ? chatBackgroundColor : '#8b5cf6' }]} 
-            onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}
-          >
-            <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
-            {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
-          </AnimatedTouchableOpacity>
-          <TouchableOpacity style={styles.cancelOrderBtn} onPress={handleCancelRide}><Text style={styles.cancelOrderBtnText}>❌ إلغاء الرحلة</Text></TouchableOpacity>
-        </View>
-      )}
-
-      {rideStatus === 'arrived' && (
-        <Animated.View style={[styles.cardArrivalPulse, { backgroundColor: backgroundColorInterpolate }]}>
-          <Text style={styles.superArrivalTitle}>🚨 الكابتن وصل! 🚨</Text>
-          <Text style={styles.statusArrivalAlert}>لقد وصل الكابتن إلى نقطة الإقلال وهو في انتظارك الآن.</Text>
           
-          {toastVisible && latestMessage ? (
-            <Animated.View style={[styles.inlineToast, { opacity: toastOpacity, transform: [{ translateY: toastTranslateY }] }]}>
-              <Text style={styles.inlineToastText} numberOfLines={2}>💬 {latestMessage}</Text>
-            </Animated.View>
-          ) : null}
+          {(rideStatus === 'accepted' || rideStatus === 'arrived') && (
+            <TouchableOpacity style={styles.onTheWayBtn} onPress={notifyPassengerOnTheWay}>
+              <Text style={styles.onTheWayBtnText}>🏃 أنا نازل (في طريقي إليك)</Text>
+            </TouchableOpacity>
+          )}
 
-          <View style={styles.captainCard}>
-            <Image source={{ uri: getValidAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
-            <View style={styles.captainDetails}>
-              <Text style={styles.captainText}>👨‍✈️ الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText}>🛺 المركبة: {captainInfo.vehicle}</Text>
-            </View>
+          <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 10 }}>
+            <TouchableOpacity style={[styles.callCaptainBtn, { flex: 1, marginLeft: 5 }]} onPress={handleCallClick}>
+              <Text style={styles.callCaptainBtnText}>📞 اتصال بالكابتن</Text>
+            </TouchableOpacity>
+            <AnimatedTouchableOpacity style={[styles.chatButton, { flex: 1, marginRight: 5, backgroundColor: unreadChatCount > 0 ? chatBackgroundColor : '#8b5cf6' }]} onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}>
+              <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
+              {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
+            </AnimatedTouchableOpacity>
           </View>
-          <ScrollView style={styles.tripRouteContainer} showsVerticalScrollIndicator={false}>
-            <Text style={styles.routeText}>📍 الانطلاق: {pickup}</Text>
-            {destinations.map((d, i) => (
-              <Text key={i} style={styles.routeText}>🏁 وجهة {i+1}: {d}</Text>
-            ))}
-            <Text style={styles.priceTag}>💰 السعر النهائي: {price} جنيه</Text>
-          </ScrollView>
           
-          <TouchableOpacity style={styles.onTheWayBtn} onPress={notifyPassengerOnTheWay}>
-            <Text style={styles.onTheWayBtnText}>🏃 أنا نازل (في طريقي إليك)</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.callCaptainBtn} onPress={handleCallClick}><Text style={styles.callCaptainBtnText}>📞 اتصال سريع بالكابتن</Text></TouchableOpacity>
-          <AnimatedTouchableOpacity 
-            style={[styles.chatButton, { backgroundColor: unreadChatCount > 0 ? chatBackgroundColor : '#8b5cf6' }]} 
-            onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}
-          >
-            <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
-            {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
-          </AnimatedTouchableOpacity>
-          <TouchableOpacity style={styles.cancelOrderBtn} onPress={handleCancelRide}><Text style={styles.cancelOrderBtnText}>❌ إلغاء الرحلة</Text></TouchableOpacity>
+          {rideStatus !== 'in_progress' && (
+            <TouchableOpacity style={styles.cancelOrderBtn} onPress={handleCancelRide}><Text style={styles.cancelOrderBtnText}>❌ إلغاء الرحلة</Text></TouchableOpacity>
+          )}
         </Animated.View>
       )}
 
-      {rideStatus === 'in_progress' && (
-        <View style={styles.cardInProgress}>
-          <Text style={styles.inProgressTitle}>🛺 الرحلة جارية الآن</Text>
-          <Text style={styles.inProgressSub}>نتمنى لك طريقاً آمناً ومريحاً!</Text>
-          
-          {toastVisible && latestMessage ? (
-            <Animated.View style={[styles.inlineToast, { opacity: toastOpacity, transform: [{ translateY: toastTranslateY }] }]}>
-              <Text style={styles.inlineToastText} numberOfLines={2}>💬 {latestMessage}</Text>
-            </Animated.View>
-          ) : null}
+      {/* --- شاشة التقييم --- */}
+      <Modal visible={isRatingModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.ratingModalContent}>
+            {!ratingSubmitted ? (
+              <>
+                <Text style={styles.modalTitle}>كيف كانت الرحلة؟ 🛺</Text>
+                <Text style={styles.modalSubtitle}>تقييمك للكابتن يساعدنا في تحسين الخدمة</Text>
 
-          <View style={styles.captainCard}>
-            <Image source={{ uri: getValidAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
-            <View style={styles.captainDetails}>
-              <Text style={styles.captainText}>👨‍✈️ الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText}>🛺 المركبة: {captainInfo.vehicle}</Text>
-            </View>
+                <View style={styles.starsRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity key={star} onPress={() => setRating(star)}>
+                      <Text style={[styles.starText, { color: star <= rating ? '#f59e0b' : '#cbd5e1' }]}>★</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {rating === 5 && <Text style={styles.thankYouFiveStars}>شكراً لك! 🤩</Text>}
+
+                {rating > 0 && rating < 5 && (
+                  <TextInput style={styles.reasonInput} placeholder="ما هو سبب تقييمك؟ (إلزامي)" placeholderTextColor="#94a3b8" value={ratingReason} onChangeText={setRatingReason} multiline={true} />
+                )}
+
+                {rating > 0 && (
+                  <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}>
+                    <Text style={styles.submitRatingBtnText}>إرسال التقييم</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : (
+              <View style={styles.successRatingContainer}>
+                <Text style={styles.successRatingIcon}>✅</Text>
+                <Text style={styles.successRatingText}>نشكرك على تقييمك لمساعدتنا في تطوير الخدمة</Text>
+              </View>
+            )}
           </View>
-
-          <ScrollView style={styles.tripRouteContainer} showsVerticalScrollIndicator={false}>
-            <Text style={styles.routeText}>📍 الانطلاق: {pickup}</Text>
-            {destinations.map((d, i) => (
-              <Text key={i} style={styles.routeText}>🏁 وجهة {i+1}: {d}</Text>
-            ))}
-            <Text style={styles.priceTag}>💰 السعر النهائي: {price} جنيه</Text>
-          </ScrollView>
-          
-          <TouchableOpacity style={styles.callCaptainBtn} onPress={handleCallClick}>
-            <Text style={styles.callCaptainBtnText}>📞 اتصال بالكابتن</Text>
-          </TouchableOpacity>
-          <AnimatedTouchableOpacity 
-            style={[styles.chatButton, { backgroundColor: unreadChatCount > 0 ? chatBackgroundColor : '#8b5cf6' }]} 
-            onPress={() => router.push({ pathname: '/chat', params: { senderType: 'passenger' } })}
-          >
-            <Text style={styles.chatButtonText}>💬 مراسلة الكابتن</Text>
-            {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
-          </AnimatedTouchableOpacity>
         </View>
-      )}
+      </Modal>
       
       <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
@@ -657,8 +645,15 @@ export default function PassengerHome() {
         <View style={styles.modalOverlay}>
           <View style={styles.callModalContent}>
             <Text style={styles.modalTitle}>📞 اختر طريقة الاتصال</Text>
-            <TouchableOpacity style={styles.regularCallBtn} onPress={makeRegularCall}><Text style={styles.regularCallBtnText}>📱 مكالمة عادية</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}><Text style={styles.cancelCallBtnText}>إلغاء</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.regularCallBtn} onPress={makeRegularCall}>
+              <Text style={styles.regularCallBtnText}>📱 مكالمة عادية (شبكة المحمول)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
+              <Text style={styles.freeCallBtnText}>🌐 مكالمة مجانية (داخل التطبيق)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}>
+              <Text style={styles.cancelCallBtnText}>إلغاء</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -676,6 +671,8 @@ const styles = StyleSheet.create({
   logoutButton: { backgroundColor: '#fee2e2', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
   logoutText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
   
+  toastContainer: { position: 'absolute', alignSelf: 'center', backgroundColor: '#1e293b', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 30, zIndex: 9999, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5 },
+  toastText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
   inlineToast: { backgroundColor: '#1e293b', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 12, marginBottom: 10, width: '100%', flexDirection: 'row-reverse', alignItems: 'center', elevation: 3 },
   inlineToastText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', textAlign: 'right', flex: 1 },
 
@@ -732,23 +729,36 @@ const styles = StyleSheet.create({
   offerPrice: { fontSize: 16, fontWeight: 'bold', color: '#10b981', textAlign: 'right', marginTop: 4 },
   acceptOfferBtn: { backgroundColor: '#10b981', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
   acceptOfferBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 20, borderRadius: 20, elevation: 5 },
   callModalContent: { backgroundColor: '#ffffff', width: '85%', padding: 20, borderRadius: 20, elevation: 5, alignItems: 'center' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#64748b', marginBottom: 15, textAlign: 'right' },
+  
+  ratingModalContent: { backgroundColor: '#ffffff', width: '95%', padding: 25, borderRadius: 24, elevation: 5, alignItems: 'center' },
+  starsRow: { flexDirection: 'row-reverse', justifyContent: 'center', marginVertical: 15, gap: 10 },
+  starText: { fontSize: 45 },
+  thankYouFiveStars: { fontSize: 16, fontWeight: 'bold', color: '#10b981', textAlign: 'center', marginBottom: 15 },
+  reasonInput: { width: '100%', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 14, marginBottom: 15, color: '#0f172a', textAlign: 'right', minHeight: 80 },
+  submitRatingBtn: { backgroundColor: '#2563eb', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 5 },
+  submitRatingBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  successRatingContainer: { alignItems: 'center', paddingVertical: 20 },
+  successRatingIcon: { fontSize: 50, marginBottom: 15 },
+  successRatingText: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', lineHeight: 28 },
+
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 10, textAlign: 'center' },
+  modalSubtitle: { fontSize: 13, color: '#64748b', marginBottom: 15, textAlign: 'center' },
   modalInput: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 16, fontWeight: 'bold', color: '#0f172a', textAlign: 'center', marginBottom: 20 },
   modalButtonsRow: { flexDirection: 'row-reverse', gap: 10 },
-  modalSaveBtn: { flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  modalSaveBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
+  modalSaveBtn: { flex: 2, backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  modalSaveBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
   modalCancelBtn: { flex: 1, backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  modalCancelBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16 },
+  modalCancelBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 15 },
   regularCallBtn: { backgroundColor: '#f1f5f9', width: '100%', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: '#cbd5e1' },
   regularCallBtnText: { color: '#1e293b', fontWeight: 'bold', fontSize: 16 },
   freeCallBtn: { backgroundColor: '#10b981', width: '100%', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15 },
   freeCallBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
-  cancelCallBtn: { paddingVertical: 10 },
-  cancelCallBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16 },
+  cancelCallBtn: { paddingVertical: 10, marginTop: 10 },
+  cancelCallBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },
   searchButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
   captainCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef3c7', padding: 12, borderRadius: 14, marginBottom: 15 },
@@ -761,14 +771,12 @@ const styles = StyleSheet.create({
   priceTag: { fontSize: 16, color: '#10b981', fontWeight: 'bold', marginTop: 4, textAlign: 'right' },
   onTheWayBtn: { backgroundColor: '#f59e0b', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10, elevation: 3 },
   onTheWayBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-  callCaptainBtn: { backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10, elevation: 3 },
+  callCaptainBtn: { backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 3 },
   callCaptainBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-  chatButton: { position: 'relative', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10, elevation: 3 },
+  chatButton: { position: 'relative', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 3 },
   chatButtonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
   badgeContainer: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', zIndex: 10, borderWidth: 2, borderColor: '#ffffff' },
   badgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
   cancelOrderBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 1 },
   cancelOrderBtnText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
-  cancelBtnOnly: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  cancelBtnOnlyText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
 });

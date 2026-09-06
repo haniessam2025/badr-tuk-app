@@ -7,7 +7,7 @@ import { db } from '../firebaseConfig';
 
 export default function CaptainLogin() {
   const router = useRouter();
-  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -26,18 +26,18 @@ export default function CaptainLogin() {
   }, []);
 
   const handleLogin = async () => {
-    if (!phone.trim() || !password.trim()) {
-      Alert.alert('تنبيه', 'برجاء إدخال رقم الهاتف وكلمة المرور.');
+    if (!name.trim() || !password.trim()) {
+      Alert.alert('تنبيه', 'برجاء إدخال الاسم وكلمة المرور.');
       return;
     }
 
     setLoading(true);
 
     try {
-      // البحث عن الكابتن في قاعدة البيانات
+      // البحث عن الكابتن في قاعدة البيانات باستخدام الاسم
       const q = query(
         collection(db, 'captains'), 
-        where('phone', '==', phone.trim()), 
+        where('name', '==', name.trim()), 
         where('password', '==', password.trim())
       );
       
@@ -47,12 +47,20 @@ export default function CaptainLogin() {
         const captainDoc = querySnapshot.docs[0];
         const data = captainDoc.data();
 
+        // التأكد إن الإدارة لم تقم بحظر الحساب
+        if (data.status === 'banned') {
+          setLoading(false);
+          Alert.alert('عفواً', 'تم إيقاف حسابك من قبل الإدارة. برجاء التواصل مع الدعم الفني.');
+          return;
+        }
+
         const profileData = {
           id: captainDoc.id,
-          name: data.name || 'كابتن',
-          phone: data.phone || phone.trim(),
+          name: data.name || name.trim(),
+          phone: data.phone || '',
           vehicle: data.tukTukNumber || data.vehicle || 'توكتوك',
-          avatar: data.profileImage || data.avatar || data.image || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'
+          avatar: data.profileImage || data.avatar || data.image || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+          walletBalance: data.walletBalance || 0 
         };
 
         // حفظ البيانات في الذاكرة لتفعيل الدخول التلقائي في المرات القادمة
@@ -61,7 +69,7 @@ export default function CaptainLogin() {
 
         router.replace('/captain-home');
       } else {
-        Alert.alert('خطأ', 'رقم الهاتف أو كلمة المرور غير صحيحة.');
+        Alert.alert('خطأ', 'الاسم أو كلمة المرور غير صحيحة.');
       }
     } catch (error) {
       console.log(error);
@@ -74,7 +82,7 @@ export default function CaptainLogin() {
   if (checkingAuth) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2563eb" />
+        <ActivityIndicator size="large" color="#eab308" />
       </View>
     );
   }
@@ -85,18 +93,17 @@ export default function CaptainLogin() {
       style={styles.container}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>تسجيل دخول الكابتن 👨‍✈️</Text>
+        <Text style={styles.title}>تسجيل دخول الكابتن 🛺</Text>
         <Text style={styles.subtitle}>أدخل بيانات حسابك لاستقبال الطلبات</Text>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>رقم الهاتف</Text>
+          <Text style={styles.label}>الاسم</Text>
           <TextInput
             style={styles.input}
-            placeholder="مثال: 01000000000"
+            placeholder="أدخل اسمك المسجل"
             placeholderTextColor="#94a3b8"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
+            value={name}
+            onChangeText={setName}
             textAlign="right"
           />
         </View>
@@ -120,11 +127,17 @@ export default function CaptainLogin() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#ffffff" />
+            <ActivityIndicator color="#000000" />
           ) : (
             <Text style={styles.loginButtonText}>تسجيل الدخول</Text>
           )}
         </TouchableOpacity>
+
+        {/* لينك للذهاب لشاشة إنشاء حساب جديد */}
+        <TouchableOpacity style={styles.registerRedirect} onPress={() => router.push('/captain-register')}>
+          <Text style={styles.registerRedirectText}>ليس لديك حساب؟ <Text style={styles.registerLink}>سجل ككابتن جديد</Text></Text>
+        </TouchableOpacity>
+
       </View>
     </KeyboardAvoidingView>
   );
@@ -139,6 +152,9 @@ const styles = StyleSheet.create({
   inputContainer: { marginBottom: 20 },
   label: { fontSize: 16, fontWeight: 'bold', color: '#334155', marginBottom: 8, textAlign: 'right' },
   input: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 15, fontSize: 16, color: '#0f172a' },
-  loginButton: { backgroundColor: '#2563eb', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 2 },
-  loginButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
+  loginButton: { backgroundColor: '#eab308', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 2 },
+  loginButtonText: { color: '#000000', fontSize: 18, fontWeight: 'bold' },
+  registerRedirect: { marginTop: 20, alignItems: 'center', paddingVertical: 10 },
+  registerRedirectText: { fontSize: 15, color: '#64748b' },
+  registerLink: { color: '#2563eb', fontWeight: 'bold' },
 });
