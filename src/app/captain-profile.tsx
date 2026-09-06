@@ -1,57 +1,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
 
 export default function CaptainProfile() {
   const router = useRouter();
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [newAvatarUrl, setNewAvatarUrl] = useState('');
-
-  const [profile, setProfile] = useState({
-    id: '',
-    name: '',
-    phone: '',
-    vehicle: '',
-    avatar: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
-  });
 
   useEffect(() => {
-    loadProfile();
+    fetchProfile();
   }, []);
 
-  const loadProfile = async () => {
+  const fetchProfile = async () => {
     try {
       const captainId = await AsyncStorage.getItem('currentCaptainId');
-      if (!captainId) {
-        router.replace('/captain-login');
-        return;
-      }
+      if (!captainId) return;
 
-      // تحميل مبدئي من الذاكرة
-      const savedProfile = await AsyncStorage.getItem('captain_profile');
-      if (savedProfile) {
-        setProfile(JSON.parse(savedProfile));
-      }
-
-      // تحديث من فايربيس
       const docRef = doc(db, 'captains', captainId);
       const docSnap = await getDoc(docRef);
+
       if (docSnap.exists()) {
-        const data = docSnap.data();
-        const updatedProfile = {
-          id: captainId,
-          name: data.name || profile.name,
-          phone: data.phone || profile.phone,
-          vehicle: data.tukTukNumber || data.vehicle || profile.vehicle,
-          avatar: data.profileImage || data.avatar || profile.avatar,
-        };
-        setProfile(updatedProfile);
-        await AsyncStorage.setItem('captain_profile', JSON.stringify(updatedProfile));
+        setProfile(docSnap.data());
       }
     } catch (error) {
       console.log(error);
@@ -60,135 +32,115 @@ export default function CaptainProfile() {
     }
   };
 
-  const handleUpdateAvatar = async () => {
-    if (!newAvatarUrl.trim()) {
-      Alert.alert('تنبيه', 'برجاء إدخال رابط الصورة.');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const docRef = doc(db, 'captains', profile.id);
-      await updateDoc(docRef, { profileImage: newAvatarUrl.trim(), avatar: newAvatarUrl.trim() });
-
-      const updatedProfile = { ...profile, avatar: newAvatarUrl.trim() };
-      setProfile(updatedProfile);
-      await AsyncStorage.setItem('captain_profile', JSON.stringify(updatedProfile));
-
-      setIsModalVisible(false);
-      setNewAvatarUrl('');
-      Alert.alert('نجاح', 'تم تحديث الصورة الشخصية بنجاح.');
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تحديث الصورة.');
-    } finally {
-      setSaving(false);
-    }
+  const getSafeAvatar = (imgStr: any) => {
+    if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+    return imgStr;
   };
 
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2563eb" />
-      </View>
-    );
+    return <View style={styles.centerContainer}><ActivityIndicator size="large" color="#2563eb" /></View>;
   }
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>⬅ رجوع</Text>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Text style={styles.backBtnText}>رجوع ⬅️</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ملف الكابتن</Text>
+        <Text style={styles.headerTitle}>الملف الشخصي 👤</Text>
       </View>
 
-      <View style={styles.avatarContainer}>
-        <Image source={{ uri: profile.avatar }} style={styles.avatar} />
-        <TouchableOpacity style={styles.editAvatarBtn} onPress={() => setIsModalVisible(true)}>
-          <Text style={styles.editAvatarText}>📷 تغيير الصورة</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.formContainer}>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>الاسم (غير قابل للتعديل)</Text>
-          <TextInput
-            style={styles.disabledInput}
-            value={profile.name}
-            editable={false}
-            selectTextOnFocus={false}
-          />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        
+        {/* بيانات الكابتن الأساسية */}
+        <View style={styles.profileHeader}>
+          <Image source={{ uri: getSafeAvatar(profile?.avatar || profile?.profileImage) }} style={styles.avatar} />
+          <Text style={styles.nameText}>{profile?.name || 'كابتن'}</Text>
+          <Text style={styles.phoneText}>{profile?.phone}</Text>
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>رقم الهاتف (غير قابل للتعديل)</Text>
-          <TextInput
-            style={styles.disabledInput}
-            value={profile.phone}
-            editable={false}
-            selectTextOnFocus={false}
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>المركبة (غير قابل للتعديل)</Text>
-          <TextInput
-            style={styles.disabledInput}
-            value={profile.vehicle}
-            editable={false}
-            selectTextOnFocus={false}
-          />
-        </View>
-      </View>
-
-      <Modal visible={isModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>تحديث الصورة الشخصية</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="ضع رابط الصورة الجديدة هنا"
-              value={newAvatarUrl}
-              onChangeText={setNewAvatarUrl}
-              textAlign="right"
-            />
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={handleUpdateAvatar} disabled={saving}>
-                {saving ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.modalSaveBtnText}>حفظ الصورة</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsModalVisible(false)} disabled={saving}>
-                <Text style={styles.modalCancelBtnText}>إلغاء</Text>
-              </TouchableOpacity>
-            </View>
+        <View style={styles.infoCard}>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoValue}>{profile?.tukTukNumber || profile?.vehicle || 'توكتوك'}</Text>
+            <Text style={styles.infoLabel}>مركبتك:</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.infoRow}>
+            <Text style={styles.infoValue}>{profile?.walletBalance?.toFixed(2) || '0.00'} ج</Text>
+            <Text style={styles.infoLabel}>رصيد المحفظة:</Text>
           </View>
         </View>
-      </Modal>
+
+        {/* قسم المستندات المرفوعة */}
+        <Text style={styles.sectionTitle}>المستندات الرسمية 📄</Text>
+        
+        <View style={styles.docsContainer}>
+          {/* الوجه */}
+          <View style={styles.docItem}>
+            <Text style={styles.docTitle}>البطاقة (وجه)</Text>
+            {profile?.idFront ? (
+              <Image source={{ uri: profile.idFront }} style={styles.docThumbnail} />
+            ) : (
+              <TouchableOpacity onPress={() => router.push('/captain-docs')}>
+                <Text style={styles.uploadNowBtn}>اضغط للرفع 📷</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* الظهر */}
+          <View style={styles.docItem}>
+            <Text style={styles.docTitle}>البطاقة (ظهر)</Text>
+            {profile?.idBack ? (
+              <Image source={{ uri: profile.idBack }} style={styles.docThumbnail} />
+            ) : (
+              <TouchableOpacity onPress={() => router.push('/captain-docs')}>
+                <Text style={styles.uploadNowBtn}>اضغط للرفع 📷</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* المركبة */}
+          <View style={styles.docItem}>
+            <Text style={styles.docTitle}>التوكتوك</Text>
+            {profile?.vehicleImage ? (
+              <Image source={{ uri: profile.vehicleImage }} style={styles.docThumbnail} />
+            ) : (
+              <TouchableOpacity onPress={() => router.push('/captain-docs')}>
+                <Text style={styles.uploadNowBtn}>اضغط للرفع 📷</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', padding: 15, paddingTop: 45, elevation: 2 },
-  backBtn: { padding: 8, backgroundColor: '#f1f5f9', borderRadius: 8 },
-  backBtnText: { fontWeight: 'bold', color: '#334155' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', flex: 1, textAlign: 'center', marginRight: 40 },
-  avatarContainer: { alignItems: 'center', marginTop: 30, marginBottom: 20 },
-  avatar: { width: 120, height: 120, borderRadius: 60, backgroundColor: '#cbd5e1', borderWidth: 3, borderColor: '#2563eb' },
-  editAvatarBtn: { marginTop: 10, backgroundColor: '#eff6ff', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, borderColor: '#2563eb' },
-  editAvatarText: { color: '#2563eb', fontWeight: 'bold', fontSize: 14 },
-  formContainer: { padding: 20 },
-  inputGroup: { marginBottom: 20 },
-  label: { fontSize: 14, fontWeight: 'bold', color: '#64748b', marginBottom: 8, textAlign: 'right' },
-  disabledInput: { backgroundColor: '#e2e8f0', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 15, fontSize: 16, color: '#475569', textAlign: 'right' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 20, borderRadius: 20 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'center' },
-  modalInput: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 14, marginBottom: 20 },
-  modalButtonsRow: { flexDirection: 'row-reverse', gap: 10 },
-  modalSaveBtn: { flex: 1, backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  modalSaveBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
-  modalCancelBtn: { flex: 1, backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  modalCancelBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16 },
+  container: { flex: 1, backgroundColor: '#f1f5f9', padding: 15, paddingTop: 45 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1e293b' },
+  backBtn: { backgroundColor: '#e2e8f0', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  backBtnText: { color: '#334155', fontWeight: 'bold' },
+  
+  profileHeader: { alignItems: 'center', marginBottom: 25, backgroundColor: '#ffffff', padding: 25, borderRadius: 20, elevation: 2 },
+  avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: '#2563eb', marginBottom: 15 },
+  nameText: { fontSize: 22, fontWeight: 'bold', color: '#1e293b', marginBottom: 5 },
+  phoneText: { fontSize: 16, color: '#64748b', fontWeight: 'bold' },
+
+  infoCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 20, marginBottom: 25, elevation: 2 },
+  infoRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
+  divider: { height: 1, backgroundColor: '#e2e8f0' },
+  infoLabel: { fontSize: 16, color: '#64748b', fontWeight: 'bold' },
+  infoValue: { fontSize: 16, color: '#1e293b', fontWeight: 'bold' },
+
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'right', marginBottom: 15 },
+  docsContainer: { flexDirection: 'row-reverse', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: 15, borderRadius: 16, elevation: 2, marginBottom: 15 },
+  docItem: { flex: 1, alignItems: 'center' },
+  docTitle: { fontSize: 13, fontWeight: 'bold', color: '#475569', marginBottom: 10 },
+  docThumbnail: { width: 90, height: 60, borderRadius: 8, resizeMode: 'cover', borderWidth: 1, borderColor: '#cbd5e1' },
+  
+  uploadNowBtn: { color: '#ffffff', fontSize: 12, fontWeight: 'bold', backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginTop: 5, textAlign: 'center' }
 });
