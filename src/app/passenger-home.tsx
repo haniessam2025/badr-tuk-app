@@ -17,11 +17,10 @@ export default function PassengerHome() {
   const [pickupCoords, setPickupCoords] = useState<{latitude: number, longitude: number} | null>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
   
-  // --- حالة نوع المركبة المطلوبة ---
-  const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt'>('tuktuk_alt');
+  // إضافة نوع السكوتر
+  const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
   
   const [price, setPrice] = useState('');
-  const [passengerCount, setPassengerCount] = useState('1'); 
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
   const [notes, setNotes] = useState('');
@@ -31,6 +30,8 @@ export default function PassengerHome() {
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
   const [offers, setOffers] = useState<any[]>([]);
+  
+  const [numericSecret, setNumericSecret] = useState('');
 
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState(''); 
@@ -126,13 +127,14 @@ export default function PassengerHome() {
         setCurrentRideId(activeRide.id); 
         setPickup(activeRide.pickupLocation || ''); 
         if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
+        if (activeRide.numericSecret) setNumericSecret(activeRide.numericSecret);
         if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
           setDestinations(activeRide.destinationsList);
         } else {
           setDestinations([activeRide.destinationLocation || '']);
         }
         
-        setPassengerCount(activeRide.passengers || '1'); setPrice(activeRide.price || ''); setUnreadChatCount(activeRide.unreadCountPassenger || 0);
+        setPrice(activeRide.price || ''); setUnreadChatCount(activeRide.unreadCountPassenger || 0);
         
         if (activeRide.status === 'pending') {
           setRideStatus('searching'); setOffers(activeRide.offers || []);
@@ -146,12 +148,12 @@ export default function PassengerHome() {
           );
           setCaptainInfo({
             name: activeRide.captainName || 'كابتن', phone: activeRide.captainPhone || 'غير مسجل',
-            vehicle: activeRide.captainVehicle || 'توكتوك', avatar: getValidAvatar(activeRide.captainAvatar),
+            vehicle: activeRide.captainVehicle || 'مركبة', avatar: getValidAvatar(activeRide.captainAvatar),
           });
         }
         await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
       } else {
-        setRideStatus('idle'); await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null);
+        setRideStatus('idle'); await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setNumericSecret('');
       }
     } catch (error) { console.log(error); }
   };
@@ -164,6 +166,7 @@ export default function PassengerHome() {
         const firebaseData = docSnap.data();
         if (firebaseData.status === 'pending') { setRideStatus('searching'); setOffers(firebaseData.offers || []); }
         setUnreadChatCount(firebaseData.unreadCountPassenger || 0);
+        if (firebaseData.numericSecret) setNumericSecret(firebaseData.numericSecret);
 
         if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(firebaseData.status)) {
           setRideStatus(
@@ -176,16 +179,16 @@ export default function PassengerHome() {
           setPrice(firebaseData.price ? String(firebaseData.price) : '');
           setCaptainInfo({
             name: firebaseData.captainName || 'كابتن', phone: firebaseData.captainPhone || 'غير مسجل',
-            vehicle: firebaseData.captainVehicle || 'توكتوك', avatar: getValidAvatar(firebaseData.captainAvatar),
+            vehicle: firebaseData.captainVehicle || 'مركبة', avatar: getValidAvatar(firebaseData.captainAvatar),
           });
         } else if (firebaseData.status === 'completed') {
           setRideToRate({ ...firebaseData, id: currentRideId });
           setIsRatingModalVisible(true);
           AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle');
-          setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage('');
+          setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage(''); setNumericSecret('');
         } else if (firebaseData.status === 'canceled') {
           AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle');
-          setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage('');
+          setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setOffers([]); setUnreadChatCount(0); setNotes(''); setLatestMessage(''); setNumericSecret('');
         }
       }
     });
@@ -293,12 +296,15 @@ export default function PassengerHome() {
     setIsFetchingLocation(false);
   };
 
-  // --- تحديث حساب السعر بناءً على نوع المركبة ---
   const updatePriceCalculation = (pickupText: string, dests: string[], vType: string = requestedVehicleType) => {
     const validDests = dests.filter(d => d.trim().length > 0);
     if (pickupText.trim().length > 0 && validDests.length > 0) {
-      // السيارة أغلى من بديل التوكتوك
-      let base = vType === 'car' ? 25 + ((validDests.length - 1) * 15) : 15 + ((validDests.length - 1) * 10);
+      let base = 0;
+      // تسعيرة السكوتر أرخص
+      if (vType === 'car') base = 25 + ((validDests.length - 1) * 15);
+      else if (vType === 'scooter') base = 10 + ((validDests.length - 1) * 5);
+      else base = 15 + ((validDests.length - 1) * 10); // tuktuk_alt
+      
       setCalculatedBasePrice(base);
       setBasePriceForSuggestions(base);
       setPrice(base.toString());
@@ -371,8 +377,8 @@ export default function PassengerHome() {
         passengerRating: passengerProfile.averageRating, passengerRatingCount: passengerProfile.ratingCount,
         pickupLocation: pickup, pickupCoords: finalPickupCoords, 
         destinationsList: validDests, destinationLocation: validDests.join(' ➡️ '), 
-        passengers: passengerCount, price: price, notes: notes.trim(), 
-        requestedVehicleType, // إرسال نوع المركبة المختارة
+        price: price, notes: notes.trim(), 
+        requestedVehicleType, 
         offers: [], status: 'pending', timestamp: new Date().getTime(), 
         unreadCountPassenger: 0, unreadCountCaptain: 0
       };
@@ -389,7 +395,7 @@ export default function PassengerHome() {
       const cleanData = {
         status: 'accepted', price: String(offer?.price || price || '0'), captainId: String(offer?.captainId || 'unknown'),
         captainName: String(offer?.captainName || 'كابتن'), captainPhone: String(offer?.captainPhone || 'غير مسجل'),
-        captainVehicle: String(offer?.captainVehicle || 'توكتوك'), captainAvatar: getValidAvatar(offer?.captainAvatar),
+        captainVehicle: String(offer?.captainVehicle || 'مركبة'), captainAvatar: getValidAvatar(offer?.captainAvatar),
       };
       await setDoc(doc(db, 'rides', rideId), cleanData, { merge: true }); setPrice(cleanData.price);
       await AsyncStorage.setItem('active_ride', JSON.stringify({ ...JSON.parse(await AsyncStorage.getItem('active_ride') || '{}'), ...cleanData }));
@@ -403,8 +409,8 @@ export default function PassengerHome() {
 
   const handleCancelRide = async () => {
     try { if (currentRideId) await updateDoc(doc(db, 'rides', currentRideId), { status: 'canceled' }); } catch (e) {}
-    await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setPassengerCount('1'); setOffers([]); setUnreadChatCount(0); 
-    setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setNotes(''); setLatestMessage('');
+    await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setOffers([]); setUnreadChatCount(0); 
+    setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setNotes(''); setLatestMessage(''); setNumericSecret('');
   };
 
   const submitRating = async () => {
@@ -460,14 +466,16 @@ export default function PassengerHome() {
         <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={styles.cardTitle}>اطلب مشوارك الآن:</Text>
 
-          {/* --- أزرار اختيار نوع المركبة --- */}
-          <Text style={styles.label}>🚖 اختر نوع المركبة</Text>
+          <Text style={styles.label}>🪄 اختر نوع بساطك</Text>
           <View style={styles.vehicleTypeTabs}>
             <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
               <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>🚗 سيارة</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('tuktuk_alt'); updatePriceCalculation(pickup, destinations, 'tuktuk_alt'); }}>
               <Text style={[styles.vTypeText, requestedVehicleType === 'tuktuk_alt' && styles.vTypeTextActive]}>🛺 بديل توكتوك</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'scooter' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('scooter'); updatePriceCalculation(pickup, destinations, 'scooter'); }}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'scooter' && styles.vTypeTextActive]}>🛵 سكوتر</Text>
             </TouchableOpacity>
           </View>
 
@@ -492,18 +500,9 @@ export default function PassengerHome() {
           {destinations.length < 3 && (
             <TouchableOpacity style={styles.addDestBtn} onPress={addDestinationField}><Text style={styles.addDestBtnText}>➕ إضافة وجهة أخرى</Text></TouchableOpacity>
           )}
-          
-          <Text style={styles.label}>👥 عدد الركاب</Text>
-          <View style={styles.passengerCountContainer}>
-            {['1', '2', '3', '4'].map(num => (
-              <TouchableOpacity key={num} style={[styles.countBtn, passengerCount === num && styles.countBtnActive]} onPress={() => setPassengerCount(num)}>
-                <Text style={[styles.countBtnText, passengerCount === num && styles.countBtnTextActive]}>{num}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
 
           <Text style={styles.label}>📝 ملاحظات للكابتن (اختياري)</Text>
-          <TextInput style={styles.notesInput} placeholder="مثال: ممنوع التدخين، معايا أغراض..." placeholderTextColor="#94a3b8" value={notes} onChangeText={setNotes} multiline={true} />
+          <TextInput style={styles.notesInput} placeholder="مثال: معايا أغراض خفيفة..." placeholderTextColor="#94a3b8" value={notes} onChangeText={setNotes} multiline={true} />
           
           <Text style={styles.label}>💰 أجرة الرحلة المقترحة</Text>
           <View style={[styles.priceDisplayContainer, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
@@ -527,11 +526,10 @@ export default function PassengerHome() {
             </View>
           )}
 
-          <TouchableOpacity style={styles.searchButton} onPress={handleSearchCaptain}><Text style={styles.searchButtonText}>🛺 إرسال الطلب للكباتن</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.searchButton} onPress={handleSearchCaptain}><Text style={styles.searchButtonText}>🪄 إرسال الطلب لكباتن بساط</Text></TouchableOpacity>
         </ScrollView>
       )}
 
-      {/* باقي الواجهة كما هي (شاشة البحث، شاشة الرحلة الجارية، كاميرا הQR، المودالز) */}
       {rideStatus === 'searching' && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📡 جاري استقبال العروض...</Text>
@@ -547,7 +545,7 @@ export default function PassengerHome() {
                         <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
                       ))}
                     </View>
-                    <Text style={styles.offerVehicle}>🛺 {offer.captainVehicle}</Text>
+                    <Text style={styles.offerVehicle}>🪄 {offer.captainVehicle}</Text>
                     <Text style={styles.offerPrice}>{offer.price} جنيه</Text>
                   </View>
                   <TouchableOpacity style={styles.acceptOfferBtn} onPress={() => acceptCaptainOffer(offer)}><Text style={styles.acceptOfferBtnText}>قبول</Text></TouchableOpacity>
@@ -567,15 +565,15 @@ export default function PassengerHome() {
         ]}>
           {rideStatus === 'arrived' ? (
             <>
-              <Text style={styles.superArrivalTitle}>🚨 الكابتن وصل! 🚨</Text>
+              <Text style={styles.superArrivalTitle}>🚨 بساطك وصل! 🚨</Text>
               <Text style={styles.statusArrivalAlert}>لقد وصل الكابتن إلى نقطة الإقلال وهو في انتظارك الآن.</Text>
             </>
           ) : (
             <Text style={[styles.statusAlertTitle, rideStatus === 'waiting_for_scan' && { color: '#ffffff' }]}>
-              {rideStatus === 'accepted' ? '🛺 الكابتن في طريقه إليك...' 
+              {rideStatus === 'accepted' ? '🪄 الكابتن في طريقه إليك...' 
                 : rideStatus === 'passenger_on_the_way' ? '✅ أنت الآن في طريقك للكابتن'
-                : rideStatus === 'waiting_for_scan' ? '📱 الكابتن في انتظارك لمسح الكود'
-                : '🛺 الرحلة جارية الآن'}
+                : rideStatus === 'waiting_for_scan' ? '📱 بانتظار إدخال أو مسح الكود'
+                : '🪄 الرحلة جارية الآن'}
             </Text>
           )}
 
@@ -589,14 +587,22 @@ export default function PassengerHome() {
             <Image source={{ uri: getValidAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
             <View style={styles.captainDetails}>
               <Text style={styles.captainText}>👨‍✈️ الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText}>🛺 المركبة: {captainInfo.vehicle}</Text>
+              <Text style={styles.captainText}>🪄 المركبة: {captainInfo.vehicle}</Text>
             </View>
           </View>
 
           {rideStatus === 'waiting_for_scan' && (
-            <TouchableOpacity style={styles.scanBtn} onPress={openScanner}>
-              <Text style={styles.scanBtnText}>📷 امسح كود الكابتن لبدء الرحلة</Text>
-            </TouchableOpacity>
+            <View style={styles.authContainer}>
+              <TouchableOpacity style={styles.scanBtn} onPress={openScanner}>
+                <Text style={styles.scanBtnText}>📷 امسح كود الكابتن لبدء الرحلة</Text>
+              </TouchableOpacity>
+              <Text style={styles.orText}>- أو ملّي الكابتن الكود السري -</Text>
+              <View style={styles.numericCodeBox}>
+                <Text style={styles.numericCode}>
+                  {numericSecret ? numericSecret : '⏳ جاري...'}
+                </Text>
+              </View>
+            </View>
           )}
 
           <ScrollView style={styles.tripRouteContainer} showsVerticalScrollIndicator={false}>
@@ -644,7 +650,7 @@ export default function PassengerHome() {
           <View style={styles.ratingModalContent}>
             {!ratingSubmitted ? (
               <>
-                <Text style={styles.modalTitle}>كيف كانت الرحلة؟ 🛺</Text>
+                <Text style={styles.modalTitle}>كيف كانت الرحلة؟ 🪄</Text>
                 <Text style={styles.modalSubtitle}>تقييمك للكابتن يساعدنا في تحسين الخدمة</Text>
                 <View style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
@@ -703,11 +709,10 @@ const styles = StyleSheet.create({
   subText: { fontSize: 15, color: '#64748b', textAlign: 'center', marginBottom: 20 },
   label: { fontSize: 14, fontWeight: 'bold', color: '#475569', marginBottom: 6, textAlign: 'right' },
   
-  // تنسيقات أزرار اختيار نوع المركبة
-  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 15, marginBottom: 20 },
+  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 10, marginBottom: 20 },
   vTypeBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 12, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' },
   vTypeBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 2 },
-  vTypeText: { fontSize: 15, fontWeight: 'bold', color: '#64748b' },
+  vTypeText: { fontSize: 14, fontWeight: 'bold', color: '#64748b' },
   vTypeTextActive: { color: '#2563eb' },
 
   rowInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
@@ -722,11 +727,6 @@ const styles = StyleSheet.create({
   addDestBtn: { backgroundColor: '#f1f5f9', paddingVertical: 10, borderRadius: 12, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#cbd5e1', borderStyle: 'dashed' },
   addDestBtnText: { color: '#3b82f6', fontWeight: 'bold', fontSize: 14 },
 
-  passengerCountContainer: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 15 },
-  countBtn: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', paddingVertical: 10, borderRadius: 10, marginHorizontal: 4, alignItems: 'center' },
-  countBtnActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
-  countBtnText: { fontSize: 16, fontWeight: 'bold', color: '#64748b' },
-  countBtnTextActive: { color: '#ffffff' },
   notesInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 14, marginBottom: 15, color: '#0f172a', textAlign: 'right', minHeight: 45 },
   priceDisplayContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef3c7', borderWidth: 1.5, borderColor: '#d97706', borderRadius: 12, padding: 10, justifyContent: 'space-between' },
   priceTextDisplay: { fontSize: 18, fontWeight: 'bold', color: '#d97706', textAlign: 'right', flex: 1 },
@@ -784,6 +784,14 @@ const styles = StyleSheet.create({
   captainAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1' },
   captainDetails: { flex: 1, marginHorizontal: 15 },
   captainText: { fontSize: 14, fontWeight: 'bold', color: '#1e293b', marginBottom: 2, textAlign: 'right' },
+  
+  authContainer: { alignItems: 'center', backgroundColor: '#1e293b', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
+  orText: { fontSize: 14, fontWeight: 'bold', color: '#94a3b8', marginVertical: 12 },
+  numericCodeBox: { backgroundColor: '#3b82f6', paddingVertical: 12, paddingHorizontal: 30, borderRadius: 12, borderWidth: 2, borderColor: '#60a5fa', borderStyle: 'dashed', minWidth: 150, alignItems: 'center' },
+  numericCode: { fontSize: 26, fontWeight: 'bold', color: '#ffffff', letterSpacing: 2 },
+  scanBtn: { backgroundColor: '#10b981', paddingVertical: 15, width: '100%', borderRadius: 12, alignItems: 'center', borderWidth: 2, borderColor: '#34d399' },
+  scanBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+
   tripRouteContainer: { maxHeight: 150, backgroundColor: '#f8fafc', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0' },
   routeText: { fontSize: 14, color: '#334155', fontWeight: 'bold', marginBottom: 4, textAlign: 'right' },
   priceTag: { fontSize: 16, color: '#10b981', fontWeight: 'bold', marginTop: 4, textAlign: 'right' },
@@ -797,8 +805,6 @@ const styles = StyleSheet.create({
   badgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
   cancelOrderBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 1 },
   cancelOrderBtnText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
-  scanBtn: { backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15, borderWidth: 2, borderColor: '#bfdbfe' },
-  scanBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
   modalOverlayQR: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 20 },
   qrHeader: { color: '#ffffff', fontSize: 20, fontWeight: 'bold', marginBottom: 30 },
   qrScannerBox: { width: 300, height: 300, borderRadius: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#10b981', elevation: 10 },

@@ -3,7 +3,7 @@ import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
 import { db } from '../firebaseConfig';
@@ -126,6 +126,8 @@ export default function CaptainHome() {
   const [isPriceModalVisible, setIsPriceModalVisible] = useState(false);
   const [selectedRideForPrice, setSelectedRideForPrice] = useState<any>(null);
   const [tempCaptainPrice, setTempCaptainPrice] = useState('');
+  
+  const [enteredNumericCode, setEnteredNumericCode] = useState('');
 
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState(''); 
@@ -148,7 +150,6 @@ export default function CaptainHome() {
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [rideToRate, setRideToRate] = useState<any>(null);
 
-  // تحديث البروفايل ليشمل تصنيف المركبة
   const [captainProfile, setCaptainProfile] = useState({ id: '', name: 'كابتن...', phone: '', vehicle: 'توكتوك', vehicleCategory: 'tuktuk_alt', avatar: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', walletBalance: 0, averageRating: 5, ratingCount: 0 });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -157,10 +158,12 @@ export default function CaptainHome() {
   const generateAndShowQR = async () => {
     if (!activeRide) return;
     const uniqueSecret = Math.random().toString(36).substring(2, 12);
+    const numeric = Math.floor(1000000 + Math.random() * 9000000).toString();
     try {
       await updateDoc(doc(db, 'rides', activeRide.id), { 
         status: 'waiting_for_scan',
-        qrSecret: uniqueSecret
+        qrSecret: uniqueSecret,
+        numericSecret: numeric
       });
     } catch (e) { Alert.alert("خطأ", "تأكد من اتصالك بالإنترنت."); }
   };
@@ -168,8 +171,19 @@ export default function CaptainHome() {
   const cancelQRScan = async () => {
     if (!activeRide) return;
     try {
-      await updateDoc(doc(db, 'rides', activeRide.id), { status: 'captain_arrived', qrSecret: null });
+      await updateDoc(doc(db, 'rides', activeRide.id), { status: 'captain_arrived', qrSecret: null, numericSecret: null });
+      setEnteredNumericCode('');
     } catch (e) {}
+  };
+
+  const verifyNumericCode = async () => {
+    if (!enteredNumericCode || enteredNumericCode.trim() === '') return;
+    if (activeRide && activeRide.numericSecret === enteredNumericCode.trim()) {
+      await updateDoc(doc(db, 'rides', activeRide.id), { status: 'in_progress' });
+      setEnteredNumericCode('');
+    } else {
+      Alert.alert('خطأ ❌', 'الكود غير صحيح، تأكد من الرقم مع الراكب.');
+    }
   };
 
   const openSidebar = () => { setIsSidebarOpen(true); Animated.timing(sidebarAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(); };
@@ -205,7 +219,6 @@ export default function CaptainHome() {
         if (docSnap.exists()) {
           const data = docSnap.data();
           const finalAvatar = getSafeAvatar(data.profileImage || data.avatar || data.image);
-          // دمج التصنيف في بيانات الكابتن
           setCaptainProfile({ id: captainId, name: data.name || 'كابتن', phone: data.phone || '', vehicle: data.tukTukNumber || data.vehicle || 'توكتوك', vehicleCategory: data.vehicleCategory || 'tuktuk_alt', avatar: finalAvatar, walletBalance: data.walletBalance || 0, averageRating: Number(avgRate), ratingCount: rCount });
           if (data.isOnline !== undefined) { setIsOnline(data.isOnline); toggleAnim.setValue(data.isOnline ? 1 : 0); }
         }
@@ -232,7 +245,6 @@ export default function CaptainHome() {
     }
   };
 
-  // فلترة الطلبات لتظهر للكابتن المناسب حسب نوع مركبته
   useEffect(() => {
     if (!isOnline) { setAllRequests([]); return; }
     const q = query(collection(db, 'rides'), where('status', '==', 'pending'));
@@ -241,11 +253,7 @@ export default function CaptainHome() {
       const currentTime = new Date().getTime();
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        
-        // جلب نوع المركبة المطلوب (بديل التوكتوك هو الافتراضي لو مفيش)
         const rideVehicleType = data.requestedVehicleType || 'tuktuk_alt';
-        
-        // التحقق إن الطلب مطابق لنوع مركبة الكابتن
         if (rideVehicleType === captainProfile.vehicleCategory) {
           if (data.timestamp && (currentTime - data.timestamp < 900000)) {
             pendingRequests.push({ id: docSnap.id, ...data });
@@ -279,9 +287,7 @@ export default function CaptainHome() {
     const unsubscribeMsgs = onSnapshot(q, (snap) => {
       if (!snap.empty) {
         const msg = snap.docs[0].data();
-        if (msg.sender === 'passenger') {
-          setLatestMessage(msg.text);
-        }
+        if (msg.sender === 'passenger') { setLatestMessage(msg.text); }
       }
     });
     return () => unsubscribeMsgs();
@@ -294,9 +300,7 @@ export default function CaptainHome() {
         Animated.timing(toastOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
         Animated.timing(toastTranslateY, { toValue: 0, duration: 300, useNativeDriver: true })
       ]).start();
-
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      
       toastTimer.current = setTimeout(() => {
         Animated.parallel([
           Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
@@ -305,17 +309,10 @@ export default function CaptainHome() {
       }, 2000);
     }
     prevUnreadRef.current = unreadChatCount;
-
     if (unreadChatCount > 0) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(chatPulseAnim, { toValue: 1, duration: 400, useNativeDriver: false }),
-          Animated.timing(chatPulseAnim, { toValue: 0, duration: 400, useNativeDriver: false })
-        ])
-      ).start();
+      Animated.loop(Animated.sequence([ Animated.timing(chatPulseAnim, { toValue: 1, duration: 400, useNativeDriver: false }), Animated.timing(chatPulseAnim, { toValue: 0, duration: 400, useNativeDriver: false }) ])).start();
     } else {
-      chatPulseAnim.stopAnimation();
-      chatPulseAnim.setValue(0);
+      chatPulseAnim.stopAnimation(); chatPulseAnim.setValue(0);
     }
   }, [unreadChatCount]);
 
@@ -324,11 +321,7 @@ export default function CaptainHome() {
   const sendOffer = async (ride: any, offerPrice: string) => {
     try {
       const safeAvatar = getSafeAvatar(captainProfile.avatar);
-      const cleanOfferData = { 
-        captainId: String(captainProfile.id), captainName: String(captainProfile.name), 
-        captainPhone: String(captainProfile.phone), captainVehicle: String(captainProfile.vehicle), 
-        captainAvatar: safeAvatar, price: String(offerPrice), captainRating: captainProfile.averageRating, captainRatingCount: captainProfile.ratingCount
-      };
+      const cleanOfferData = { captainId: String(captainProfile.id), captainName: String(captainProfile.name), captainPhone: String(captainProfile.phone), captainVehicle: String(captainProfile.vehicle), captainAvatar: safeAvatar, price: String(offerPrice), captainRating: captainProfile.averageRating, captainRatingCount: captainProfile.ratingCount };
       await updateDoc(doc(db, 'rides', ride.id), { price: String(offerPrice), offers: arrayUnion(cleanOfferData) });
       setSentOffers(prev => [...prev, ride.id]);
     } catch (error) {}
@@ -344,7 +337,27 @@ export default function CaptainHome() {
   };
 
   const notifyArrival = async () => { if (activeRide) await updateDoc(doc(db, 'rides', activeRide.id), { status: 'captain_arrived' }); };
-  const completeRide = async () => { if (!activeRide) return; setRideToRate(activeRide); await updateDoc(doc(db, 'rides', activeRide.id), { status: 'completed' }); setActiveRide(null); setIsRatingModalVisible(true); };
+  
+  // --- دالة إنهاء المشوار مع رسالة التأكيد المضافة ---
+  const completeRide = () => { 
+    if (!activeRide) return; 
+    Alert.alert(
+      'إنهاء الرحلة 🏁',
+      'هل أنت متأكد من إنهاء الرحلة وتحصيل الأجرة من الراكب؟',
+      [
+        { text: 'لا، تراجع', style: 'cancel' },
+        { 
+          text: 'نعم، إنهاء المشوار', 
+          onPress: async () => {
+            setRideToRate(activeRide); 
+            await updateDoc(doc(db, 'rides', activeRide.id), { status: 'completed' }); 
+            setActiveRide(null); 
+            setIsRatingModalVisible(true);
+          } 
+        }
+      ]
+    );
+  };
   
   const openGoogleMaps = (locationName: string) => {
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName)}`;
@@ -361,7 +374,6 @@ export default function CaptainHome() {
   };
 
   const cancelRideByCaptain = async () => { if (activeRide) { await updateDoc(doc(db, 'rides', activeRide.id), { status: 'pending', captainId: null, offers: [] }); handleDismissRequest(activeRide); setActiveRide(null); } };
-  
   const handleCallClick = () => { if (activeRide) { setPhoneToCall(activeRide.phone || activeRide.passengerPhone); setIsCallModalVisible(true); } };
   const makeRegularCall = () => { setIsCallModalVisible(false); Linking.openURL(`tel:${phoneToCall}`); };
   const makeFreeCall = () => { setIsCallModalVisible(false); Alert.alert('مكالمة مجانية', 'تتطلب ربط التطبيق بخدمة اتصالات خارجية.'); };
@@ -486,7 +498,7 @@ export default function CaptainHome() {
               <TouchableOpacity style={styles.arriveButton} onPress={notifyArrival}><Text style={styles.arriveButtonText}>📍 إبلاغ بالوصول</Text></TouchableOpacity>
             ) : activeRide.status === 'captain_arrived' || activeRide.status === 'passenger_on_the_way' ? (
               <TouchableOpacity style={styles.startButton} onPress={generateAndShowQR}>
-                <Text style={styles.startButtonText}>▶️ ابدأ الرحلة (تأكيد QR)</Text>
+                <Text style={styles.startButtonText}>▶️ ابدأ الرحلة (تأكيد QR أو الكود)</Text>
               </TouchableOpacity>
             ) : activeRide.status === 'in_progress' ? (
               <TouchableOpacity style={styles.completeButton} onPress={completeRide}><Text style={styles.completeButtonText}>✅ إنهاء المشوار واستلام الكاش</Text></TouchableOpacity>
@@ -501,20 +513,41 @@ export default function CaptainHome() {
         </ScrollView>
       )}
 
+      {/* مودال مسح الـ QR وإدخال الكود الرقمي */}
       <Modal visible={activeRide?.status === 'waiting_for_scan'} transparent={true} animationType="slide">
         <View style={styles.modalOverlayQR}>
-          <View style={styles.qrModalContent}>
-            <Text style={styles.qrTitle}>أمان الرحلة 🔒</Text>
-            <Text style={styles.qrSubtitle}>اطلب من الراكب مسح هذا الكود من تطبيقه لتبدأ الرحلة بشكل آمن.</Text>
-            <View style={styles.qrBox}>
-              {activeRide && activeRide.qrSecret && (
-                <QRCode value={JSON.stringify({ rideId: activeRide.id, token: activeRide.qrSecret })} size={200} />
-              )}
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+            <View style={styles.qrModalContent}>
+              <Text style={styles.qrTitle}>أمان الرحلة 🔒</Text>
+              <Text style={styles.qrSubtitle}>اطلب من الراكب مسح الكود، أو أدخل الرقم السري الموجود بتطبيقه.</Text>
+              
+              <View style={styles.qrBox}>
+                {activeRide && activeRide.qrSecret && (
+                  <QRCode value={JSON.stringify({ rideId: activeRide.id, token: activeRide.qrSecret })} size={150} />
+                )}
+              </View>
+              
+              <Text style={styles.orTextDivider}>--- أو ---</Text>
+              
+              <View style={styles.inputCodeContainer}>
+                <TextInput
+                  style={styles.numericInput}
+                  placeholder="أدخل الكود (7 أرقام)"
+                  placeholderTextColor="#94a3b8"
+                  keyboardType="numeric"
+                  maxLength={7}
+                  value={enteredNumericCode}
+                  onChangeText={setEnteredNumericCode}
+                  textAlign="center"
+                />
+                <TouchableOpacity style={styles.verifyCodeBtn} onPress={verifyNumericCode}>
+                  <Text style={styles.verifyCodeBtnText}>✔️ تأكيد الكود وبدء الرحلة</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.qrCancelBtn} onPress={cancelQRScan}><Text style={styles.qrCancelBtnText}>إلغاء والعودة</Text></TouchableOpacity>
             </View>
-            <ActivityIndicator size="small" color="#2563eb" style={{marginTop: 15}} />
-            <Text style={styles.qrWaitingText}>في انتظار مسح الكود...</Text>
-            <TouchableOpacity style={styles.qrCancelBtn} onPress={cancelQRScan}><Text style={styles.qrCancelBtnText}>إلغاء والعودة</Text></TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -686,14 +719,20 @@ const styles = StyleSheet.create({
   cancelCallBtn: { paddingVertical: 10, marginTop: 10 },
   cancelCallBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
   
-  modalOverlayQR: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  qrModalContent: { backgroundColor: '#ffffff', width: '90%', padding: 30, borderRadius: 24, alignItems: 'center', elevation: 10 },
-  qrTitle: { fontSize: 22, fontWeight: 'bold', color: '#1e293b', marginBottom: 10 },
-  qrSubtitle: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 25, lineHeight: 22 },
-  qrBox: { padding: 15, backgroundColor: '#f8fafc', borderRadius: 16, borderWidth: 2, borderColor: '#e2e8f0' },
+  modalOverlayQR: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)' },
+  qrModalContent: { backgroundColor: '#ffffff', width: '90%', alignSelf: 'center', padding: 25, borderRadius: 24, alignItems: 'center', elevation: 10 },
+  qrTitle: { fontSize: 22, fontWeight: 'bold', color: '#1e293b', marginBottom: 8 },
+  qrSubtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 20, lineHeight: 22 },
+  qrBox: { padding: 10, backgroundColor: '#f8fafc', borderRadius: 16, borderWidth: 2, borderColor: '#e2e8f0' },
+  orTextDivider: { color: '#64748b', fontWeight: 'bold', marginVertical: 15 },
+  inputCodeContainer: { width: '100%', alignItems: 'center' },
+  numericInput: { width: '100%', backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 18, fontWeight: 'bold', letterSpacing: 2, color: '#0f172a', marginBottom: 10 },
+  verifyCodeBtn: { backgroundColor: '#10b981', width: '100%', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  verifyCodeBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
   qrWaitingText: { marginTop: 10, color: '#475569', fontSize: 14, fontWeight: 'bold' },
-  qrCancelBtn: { marginTop: 25, paddingVertical: 12, paddingHorizontal: 25, backgroundColor: '#fee2e2', borderRadius: 10 },
+  qrCancelBtn: { marginTop: 20, paddingVertical: 10, paddingHorizontal: 25, backgroundColor: '#fee2e2', borderRadius: 10 },
   qrCancelBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 15 },
+
   modalOverlayAdmin: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   adminMsgModalContent: { backgroundColor: '#ffffff', width: '100%', padding: 25, borderRadius: 20, alignItems: 'center', elevation: 10, borderWidth: 2, borderColor: '#eab308' },
   adminMsgIcon: { fontSize: 50, marginBottom: 10 },

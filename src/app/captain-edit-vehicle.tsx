@@ -13,7 +13,9 @@ const CAR_MODELS = ['سيراتو', 'النترا', 'اف 3', 'صني', 'أوب�
 export default function CaptainEditVehicle() {
   const router = useRouter();
   const [captainId, setCaptainId] = useState('');
-  const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt'>('tuktuk_alt');
+  
+  // تمت إضافة scooter هنا
+  const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -22,10 +24,18 @@ export default function CaptainEditVehicle() {
   const [carYear, setCarYear] = useState('');
   const [carColor, setCarColor] = useState('');
   const [carPlate, setCarPlate] = useState('');
-  const [tuktukNumber, setTuktukNumber] = useState('');
+  
+  const [tuktukNumber, setTuktukNumber] = useState(''); // نستخدمه لرقم بديل التوكتوك والسكوتر
+  const [scooterModel, setScooterModel] = useState(''); // موديل السكوتر
 
   const [images, setImages] = useState<any>({
-    carLicenseFront: null, carLicenseBack: null, drivingLicenseFront: null, drivingLicenseBack: null, carFrontImage: null, tuktukImage: null,
+    carLicenseFront: null, 
+    carLicenseBack: null, 
+    drivingLicenseFront: null, 
+    drivingLicenseBack: null, 
+    carFrontImage: null, 
+    tuktukImage: null,
+    scooterImage: null // تمت إضافة صورة السكوتر
   });
 
   const [isDropdownVisible, setIsDropdownVisible] = useState(false);
@@ -46,13 +56,18 @@ export default function CaptainEditVehicle() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setVehicleCategory(data.vehicleCategory || 'tuktuk_alt');
+        
         if (data.vehicleCategory === 'car') {
           setCarBrand(data.carBrand || ''); setCarModel(data.carModel || ''); setCarYear(data.carYear || '');
           setCarColor(data.carColor || ''); setCarPlate(data.carPlate || '');
-          setImages(prev => ({ ...prev, carLicenseFront: data.carLicenseFront, carLicenseBack: data.carLicenseBack, drivingLicenseFront: data.drivingLicenseFront, drivingLicenseBack: data.drivingLicenseBack, carFrontImage: data.vehicleImage }));
+          setImages((prev: any) => ({ ...prev, carLicenseFront: data.carLicenseFront, carLicenseBack: data.carLicenseBack, drivingLicenseFront: data.drivingLicenseFront, drivingLicenseBack: data.drivingLicenseBack, carFrontImage: data.vehicleImage }));
+        } else if (data.vehicleCategory === 'scooter') {
+          setScooterModel(data.vehicle ? data.vehicle.replace('سكوتر ', '') : '');
+          setTuktukNumber(data.tuktukNumber || '');
+          setImages((prev: any) => ({ ...prev, scooterImage: data.vehicleImage }));
         } else {
           setTuktukNumber(data.tuktukNumber || '');
-          setImages(prev => ({ ...prev, tuktukImage: data.vehicleImage }));
+          setImages((prev: any) => ({ ...prev, tuktukImage: data.vehicleImage }));
         }
       }
     } catch (e) {} finally { setIsLoading(false); }
@@ -92,6 +107,9 @@ export default function CaptainEditVehicle() {
       if (!images.carLicenseFront || !images.carLicenseBack || !images.drivingLicenseFront || !images.drivingLicenseBack || !images.carFrontImage) { 
         Alert.alert('تنبيه', 'يرجى إرفاق جميع الرخص وصورة السيارة.'); return; 
       }
+    } else if (vehicleCategory === 'scooter') {
+      if (!scooterModel) { Alert.alert('تنبيه', 'يرجى إدخال موديل السكوتر.'); return; }
+      if (!images.scooterImage) { Alert.alert('تنبيه', 'يرجى إرفاق صورة السكوتر.'); return; }
     } else {
       if (!images.tuktukImage) { Alert.alert('تنبيه', 'يرجى إرفاق صورة بديل التوكتوك.'); return; }
     }
@@ -106,6 +124,10 @@ export default function CaptainEditVehicle() {
         updateData.drivingLicenseFront = images.drivingLicenseFront; updateData.drivingLicenseBack = images.drivingLicenseBack;
         updateData.vehicleImage = images.carFrontImage;
         updateData.vehicle = `${carBrand} ${carModel}`;
+      } else if (vehicleCategory === 'scooter') {
+        updateData.tuktukNumber = tuktukNumber;
+        updateData.vehicleImage = images.scooterImage;
+        updateData.vehicle = `سكوتر ${scooterModel}`;
       } else {
         updateData.tuktukNumber = tuktukNumber;
         updateData.vehicleImage = images.tuktukImage;
@@ -113,7 +135,7 @@ export default function CaptainEditVehicle() {
       }
 
       await updateDoc(doc(db, 'captains', captainId), updateData);
-      Alert.alert('تم ✅', 'تم تحديث بيانات المركبة بنجاح.', [{ text: 'حسناً', onPress: () => router.back() }]);
+      Alert.alert('تم ✅', 'تم تحديث بيانات بساطك بنجاح.', [{ text: 'حسناً', onPress: () => router.back() }]);
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الحفظ.'); } finally { setIsSaving(false); }
   };
 
@@ -124,7 +146,7 @@ export default function CaptainEditVehicle() {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backBtnText}>رجوع ⬅️</Text></TouchableOpacity>
-          <Text style={styles.headerTitle}>تعديل المركبة 🛺</Text>
+          <Text style={styles.headerTitle}>تعديل بساطك 🪄</Text>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" removeClippedSubviews={Platform.OS === 'android'}>
@@ -135,6 +157,9 @@ export default function CaptainEditVehicle() {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('tuktuk_alt')}>
                 <Text style={[styles.vTypeText, vehicleCategory === 'tuktuk_alt' && styles.vTypeTextActive]}>🛺 بديل توكتوك</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'scooter' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('scooter')}>
+                <Text style={[styles.vTypeText, vehicleCategory === 'scooter' && styles.vTypeTextActive]}>🛵 سكوتر</Text>
               </TouchableOpacity>
             </View>
 
@@ -168,6 +193,19 @@ export default function CaptainEditVehicle() {
                 <TextInput style={styles.input} placeholder="أدخل الرقم أو اتركها فارغة" value={tuktukNumber} onChangeText={setTuktukNumber} textAlign="right" />
                 <Text style={styles.sectionSubtitle}>صورة المركبة</Text>
                 {renderImageBox("إرفاق صورة للمركبة", "tuktukImage")}
+              </View>
+            )}
+
+            {vehicleCategory === 'scooter' && (
+              <View>
+                <Text style={styles.label}>موديل السكوتر</Text>
+                <TextInput style={styles.input} placeholder="مثال: كيمكو، SYM" value={scooterModel} onChangeText={setScooterModel} textAlign="right" />
+
+                <Text style={styles.label}>رقم اللوحة (إن وجد)</Text>
+                <TextInput style={styles.input} placeholder="أدخل الرقم أو اتركها فارغة" value={tuktukNumber} onChangeText={setTuktukNumber} textAlign="right" />
+                
+                <Text style={styles.sectionSubtitle}>صورة السكوتر</Text>
+                {renderImageBox("إرفاق صورة للسكوتر", "scooterImage")}
               </View>
             )}
 
@@ -214,11 +252,14 @@ const styles = StyleSheet.create({
   boxText: { fontSize: 12, color: '#64748b', fontWeight: 'bold', textAlign: 'center', paddingHorizontal: 5 },
   submitBtn: { backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 30, elevation: 3 },
   submitBtnText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
-  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 15, marginBottom: 20 },
+  
+  // تحديث التبويبات لتشمل السكوتر بشكل أفضل
+  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 10, marginBottom: 20 },
   vTypeBtn: { flex: 1, paddingVertical: 15, alignItems: 'center', borderRadius: 12, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' },
   vTypeBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 2 },
-  vTypeText: { fontSize: 16, fontWeight: 'bold', color: '#64748b' },
+  vTypeText: { fontSize: 14, fontWeight: 'bold', color: '#64748b' },
   vTypeTextActive: { color: '#2563eb' },
+  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '60%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 15 },

@@ -15,7 +15,7 @@ export default function CaptainRegister() {
   
   // --- حالة التبويبات ---
   const [activeTab, setActiveTab] = useState<'basic' | 'vehicle'>('basic');
-  const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt'>('car');
+  const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('car');
 
   // --- البيانات الأساسية ---
   const [name, setName] = useState('');
@@ -30,8 +30,9 @@ export default function CaptainRegister() {
   const [carColor, setCarColor] = useState('');
   const [carPlate, setCarPlate] = useState('');
 
-  // --- بيانات المركبة (بديل التوكتوك) ---
-  const [tuktukNumber, setTuktukNumber] = useState('');
+  // --- بيانات المركبة (بديل التوكتوك والسكوتر) ---
+  const [tuktukNumber, setTuktukNumber] = useState(''); // نستخدم نفس المتغير لرقم السكوتر
+  const [scooterModel, setScooterModel] = useState(''); // لاسم موديل السكوتر
 
   // --- الصور ---
   const [images, setImages] = useState<any>({
@@ -44,6 +45,7 @@ export default function CaptainRegister() {
     drivingLicenseBack: null,
     carFrontImage: null,
     tuktukImage: null,
+    scooterImage: null, // صورة السكوتر
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -68,7 +70,7 @@ export default function CaptainRegister() {
     setIsDropdownVisible(false);
   };
 
-  // --- دالة اختيار الصور (مع تقليل الجودة لتسريع الواجهة) ---
+  // --- دالة اختيار الصور ---
   const pickImage = async (field: string) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -78,7 +80,7 @@ export default function CaptainRegister() {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      quality: 0.2, // تم تقليل الجودة لـ 0.2 لتخفيف الحمل على الذاكرة وتسريع التمرير
+      quality: 0.2, 
       base64: true,
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -86,7 +88,6 @@ export default function CaptainRegister() {
     }
   };
 
-  // --- تحويل ImageBox لدالة عادية لمنع إعادة بناء المكونات الثقيلة (إصلاح ثقل الشاشة) ---
   const renderImageBox = (title: string, field: string, isAvatar = false) => (
     <TouchableOpacity style={isAvatar ? styles.avatarContainer : styles.imageBoxContainer} onPress={() => pickImage(field)}>
       {images[field] ? (
@@ -111,6 +112,9 @@ export default function CaptainRegister() {
       if (!images.carLicenseFront || !images.carLicenseBack || !images.drivingLicenseFront || !images.drivingLicenseBack || !images.carFrontImage) { 
         Alert.alert('تنبيه', 'يرجى إرفاق جميع صور رخص السيارة والقيادة وصورة السيارة.'); return; 
       }
+    } else if (vehicleCategory === 'scooter') {
+      if (!scooterModel) { Alert.alert('تنبيه', 'يرجى إدخال موديل السكوتر.'); return; }
+      if (!images.scooterImage) { Alert.alert('تنبيه', 'يرجى إرفاق صورة السكوتر.'); return; }
     } else {
       if (!images.tuktukImage) { Alert.alert('تنبيه', 'يرجى إرفاق صورة بديل التوكتوك.'); return; }
     }
@@ -140,6 +144,10 @@ export default function CaptainRegister() {
         captainData.drivingLicenseFront = images.drivingLicenseFront; captainData.drivingLicenseBack = images.drivingLicenseBack;
         captainData.vehicleImage = images.carFrontImage; 
         captainData.vehicle = `${carBrand} ${carModel}`;
+      } else if (vehicleCategory === 'scooter') {
+        captainData.tuktukNumber = tuktukNumber; // نستخدم نفس الحقل للرقم
+        captainData.vehicleImage = images.scooterImage;
+        captainData.vehicle = `سكوتر ${scooterModel}`;
       } else {
         captainData.tuktukNumber = tuktukNumber;
         captainData.vehicleImage = images.tuktukImage;
@@ -147,7 +155,7 @@ export default function CaptainRegister() {
       }
 
       await addDoc(collection(db, 'captains'), captainData);
-      Alert.alert('نجاح ✅', 'تم تسجيل طلبك بنجاح. سيتم مراجعة بياناتك وتفعيل حسابك قريباً.', [
+      Alert.alert('نجاح 🪄', 'تم تسجيل طلبك بنجاح. سيتم مراجعة بياناتك وتفعيل حسابك قريباً.', [
         { text: 'حسناً', onPress: () => router.replace('/captain-login') }
       ]);
     } catch (error) {
@@ -160,7 +168,7 @@ export default function CaptainRegister() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
-        <Text style={styles.mainTitle}>تسجيل كابتن جديد 🛺</Text>
+        <Text style={styles.mainTitle}>تسجيل كابتن بُساط 🪄</Text>
 
         <View style={styles.tabsContainer}>
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'basic' && styles.tabBtnActive]} onPress={() => setActiveTab('basic')}>
@@ -171,7 +179,6 @@ export default function CaptainRegister() {
           </TouchableOpacity>
         </View>
 
-        {/* تم إضافة keyboardShouldPersistTaps و removeClippedSubviews لتحسين الأداء */}
         <ScrollView 
           showsVerticalScrollIndicator={false} 
           contentContainerStyle={styles.scrollContent}
@@ -216,10 +223,18 @@ export default function CaptainRegister() {
               
               <View style={styles.vehicleTypeTabs}>
                 <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'car' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('car')}>
-                  <Text style={[styles.vTypeText, vehicleCategory === 'car' && styles.vTypeTextActive]}>🚗 سيارة</Text>
+                  <Text style={styles.vTypeEmoji}>🚗</Text>
+                  <Text style={[styles.vTypeText, vehicleCategory === 'car' && styles.vTypeTextActive]}>سيارة</Text>
                 </TouchableOpacity>
+                
                 <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('tuktuk_alt')}>
-                  <Text style={[styles.vTypeText, vehicleCategory === 'tuktuk_alt' && styles.vTypeTextActive]}>🛺 بديل توكتوك</Text>
+                  <Text style={styles.vTypeEmoji}>🛺</Text>
+                  <Text style={[styles.vTypeText, vehicleCategory === 'tuktuk_alt' && styles.vTypeTextActive]}>بديل توكتوك</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'scooter' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('scooter')}>
+                  <Text style={styles.vTypeEmoji}>🛵</Text>
+                  <Text style={[styles.vTypeText, vehicleCategory === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
                 </TouchableOpacity>
               </View>
 
@@ -270,6 +285,19 @@ export default function CaptainRegister() {
                   
                   <Text style={styles.sectionSubtitle}>صورة المركبة</Text>
                   {renderImageBox("إرفاق صورة للمركبة", "tuktukImage")}
+                </View>
+              )}
+
+              {vehicleCategory === 'scooter' && (
+                <View>
+                  <Text style={styles.label}>موديل السكوتر</Text>
+                  <TextInput style={styles.input} placeholder="مثال: كيمكو، SYM" value={scooterModel} onChangeText={setScooterModel} textAlign="right" />
+
+                  <Text style={styles.label}>رقم اللوحة (إن وجد)</Text>
+                  <TextInput style={styles.input} placeholder="أدخل الرقم أو اتركها فارغة" value={tuktukNumber} onChangeText={setTuktukNumber} textAlign="right" />
+                  
+                  <Text style={styles.sectionSubtitle}>صورة السكوتر</Text>
+                  {renderImageBox("إرفاق صورة للسكوتر", "scooterImage")}
                 </View>
               )}
 
@@ -346,10 +374,12 @@ const styles = StyleSheet.create({
   submitBtn: { backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 30, elevation: 3 },
   submitBtnText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
 
-  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 15, marginBottom: 20 },
-  vTypeBtn: { flex: 1, paddingVertical: 15, alignItems: 'center', borderRadius: 12, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' },
+  // --- التنسيق الجديد لتوضيح الاختيارات ---
+  vehicleTypeTabs: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 10, marginBottom: 20 },
+  vTypeBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' },
   vTypeBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 2 },
-  vTypeText: { fontSize: 16, fontWeight: 'bold', color: '#64748b' },
+  vTypeEmoji: { fontSize: 28, marginBottom: 5 },
+  vTypeText: { fontSize: 13, fontWeight: 'bold', color: '#64748b', textAlign: 'center' },
   vTypeTextActive: { color: '#2563eb' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
