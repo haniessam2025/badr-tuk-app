@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "badr-tuk-app",
+    "name": "بَرّاق",
     "slug": "badr-tuk-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,7 +13,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0f172a",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -35,7 +35,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#0f172a",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
@@ -44,6 +44,12 @@
         "expo-location",
         {
           "locationAlwaysPermission": "Allow $(PRODUCT_NAME) to access your location."
+        }
+      ],
+      [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "نحتاج إلى الوصول للكاميرا لمسح وتصوير بطاقة ورخصة الكابتن بدقة."
         }
       ]
     ],

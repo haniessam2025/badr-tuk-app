@@ -17,7 +17,6 @@ export default function PassengerHome() {
   const [pickupCoords, setPickupCoords] = useState<{latitude: number, longitude: number} | null>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
   
-  // إضافة نوع السكوتر
   const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
   
   const [price, setPrice] = useState('');
@@ -38,6 +37,12 @@ export default function PassengerHome() {
   const [isCallModalVisible, setIsCallModalVisible] = useState(false);
   const [phoneToCall, setPhoneToCall] = useState('');
   const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+  
+  // حالات زر الأمان
+  const [isSendingLocation, setIsSendingLocation] = useState(false);
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [isEmergencyModalVisible, setIsEmergencyModalVisible] = useState(false);
+  const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
 
   const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
   const [rating, setRating] = useState(0);
@@ -70,7 +75,14 @@ export default function PassengerHome() {
     return DEFAULT_AVATAR;
   };
 
-  useFocusEffect(useCallback(() => { loadPassengerProfile(); }, []));
+  useFocusEffect(useCallback(() => { loadPassengerProfile(); loadEmergencyPhone(); }, []));
+
+  const loadEmergencyPhone = async () => {
+    try {
+      const savedPhone = await AsyncStorage.getItem('emergency_phone');
+      if (savedPhone) setEmergencyPhone(savedPhone);
+    } catch (e) { console.log(e); }
+  };
 
   const loadPassengerProfile = async () => {
     try {
@@ -248,6 +260,36 @@ export default function PassengerHome() {
     }
   }, [unreadChatCount]);
 
+  // --- التتبع الحي (Live Tracking) ---
+  useEffect(() => {
+    let locationSubscription;
+    const startLiveTracking = async () => {
+      // التتبع يشتغل بس لو فيه رحلة شغالة
+      if (currentRideId && ['accepted', 'arrived', 'waiting_for_scan', 'in_progress', 'passenger_on_the_way'].includes(rideStatus)) {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          locationSubscription = await Location.watchPositionAsync(
+            { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+            (loc) => {
+              // تحديث الإحداثيات في فايربيز كل 5 ثواني
+              updateDoc(doc(db, 'rides', currentRideId), {
+                liveCoords: { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
+              }).catch(e => console.log("Error updating live location:", e));
+            }
+          );
+        }
+      }
+    };
+
+    startLiveTracking();
+
+    return () => {
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, [currentRideId, rideStatus]);
+
   const backgroundColorInterpolate = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#064e3b', '#10b981'] });
   const chatBackgroundColor = chatPulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#8b5cf6', '#0f172a'] });
 
@@ -300,10 +342,9 @@ export default function PassengerHome() {
     const validDests = dests.filter(d => d.trim().length > 0);
     if (pickupText.trim().length > 0 && validDests.length > 0) {
       let base = 0;
-      // تسعيرة السكوتر أرخص
       if (vType === 'car') base = 25 + ((validDests.length - 1) * 15);
       else if (vType === 'scooter') base = 10 + ((validDests.length - 1) * 5);
-      else base = 15 + ((validDests.length - 1) * 10); // tuktuk_alt
+      else base = 15 + ((validDests.length - 1) * 10); 
       
       setCalculatedBasePrice(base);
       setBasePriceForSuggestions(base);
@@ -439,6 +480,77 @@ export default function PassengerHome() {
     router.replace('/passenger-login');
   };
 
+// --- دوال زر الأمان ---
+  const [actionAfterSave, setActionAfterSave] = useState(false); // عشان نفرق بين (حفظ فقط) و (حفظ وإرسال)
+
+  const openEmergencyEdit = () => {
+    setActionAfterSave(false); // تعديل فقط
+    setTempEmergencyPhone(emergencyPhone); // إظهار الرقم القديم ليقوم بتعديله
+    setIsEmergencyModalVisible(true);
+  };
+
+  const saveEmergencyPhone = async () => {
+    if (tempEmergencyPhone.length < 10) {
+      Alert.alert('تنبيه', 'أدخل رقم هاتف صحيح (مثال: 01012345678)');
+      return;
+    }
+    
+    let formattedPhone = tempEmergencyPhone;
+    if (formattedPhone.startsWith('0')) {
+      formattedPhone = '2' + formattedPhone; 
+    }
+    
+    await AsyncStorage.setItem('emergency_phone', formattedPhone);
+    setEmergencyPhone(formattedPhone);
+    setIsEmergencyModalVisible(false);
+    
+    // لو كان بيسجل لأول مرة هيبعت الرسالة.. لو بيعدل بس هتطلعله رسالة نجاح
+    if (actionAfterSave) {
+      sendLocationToWhatsApp(formattedPhone);
+    } else {
+      Alert.alert('نجاح ✅', 'تم تحديث رقم الطوارئ الخاص بك بنجاح.');
+    }
+  };
+
+  const sendSafetyLocation = () => {
+    if (!emergencyPhone) {
+      setActionAfterSave(true); // هيحفظ ويبعت الرسالة فوراً
+      setTempEmergencyPhone('');
+      setIsEmergencyModalVisible(true);
+    } else {
+      sendLocationToWhatsApp(emergencyPhone);
+    }
+  };
+
+  const sendLocationToWhatsApp = async (phoneToUse: string) => {
+    setIsSendingLocation(true);
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('تنبيه', 'نحتاج صلاحية الموقع لإرسال مسار الرحلة للطوارئ.');
+        setIsSendingLocation(false);
+        return;
+      }
+
+      // الرابط الخاص بمشروعك على فايربيز (هياخد رقم الرحلة الحالية)
+      const trackingLink = `https://badr-cute.web.app/?ride=${currentRideId}`;
+      const message = `أنا حالياً في رحلة مع تطبيق بَرّاق ⚡.\nتتبع مساري (لايف) من هنا لأسباب الأمان 🛡️:\n${trackingLink}`;
+      
+      // استخدام الرابط العالمي wa.me ليتخطى مشاكل الأندرويد في التعرف على التطبيقات
+      const whatsappUrl = `https://wa.me/${phoneToUse}?text=${encodeURIComponent(message)}`;      
+      try {
+        await Linking.openURL(whatsappUrl);
+      } catch (err) {
+        Alert.alert('تنبيه', 'تعذر فتح واتساب. قد يكون التطبيق غير مثبت.');
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة تحديد وإرسال الموقع.');
+    } finally {
+      setIsSendingLocation(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {toastVisible && (
@@ -466,7 +578,7 @@ export default function PassengerHome() {
         <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={styles.cardTitle}>اطلب مشوارك الآن:</Text>
 
-          <Text style={styles.label}>🪄 اختر نوع بساطك</Text>
+          <Text style={styles.label}>🪄 اختر نوع براقك</Text>
           <View style={styles.vehicleTypeTabs}>
             <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
               <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>🚗 سيارة</Text>
@@ -526,7 +638,7 @@ export default function PassengerHome() {
             </View>
           )}
 
-          <TouchableOpacity style={styles.searchButton} onPress={handleSearchCaptain}><Text style={styles.searchButtonText}>🪄 إرسال الطلب لكباتن بساط</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.searchButton} onPress={handleSearchCaptain}><Text style={styles.searchButtonText}>🪄 البحث عن كابتن</Text></TouchableOpacity>
         </ScrollView>
       )}
 
@@ -565,7 +677,7 @@ export default function PassengerHome() {
         ]}>
           {rideStatus === 'arrived' ? (
             <>
-              <Text style={styles.superArrivalTitle}>🚨 بساطك وصل! 🚨</Text>
+              <Text style={styles.superArrivalTitle}>🚨 براقك وصل! 🚨</Text>
               <Text style={styles.statusArrivalAlert}>لقد وصل الكابتن إلى نقطة الإقلال وهو في انتظارك الآن.</Text>
             </>
           ) : (
@@ -628,12 +740,57 @@ export default function PassengerHome() {
               {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
             </AnimatedTouchableOpacity>
           </View>
+
+          {/* زر مشاركة الموقع (الطوارئ) */}
+          <TouchableOpacity style={styles.safetyBtn} onPress={sendSafetyLocation} disabled={isSendingLocation}>
+            {isSendingLocation ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.safetyBtnText}>🛡️ مشاركة مسار الرحلة (أمان)</Text>
+            )}
+          </TouchableOpacity>
+          
+          {/* === الزرار الجديد الخاص بتعديل الرقم === */}
+          {emergencyPhone ? (
+            <TouchableOpacity onPress={openEmergencyEdit} style={styles.editEmergencyBtn}>
+              <Text style={styles.editEmergencyText}>✏️ تعديل رقم الطوارئ الحالي: {emergencyPhone}</Text>
+            </TouchableOpacity>
+          ) : null}
+          {/* ======================================= */}
           
           {rideStatus !== 'in_progress' && (
             <TouchableOpacity style={styles.cancelOrderBtn} onPress={handleCancelRide}><Text style={styles.cancelOrderBtnText}>❌ إلغاء الرحلة</Text></TouchableOpacity>
           )}
         </Animated.View>
       )}
+
+      {/* نافذة إدخال رقم الطوارئ أول مرة */}
+      <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🛡️ إعداد رقم الطوارئ</Text>
+            <Text style={styles.modalSubtitle}>يرجى إدخال رقم هاتف شخص تثق به (يمتلك واتساب) لمشاركة مسار رحلتك معه بنقرة واحدة لاحقاً:</Text>
+            <TextInput 
+              style={styles.modalInput} 
+              value={tempEmergencyPhone} 
+              onChangeText={setTempEmergencyPhone} 
+              keyboardType="phone-pad" 
+              placeholder="مثال: 01012345678" 
+              placeholderTextColor="#94a3b8" 
+            />
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveEmergencyPhone}>
+                <Text style={styles.modalSaveBtnText}>
+                  {actionAfterSave ? 'حفظ وإرسال الآن' : 'حفظ الرقم الجديد'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEmergencyModalVisible(false)}>
+                <Text style={styles.modalCancelBtnText}>إلغاء</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={isScannerVisible} transparent={true} animationType="slide">
         <View style={styles.modalOverlayQR}>
@@ -803,6 +960,10 @@ const styles = StyleSheet.create({
   chatButtonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
   badgeContainer: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', zIndex: 10, borderWidth: 2, borderColor: '#ffffff' },
   badgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
+  
+  safetyBtn: { backgroundColor: '#ef4444', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10, elevation: 3, borderWidth: 1, borderColor: '#dc2626' },
+  safetyBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+
   cancelOrderBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 1 },
   cancelOrderBtnText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
   modalOverlayQR: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 20 },

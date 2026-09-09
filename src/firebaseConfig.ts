@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getAuth, getReactNativePersistence, initializeAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage'; // 1. أضفنا استدعاء مكتبة التخزين
 
 const firebaseConfig = {
   apiKey: "AIzaSyDq5trvT-Hfw1y7nwllqe3a2A0uf9AevOS",
@@ -25,3 +26,4 @@ try {
 
 export const auth = authInstance;
 export const db = getFirestore(app);
+export const storage = getStorage(app); // 2. أضفنا تصدير التخزين عشان باقي الشاشات تقدر تستخدمه
