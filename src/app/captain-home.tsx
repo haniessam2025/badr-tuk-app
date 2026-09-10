@@ -114,6 +114,17 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
 
 export default function CaptainHome() {
   const router = useRouter();
+  
+  // --- أنيميشن البحث (البرق) ---
+  const lightningAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(lightningAnim, { toValue: 1.4, duration: 800, useNativeDriver: true }),
+        Animated.timing(lightningAnim, { toValue: 1, duration: 800, useNativeDriver: true })
+      ])
+    ).start();
+  }, []);
   const [isOnline, setIsOnline] = useState(false);
   const toggleAnim = useRef(new Animated.Value(0)).current; 
 

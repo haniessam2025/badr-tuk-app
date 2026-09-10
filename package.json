@@ -11,6 +11,7 @@
     "@react-native-picker/picker": "^2.11.4",
     "@zegocloud/zego-uikit-prebuilt-call-rn": "^6.7.0",
     "expo": "~57.0.14",
+    "expo-av": "^16.0.8",
     "expo-camera": "~57.0.4",
     "expo-constants": "~57.0.17",
     "expo-dev-client": "~57.0.18",
