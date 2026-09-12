@@ -6,11 +6,12 @@ import { db } from '../firebaseConfig';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'pending' | 'captains' | 'passengers' | 'support'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'support'>('pending');
   
   const [captains, setCaptains] = useState<any[]>([]);
   const [passengers, setPassengers] = useState<any[]>([]);
   const [complaints, setComplaints] = useState<any[]>([]);
+  const [updateRequests, setUpdateRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [searchCaptain, setSearchCaptain] = useState('');
@@ -62,7 +63,14 @@ export default function AdminDashboard() {
       setComplaints(list);
     });
 
-    return () => { unsubCaptains(); unsubPassengers(); unsubComplaints(); };
+    const unsubUpdates = onSnapshot(collection(db, 'update_requests'), (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      const pendingUpdates = list.filter(r => r.status === 'pending');
+      pendingUpdates.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setUpdateRequests(pendingUpdates);
+    });
+
+    return () => { unsubCaptains(); unsubPassengers(); unsubComplaints(); unsubUpdates(); };
   }, []);
 
   const pendingCaptains = captains.filter(c => c.status === 'pending_approval');
@@ -81,6 +89,50 @@ export default function AdminDashboard() {
   };
   const rejectCaptain = async (id: string) => {
     try { await updateDoc(doc(db, 'captains', id), { status: 'rejected' }); Alert.alert('تم 🛑', 'تم الرفض.'); } catch (e) {}
+  };
+
+  const handleApproveUpdate = async (req: any) => {
+    try {
+      await updateDoc(doc(db, 'captains', req.captainId), {
+        name: req.newData.name,
+        vehicle: req.newData.vehicle,
+        vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt',
+        vehicleDetails: req.newData.vehicleDetails || null,
+        avatar: req.newData.avatar,
+        profileImage: req.newData.avatar // للتوافق القديم
+      });
+      await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
+      await addDoc(collection(db, 'notifications'), {
+        userId: req.captainId,
+        userType: 'captain',
+        title: 'تحديث البيانات',
+        message: 'تمت الموافقة على طلب تعديل بياناتك بنجاح.',
+        timestamp: serverTimestamp(),
+        read: false,
+        sender: 'الإدارة'
+      });
+      Alert.alert('نجاح', 'تمت الموافقة وتحديث بيانات الكابتن بنجاح.');
+    } catch (e) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الموافقة على الطلب.');
+    }
+  };
+
+  const handleRejectUpdate = async (req: any) => {
+    try {
+      await updateDoc(doc(db, 'update_requests', req.id), { status: 'rejected' });
+      await addDoc(collection(db, 'notifications'), {
+        userId: req.captainId,
+        userType: 'captain',
+        title: 'تحديث البيانات',
+        message: 'تم رفض طلب تعديل بياناتك لمخالفته الشروط. تواصل مع الدعم للمزيد من التفاصيل.',
+        timestamp: serverTimestamp(),
+        read: false,
+        sender: 'الإدارة'
+      });
+      Alert.alert('تم', 'تم رفض طلب التعديل.');
+    } catch (e) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.');
+    }
   };
   
   const toggleBanUser = async (user: any, type: 'captain' | 'passenger') => {
@@ -101,7 +153,7 @@ export default function AdminDashboard() {
   const deleteUserAccount = async (userId: string, type: 'captain' | 'passenger') => {
     Alert.alert(
       'مسح بيانات الحساب ⚠️',
-      'سيتم مسح بيانات هذا الحساب تماماً من قاعدة البيانات. سيكون بإمكان صاحب الرقم التسجيل مرة أخرى كحساب جديد. هل أنت متأكد؟',
+      'سيتم مسح بيانات هذا الحساب تماماً من قاعدة البيانات. هل أنت متأكد؟',
       [{ text: 'إلغاء', style: 'cancel' },
        { text: 'نعم، امسح البيانات', style: 'destructive', onPress: async () => {
             const collectionName = type === 'captain' ? 'captains' : 'passengers';
@@ -109,7 +161,7 @@ export default function AdminDashboard() {
               await deleteDoc(doc(db, collectionName, userId));
               Alert.alert('تم الحذف 🗑️', 'تم مسح الحساب وبياناته بنجاح.');
               if (selectedUser?.id === userId) { setProfileModalVisible(false); setSelectedUser(null); }
-            } catch (error) { Alert.alert('خطأ', 'فشلت عملية الحذف، تأكد من اتصالك بالإنترنت.'); }
+            } catch (error) { Alert.alert('خطأ', 'فشلت عملية الحذف.'); }
           }
        }]
     );
@@ -118,10 +170,13 @@ export default function AdminDashboard() {
   const openUserProfile = async (user: any, type: 'captain' | 'passenger') => {
     setSelectedUser(user); setSelectedUserType(type); setProfileModalVisible(true); setLoadingProfile(true);
     try {
-      const fieldName = type === 'captain' ? 'captainId' : 'passengerId';
-      const q = query(collection(db, 'ratings'), where(fieldName, '==', user.id));
+        const fieldName = type === 'captain' ? 'captainId' : 'passengerId';
+        const targetType = type === 'captain' ? 'passenger_rating_captain' : 'captain_rating_passenger';
+        const q = query(collection(db, 'ratings'), where(fieldName, '==', user.id), where('type', '==', targetType));
       const snap = await getDocs(q);
-      setUserRatings(snap.docs.map(d => d.data()));
+      const fetchedRatings = snap.docs.map(d => d.data());
+      fetchedRatings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setUserRatings(fetchedRatings);
     } catch (error) {} finally { setLoadingProfile(false); }
   };
 
@@ -188,7 +243,6 @@ export default function AdminDashboard() {
     } catch (e) {} finally { setSendingReply(false); }
   };
 
-  // حساب متوسط التقييمات للملف الشخصي
   const getAverageRating = () => {
     if (userRatings.length === 0) return 5;
     const total = userRatings.reduce((sum, current) => sum + (current.rating || 0), 0);
@@ -205,8 +259,12 @@ export default function AdminDashboard() {
 
       <View style={styles.tabsRow}>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
-          <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>طلبات</Text>
+          <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>تسجيل</Text>
           {pendingCaptains.length > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{pendingCaptains.length}</Text></View>}
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'updates' && styles.tabBtnActive]} onPress={() => setActiveTab('updates')}>
+          <Text style={[styles.tabBtnText, activeTab === 'updates' && styles.tabBtnTextActive]}>تعديلات</Text>
+          {updateRequests.length > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{updateRequests.length}</Text></View>}
         </TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'captains' && styles.tabBtnActive]} onPress={() => setActiveTab('captains')}><Text style={[styles.tabBtnText, activeTab === 'captains' && styles.tabBtnTextActive]}>كباتن</Text></TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'passengers' && styles.tabBtnActive]} onPress={() => setActiveTab('passengers')}><Text style={[styles.tabBtnText, activeTab === 'passengers' && styles.tabBtnTextActive]}>ركاب</Text></TouchableOpacity>
@@ -232,6 +290,44 @@ export default function AdminDashboard() {
                 <View style={styles.actionRow}>
                   <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectCaptain(item.id)}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
                   <TouchableOpacity style={styles.approveBtn} onPress={() => approveCaptain(item.id)}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      ) : activeTab === 'updates' ? (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {updateRequests.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات تعديل ✨</Text></View> : (
+            updateRequests.map(req => (
+              <View key={req.id} style={styles.userCard}>
+                <Text style={styles.updateRequestHeader}>طلب تعديل بيانات</Text>
+                <Text style={styles.updateRequestPhone}>رقم الكابتن: {req.captainPhone}</Text>
+                
+                <View style={styles.updateComparisonBox}>
+                  <View style={styles.updateCol}>
+                    <Text style={styles.updateColTitleNew}>البيانات الجديدة</Text>
+                    <Image source={{ uri: req.newData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
+                    <Text style={styles.updateText}>{req.newData.name}</Text>
+                    <Text style={styles.updateText}>{req.newData.vehicle}</Text>
+                  </View>
+                  <View style={styles.updateDivider} />
+                  <View style={styles.updateCol}>
+                    <Text style={styles.updateColTitleOld}>البيانات القديمة</Text>
+                    <Image source={{ uri: req.oldData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
+                    <Text style={styles.updateText}>{req.oldData.name}</Text>
+                    <Text style={styles.updateText}>{req.oldData.vehicle}</Text>
+                  </View>
+                </View>
+
+                {req.newData.vehicleCategory && req.newData.vehicleCategory !== 'car' && (
+                   <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs({ vehicleImage: req.newData.vehicleDetails?.image })}>
+                     <Text style={styles.inspectDocsBtnText}>🔍 معاينة صورة المركبة الجديدة</Text>
+                   </TouchableOpacity>
+                )}
+
+                <View style={styles.actionRow}>
+                  <TouchableOpacity style={styles.rejectBtn} onPress={() => handleRejectUpdate(req)}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.approveBtn} onPress={() => handleApproveUpdate(req)}><Text style={styles.approveBtnText}>موافقة وتحديث ✔️</Text></TouchableOpacity>
                 </View>
               </View>
             ))
@@ -292,7 +388,7 @@ export default function AdminDashboard() {
         </ScrollView>
       )}
 
-      {/* مودال الملف الشخصي الشامل (Profile View) */}
+      {/* مودال الملف الشخصي الشامل */}
       <Modal visible={profileModalVisible} transparent={true} animationType="slide">
         <View style={styles.fullScreenModal}>
           <View style={styles.profileModalHeader}>
@@ -307,7 +403,6 @@ export default function AdminDashboard() {
               <View style={styles.profileHeaderBox}>
                 <Image source={{ uri: selectedUser.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.profileBigAvatar} />
                 
-                {/* --- نظام النجوم بناءً على التقييمات --- */}
                 <View style={styles.profileAvgRatingRow}>
                   <Text style={styles.profileAvgStars}>
                     {'⭐'.repeat(averageRating)}{'☆'.repeat(5 - averageRating)}
@@ -341,12 +436,28 @@ export default function AdminDashboard() {
               <View style={styles.ratingsSection}>
                 <Text style={styles.sectionTitleProfile}>سجل التقييمات ({userRatings.length})</Text>
                 {loadingProfile ? <ActivityIndicator color="#eab308" /> : userRatings.length === 0 ? <Text style={styles.emptyTextSupport}>لم يتلقَ أي تقييمات بعد.</Text> : (
-                  userRatings.map((rating, idx) => (
-                    <View key={idx} style={styles.ratingItem}>
-                      <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}><Text style={styles.starsText}>{'⭐'.repeat(rating.rating)}</Text><Text style={styles.ratingUserText}>من: {rating.senderName || (selectedUserType === 'captain' ? 'راكب' : 'كابتن')}</Text></View>
-                      <Text style={styles.ratingReasonText}>"{rating.reason}"</Text>
-                    </View>
-                  ))
+                  userRatings.map((rating, idx) => {
+                    let finalSenderName = rating.senderName;
+                    if (!finalSenderName) {
+                      if (selectedUserType === 'captain') {
+                        const pass = passengers.find(p => p.id === rating.passengerId);
+                        finalSenderName = pass ? pass.name : 'راكب (حساب محذوف)';
+                      } else {
+                        const cap = captains.find(c => c.id === rating.captainId);
+                        finalSenderName = cap ? cap.name : 'كابتن (حساب محذوف)';
+                      }
+                    }
+
+                    return (
+                      <View key={idx} style={styles.ratingItem}>
+                        <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}>
+                          <Text style={styles.starsText}>{'⭐'.repeat(rating.rating)}</Text>
+                          <Text style={styles.ratingUserText}>من: {finalSenderName}</Text>
+                        </View>
+                        <Text style={styles.ratingReasonText}>"{rating.reason}"</Text>
+                      </View>
+                    );
+                  })
                 )}
               </View>
 
@@ -360,15 +471,12 @@ export default function AdminDashboard() {
         </View>
       </Modal>
 
-      {/* --- نافذة إرسال الرسالة المباشرة من البروفايل --- */}
       <Modal visible={profileMsgModalVisible} transparent={true} animationType="fade">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlayCentered}>
           <View style={styles.walletModalContent}>
             <Text style={styles.modalTitleText}>مراسلة: {selectedUser?.name}</Text>
-            
             <TextInput style={styles.inputModal} placeholder="عنوان الرسالة (تنبيه، مكافأة...)" placeholderTextColor="#64748b" value={profileMsgTitle} onChangeText={setProfileMsgTitle} textAlign="right" />
             <TextInput style={[styles.inputModal, { minHeight: 80, textAlignVertical: 'top' }]} placeholder="اكتب نص الرسالة هنا..." placeholderTextColor="#64748b" multiline value={profileMsgText} onChangeText={setProfileMsgText} textAlign="right" />
-            
             <View style={styles.actionRowModal}>
               <TouchableOpacity style={styles.confirmModalBtn} onPress={handleSendProfileMessage} disabled={sendingProfileMsg}>
                 {sendingProfileMsg ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmModalBtnText}>إرسال الإشعار فوراً</Text>}
@@ -381,7 +489,6 @@ export default function AdminDashboard() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* باقي النوافذ المنبثقة */}
       <Modal visible={walletModalVisible} transparent={true} animationType="fade">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlayCentered}>
           <View style={styles.walletModalContent}>
@@ -405,9 +512,12 @@ export default function AdminDashboard() {
           <View style={styles.docsModalContent}>
             <TouchableOpacity onPress={() => setSelectedDocs(null)} style={{alignSelf: 'flex-start'}}><Text style={styles.closeBtnText}>إغلاق ✖</Text></TouchableOpacity>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.imgLabel}>الوجه</Text><Image source={{ uri: selectedDocs?.idFront }} style={styles.docImage} />
-              <Text style={styles.imgLabel}>الظهر</Text><Image source={{ uri: selectedDocs?.idBack }} style={styles.docImage} />
-              <Text style={styles.imgLabel}>التوكتوك</Text><Image source={{ uri: selectedDocs?.vehicleImage }} style={styles.docImage} />
+              {selectedDocs?.idFront && <Text style={styles.imgLabel}>الوجه</Text>}
+              {selectedDocs?.idFront && <Image source={{ uri: selectedDocs.idFront }} style={styles.docImage} />}
+              {selectedDocs?.idBack && <Text style={styles.imgLabel}>الظهر</Text>}
+              {selectedDocs?.idBack && <Image source={{ uri: selectedDocs.idBack }} style={styles.docImage} />}
+              {selectedDocs?.vehicleImage && <Text style={styles.imgLabel}>المركبة</Text>}
+              {selectedDocs?.vehicleImage && <Image source={{ uri: selectedDocs.vehicleImage }} style={styles.docImage} />}
             </ScrollView>
           </View>
         </View>
@@ -438,9 +548,9 @@ const styles = StyleSheet.create({
   tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },
   tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, position: 'relative' },
   tabBtnActive: { backgroundColor: '#eab308' },
-  tabBtnText: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold' },
+  tabBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
   tabBtnTextActive: { color: '#000000' },
-  badge: { position: 'absolute', top: -5, right: 5, backgroundColor: '#ef4444', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  badge: { position: 'absolute', top: -5, right: 2, backgroundColor: '#ef4444', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
 
   searchInput: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
@@ -460,6 +570,17 @@ const styles = StyleSheet.create({
   balanceLabelText: { color: '#64748b', fontSize: 11, fontWeight: 'bold' },
   balanceNum: { fontSize: 15, fontWeight: 'bold' },
 
+  // تنسيقات بطاقة طلبات التعديل
+  updateRequestHeader: { color: '#eab308', fontWeight: 'bold', marginBottom: 5, textAlign: 'right', fontSize: 16 },
+  updateRequestPhone: { color: '#94a3b8', textAlign: 'right', marginBottom: 15, fontSize: 13 },
+  updateComparisonBox: { flexDirection: 'row-reverse', backgroundColor: '#0f172a', borderRadius: 10, padding: 12, marginBottom: 15 },
+  updateCol: { flex: 1, alignItems: 'center' },
+  updateDivider: { width: 1, backgroundColor: '#334155', marginHorizontal: 10 },
+  updateColTitleNew: { color: '#10b981', fontWeight: 'bold', fontSize: 13, marginBottom: 10 },
+  updateColTitleOld: { color: '#ef4444', fontWeight: 'bold', fontSize: 13, marginBottom: 10 },
+  updateAvatar: { width: 50, height: 50, borderRadius: 25, marginBottom: 8, backgroundColor: '#334155' },
+  updateText: { color: '#cbd5e1', fontSize: 12, textAlign: 'center', marginBottom: 4 },
+
   actionRow: { flexDirection: 'row-reverse', gap: 10, marginTop: 12 },
   approveBtn: { flex: 2, backgroundColor: '#10b981', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   approveBtnText: { color: '#ffffff', fontWeight: 'bold' },
@@ -468,13 +589,11 @@ const styles = StyleSheet.create({
   inspectDocsBtn: { backgroundColor: '#334155', paddingVertical: 8, borderRadius: 8, alignItems: 'center', marginTop: 12 },
   inspectDocsBtnText: { color: '#38bdf8', fontSize: 13, fontWeight: 'bold' },
 
-  /* Profile Modal Styles */
   fullScreenModal: { flex: 1, backgroundColor: '#0f172a' },
   profileModalHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#1e293b', borderBottomWidth: 1, borderColor: '#334155' },
   profileHeaderBox: { alignItems: 'center', marginBottom: 20, backgroundColor: '#1e293b', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#334155' },
   profileBigAvatar: { width: 90, height: 90, borderRadius: 45, borderWidth: 3, borderColor: '#eab308', marginBottom: 10 },
   
-  // تنسيقات نجوم التقييم
   profileAvgRatingRow: { flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 15 },
   profileAvgStars: { fontSize: 18, color: '#f59e0b', letterSpacing: 2 },
   profileRatingCount: { fontSize: 13, color: '#94a3b8', marginRight: 5, fontWeight: 'bold' },
@@ -510,7 +629,6 @@ const styles = StyleSheet.create({
   deleteBtnBig: { backgroundColor: '#991b1b', padding: 15, borderRadius: 12, alignItems: 'center' },
   deleteBtnBigText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
 
-  /* Support Styles */
   sectionTitle: { color: '#eab308', fontSize: 18, fontWeight: 'bold', textAlign: 'right', marginBottom: 15, marginTop: 10 },
   messagingContainer: { backgroundColor: '#1e293b', padding: 15, borderRadius: 14, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
   supportInput: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
@@ -529,7 +647,6 @@ const styles = StyleSheet.create({
   adminReplyTitle: { color: '#10b981', fontSize: 12, fontWeight: 'bold', textAlign: 'right', marginBottom: 4 },
   adminReplyText: { color: '#f8fafc', fontSize: 13, textAlign: 'right' },
 
-  /* General Modals */
   overlayCentered: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 15 },
   walletModalContent: { backgroundColor: '#1e293b', width: '90%', borderRadius: 16, padding: 20 },
   docsModalContent: { backgroundColor: '#1e293b', width: '100%', maxHeight: '85%', borderRadius: 16, padding: 15 },

@@ -15,10 +15,14 @@ export default function PassengerLogin() {
   // التحقق مما إذا كان الراكب مسجل الدخول مسبقاً
   useEffect(() => {
     const checkExistingLogin = async () => {
-      const passengerId = await AsyncStorage.getItem('currentPassengerId');
-      if (passengerId) {
-        router.replace('/passenger-home');
-      } else {
+      try {
+        const passengerId = await AsyncStorage.getItem('currentPassengerId');
+        if (passengerId) {
+          router.replace('/passenger-home');
+        } else {
+          setCheckingAuth(false);
+        }
+      } catch (e) {
         setCheckingAuth(false);
       }
     };
@@ -27,20 +31,19 @@ export default function PassengerLogin() {
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
-      Alert.alert('تنبيه', 'برجاء إدخال اسم المستخدم وكلمة المرور.');
+      Alert.alert('تنبيه', 'برجاء إدخال اسم المستخدم وكلمة المرور');
       return;
     }
 
     setLoading(true);
-
     try {
-      // البحث عن الراكب في قاعدة البيانات باستخدام حقل 'name' المطابق لاسم المستخدم
+      // البحث عن الراكب في قاعدة البيانات باستخدام حقل "name"
       const q = query(
-        collection(db, 'passengers'), 
-        where('name', '==', username.trim()), 
-        where('password', '==', password.trim())
+        collection(db, 'passengers'),
+        where('name', '==', username.trim()),
+        where('password', '==', password.trim()) // تم تعديل علامة التساوي هنا
       );
-      
+
       const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
@@ -57,15 +60,15 @@ export default function PassengerLogin() {
         // حفظ بيانات الدخول في ذاكرة الهاتف
         await AsyncStorage.setItem('currentPassengerId', passengerDoc.id);
         await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
-
+        
         // التوجيه للصفحة الرئيسية
         router.replace('/passenger-home');
       } else {
-        Alert.alert('خطأ', 'اسم المستخدم أو كلمة المرور غير صحيحة.');
+        Alert.alert('خطأ', 'اسم المستخدم أو كلمة المرور غير صحيحة');
       }
     } catch (error) {
-      console.log(error);
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول، تأكد من اتصالك بالإنترنت.');
+      console.log('Login Error:', error);
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء تسجيل الدخول، تأكد من اتصالك بالإنترنت');
     } finally {
       setLoading(false);
     }
@@ -80,12 +83,12 @@ export default function PassengerLogin() {
   }
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>تسجيل دخول الراكب 🛺</Text>
+        <Text style={styles.title}>تسجيل دخول الراكب</Text>
         <Text style={styles.subtitle}>أدخل بيانات حسابك للمتابعة</Text>
 
         <View style={styles.inputContainer}>
@@ -114,8 +117,8 @@ export default function PassengerLogin() {
           />
         </View>
 
-        <TouchableOpacity 
-          style={styles.loginButton} 
+        <TouchableOpacity
+          style={styles.loginButton}
           onPress={handleLogin}
           disabled={loading}
         >

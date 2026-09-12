@@ -7,41 +7,48 @@ import { db } from '../firebaseConfig';
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { senderType } = useLocalSearchParams(); 
   
+  // الحل السحري لاستقبال رقم المشوار بأي صيغة (سواء L سمول أو I كابيتال)
+  const params = useLocalSearchParams();
+  const senderType = params.senderType;
+  const paramRideId = params.rideId || params.rideld; 
+
   const [messages, setMessages] = useState<any[]>([]);
-  const [inputText, setInputText] = useState('');
+  const [inputText, setInputText] = useState("");
+  // توحيد اسم المتغير عشان ميحصلش أي تضارب
   const [rideId, setRideId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  
-  // حالة لمراقبة الكيبورد (مفتوحة ولا مقفولة)
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-  
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    loadActiveRide();
+    // تشغيل الشات مباشرة برقم المشوار بدون الانتظار
+    if (paramRideId) {
+      const activeRideId = Array.isArray(paramRideId) ? paramRideId[0] : paramRideId;
+      setRideId(activeRideId);
+      markMessagesAsRead(activeRideId);
+      listenToMessages(activeRideId);
+    } else {
+      loadActiveRide();
+    }
 
-    // تشغيل مراقب الكيبورد لضبط حركة المستطيل
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
+    
     const keyboardDidShowListener = Keyboard.addListener(showEvent, () => {
       setKeyboardVisible(true);
-      // النزول لآخر رسالة تلقائياً أول ما الكيبورد تفتح
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      setTimeout(() => { flatListRef.current?.scrollToEnd({ animated: true }); }, 100);
     });
+    
     const keyboardDidHideListener = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false);
     });
-
+    
     return () => {
       keyboardDidShowListener.remove();
       keyboardDidHideListener.remove();
     };
-  }, []);
+  }, [paramRideId]);
 
   const loadActiveRide = async () => {
     try {
@@ -69,7 +76,8 @@ export default function ChatScreen() {
       if (userId) {
         const q = query(collection(db, 'rides'), where(field, '==', userId));
         const snap = await getDocs(q);
-        const activeDoc = snap.docs.find(d => ['accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress'].includes(d.data().status));
+        // ضفنا waiting_for_scan عشان الشات يقرأ المشوار في كل الحالات
+        const activeDoc = snap.docs.find(d => ['accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress', 'waiting_for_scan'].includes(d.data().status));
         
         if (activeDoc) {
           setRideId(activeDoc.id);
@@ -246,7 +254,6 @@ export default function ChatScreen() {
   }
 
   return (
-    // استخدام الشاشة بالكامل داخل الكيبورد عشان نزق كل حاجة فوق بشكل إجباري وسليم
     <KeyboardAvoidingView 
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
@@ -278,11 +285,8 @@ export default function ChatScreen() {
         }}
       />
 
-      {/* المستطيل اللي بيرتفع وينزل مع الكيبورد */}
       <View style={[
         styles.inputContainer, 
-        // لو الكيبورد مفتوحة، المستطيل هينزل يرسى عليها بمسافة 10 بس عشان تشوف الكلام
-        // لو مقفولة، هيترفع 45 بيكسل (حوالي 3 سطور)
         { marginBottom: isKeyboardVisible ? (Platform.OS === 'ios' ? 10 : 5) : 45 }
       ]}>
         <TextInput
@@ -333,9 +337,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff', 
     borderWidth: 1, 
     borderColor: '#e2e8f0',
-    borderRadius: 25, // شكل الكبسولة الأنيق
+    borderRadius: 25, 
     marginHorizontal: 15,
-    elevation: 3, // ظل خفيف بيدي شكل طافي شيك جداً
+    elevation: 3, 
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
