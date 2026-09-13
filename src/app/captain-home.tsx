@@ -126,7 +126,7 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
   );
 };
 
-const EmptySearchingState = () => {
+const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestination: boolean }) => {
   const lightningAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(Animated.sequence([
@@ -139,7 +139,9 @@ const EmptySearchingState = () => {
       <Animated.View style={{ transform: [{ scale: lightningAnim }], marginBottom: 20 }}>
         <Text style={{ fontSize: 75 }}>⚡</Text>
       </Animated.View>
-      <Text style={styles.emptyText}>جاري البحث عن مشاوير...</Text>
+      <Text style={styles.emptyText}>
+        {hasConfirmedDestination ? 'جاري البحث عن مشاوير نحو وجهتك...' : 'جاري البحث عن مشاوير...'}
+      </Text>
       <Text style={{ fontSize: 13, color: '#94a3b8', marginTop: 8 }}>الطلبات هتظهر هنا تلقائياً بمجرد توفرها</Text>
     </View>
   );
@@ -556,52 +558,44 @@ export default function CaptainHome() {
               <View style={styles.filterHeaderRow}>
                 <Text style={styles.filterTitle}>مشوار في سكتي 📍</Text>
                 <TouchableOpacity onPress={() => {
-                  setIsDestinationFilterActive(!isDestinationFilterActive);
-                  if (isDestinationFilterActive) {
-                    setConfirmedDestinationFilter(''); // مسح الفلتر عند إيقاف الخاصية
+                  const nextState = !isDestinationFilterActive;
+                  setIsDestinationFilterActive(nextState);
+                  if (!nextState) {
+                    setConfirmedDestinationFilter('');
+                    setDestinationFilterText('');
                   }
-                }} style={[styles.filterToggle, isDestinationFilterActive && styles.filterToggleActive]}>
-                  <Text style={[styles.filterToggleText, isDestinationFilterActive && styles.filterToggleTextActive]}>{isDestinationFilterActive ? 'مُفعل' : 'إيقاف'}</Text>
+                }} style={[styles.filterToggle, isDestinationFilterActive ? styles.filterToggleActive : { backgroundColor: '#e2e8f0' }]}>
+                  <Text style={[styles.filterToggleText, isDestinationFilterActive && styles.filterToggleTextActive]}>
+                    {isDestinationFilterActive ? 'مُفعل' : 'غير مُفعل'}
+                  </Text>
                 </TouchableOpacity>
               </View>
+
               {isDestinationFilterActive && (
-                 <View>
+                 <View style={{marginTop: 10}}>
                    <TextInput 
-                      style={styles.filterInput}
-                      placeholder="أدخل الوجهة أو اختر من القائمة..."
+                      style={[
+                        styles.filterInput, 
+                        (confirmedDestinationFilter && destinationFilterText === confirmedDestinationFilter) ? styles.filterInputConfirmed : {}
+                      ]}
+                      placeholder="أدخل الوجهة (مثال: الحي المتميز)..."
                       placeholderTextColor="#94a3b8"
                       value={destinationFilterText}
                       onChangeText={setDestinationFilterText}
                       textAlign="right"
                    />
-                   {/* اقتراحات أحياء مدينة بدر */}
-                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} inverted>
-                     {['الحي المتميز', 'دار مصر', 'سكن مصر', 'الإسكان الاجتماعي', 'الحي الأول', 'الحي الثاني', 'الحي الثالث', 'الجامعة الروسية', 'جامعة بدر', 'المنطقة الصناعية'].map((area, idx) => (
-                       <TouchableOpacity 
-                         key={idx} 
-                         style={[styles.areaChip, destinationFilterText === area && styles.areaChipActive]}
-                         onPress={() => setDestinationFilterText(area)}
-                       >
-                         <Text style={[styles.areaChipText, destinationFilterText === area && styles.areaChipTextActive]}>{area}</Text>
-                       </TouchableOpacity>
-                     ))}
-                   </ScrollView>
-
-                   {/* زر التأكيد الجديد */}
-                   <TouchableOpacity 
-                     style={{backgroundColor: '#2563eb', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12}}
-                     onPress={() => {
-                       if(!destinationFilterText.trim()) {
-                         Alert.alert('تنبيه', 'الرجاء كتابة الوجهة أو اختيارها أولاً.');
-                         return;
-                       }
-                       setConfirmedDestinationFilter(destinationFilterText);
-                       Alert.alert("تم التأكيد بنجاح", `تطبيقك الآن مبرمج لاستقبال المشاوير المتجهة إلى: ${destinationFilterText} فقط.`);
-                     }}
-                   >
-                     <Text style={{color: '#ffffff', fontWeight: 'bold', fontSize: 15}}>تأكيد الوجهة للبحث</Text>
-                   </TouchableOpacity>
-
+                   
+                   {/* يظهر الزرار فقط إذا كان المستطيل غير فارغ والوجهة المكتوبة لم يتم تأكيدها بعد */}
+                   {destinationFilterText.trim() !== '' && destinationFilterText !== confirmedDestinationFilter && (
+                     <TouchableOpacity 
+                       style={{backgroundColor: '#2563eb', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 10}}
+                       onPress={() => {
+                         setConfirmedDestinationFilter(destinationFilterText);
+                       }}
+                     >
+                       <Text style={{color: '#ffffff', fontWeight: 'bold', fontSize: 15}}>تأكيد الوجهة للبحث</Text>
+                     </TouchableOpacity>
+                   )}
                  </View>
               )}
             </View>
@@ -613,7 +607,7 @@ export default function CaptainHome() {
               <Text style={{ fontSize: 13, color: '#94a3b8', marginTop: 5 }}>فعل زر الاتصال بالأعلى لاستقبال الطلبات</Text>
             </View>
           ) : displayRequests.length === 0 ? (
-            <EmptySearchingState />
+            <EmptySearchingState hasConfirmedDestination={isDestinationFilterActive && confirmedDestinationFilter !== ''} />
           ) : (
             <FlatList data={displayRequests} keyExtractor={(item) => item.id} renderItem={({ item }) => <SwipeableRequestItem item={item} onSendOffer={sendOffer} onEditPrice={openPriceModal} onDismiss={handleDismissRequest} hasSentOffer={sentOffers.includes(item.id)} captainLocation={captainLocation} />} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }} />
           )}
@@ -844,6 +838,7 @@ const styles = StyleSheet.create({
   filterToggleText: { color: '#64748b', fontSize: 12, fontWeight: 'bold' },
   filterToggleTextActive: { color: '#ffffff' },
   filterInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 10, fontSize: 14, marginTop: 10, color: '#0f172a', textAlign: 'right' },
+  filterInputConfirmed: { backgroundColor: '#dcfce7', borderColor: '#86efac', color: '#166534', fontWeight: 'bold' },
   suggestionsBox: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, marginTop: 5, maxHeight: 150, elevation: 3 },
   suggestionItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   suggestionItemText: { fontSize: 14, color: '#334155', textAlign: 'right' },
