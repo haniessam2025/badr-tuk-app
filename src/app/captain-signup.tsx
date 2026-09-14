@@ -39,6 +39,7 @@ export default function CaptainRegister() {
   const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('car');
 
   const [name, setName] = useState('');
+  const [nationalId, setNationalId] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -62,10 +63,11 @@ export default function CaptainRegister() {
   const refNum = useRef<TextInput>(null);
 
   const [tuktukNumber, setTuktukNumber] = useState('');
+  const [tuktukAltType, setTuktukAltType] = useState(''); // 👈 متغير جديد لتحديد نوع بديل التوكتوك
   const [scooterModel, setScooterModel] = useState('');
 
   const [errors, setErrors] = useState({
-    name: '', phone: '', password: '', confirmPassword: '', customCarColor: '', plateNumbers: '', scooterModel: ''
+    name: '', nationalId: '', phone: '', password: '', confirmPassword: '', customCarColor: '', plateNumbers: '', scooterModel: ''
   });
 
   const [images, setImages] = useState<any>({
@@ -79,26 +81,15 @@ export default function CaptainRegister() {
   const [dropdownTarget, setDropdownTarget] = useState<'carBrand' | 'carModel' | 'carYear' | 'carColor' | null>(null);
   const [dropdownTitle, setDropdownTitle] = useState('');
 
-// الحل الجذري والنهائي: استخدام XHR بدلاً من fetch لتجنب تلف الـ Blob في React Native
   const uploadImageToStorage = async (uri: string, imageName: string) => {
     if (!uri) return null;
-    
-    // حماية ضد الـ Base64 القديم
-    if (uri.startsWith('data:')) {
-      throw new Error('يرجى إعادة اختيار الصورة مرة أخرى. تم تحديث النظام.');
-    }
+    if (uri.startsWith('data:')) throw new Error('يرجى إعادة اختيار الصورة مرة أخرى. تم تحديث النظام.');
 
     try {
-      // بناء الـ Blob بشكل سليم باستخدام XHR
       const blob: Blob = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.onload = function() {
-          resolve(xhr.response);
-        };
-        xhr.onerror = function(e) {
-          console.error("XHR Error:", e);
-          reject(new TypeError("فشل في تجهيز الصورة للرفع"));
-        };
+        xhr.onload = function() { resolve(xhr.response); };
+        xhr.onerror = function(e) { reject(new TypeError("فشل في تجهيز الصورة للرفع")); };
         xhr.responseType = "blob";
         xhr.open("GET", uri, true);
         xhr.send(null);
@@ -107,25 +98,28 @@ export default function CaptainRegister() {
       const storageRef = ref(storage, `captains_documents/${phone}/${imageName}`);
       const metadata = { contentType: 'image/jpeg' };
       
-      // رفع الملف مع الـ metadata
       await uploadBytes(storageRef, blob, metadata);
-      
-      // تفريغ الذاكرة المؤقتة للـ Blob بعد الرفع لمنع تسرب الذاكرة (Memory Leak)
       // @ts-ignore
       if (blob.close) { blob.close(); }
       
-      const downloadURL = await getDownloadURL(storageRef);
-      return downloadURL;
+      return await getDownloadURL(storageRef);
     } catch (error: any) {
-      console.error("Upload error details: ", error);
       throw new Error(`${error.message}`);
     }
   };
+
   const validateName = () => {
     if (name.trim().length === 0) {
       setErrors(prev => ({ ...prev, name: 'برجاء إدخال الاسم' })); return false;
     }
     setErrors(prev => ({ ...prev, name: '' })); return true;
+  };
+
+  const validateNationalId = () => {
+    if (nationalId.trim().length !== 14 || isNaN(Number(nationalId))) {
+      setErrors(prev => ({ ...prev, nationalId: 'الرقم القومي يجب أن يتكون من 14 رقماً' })); return false;
+    }
+    setErrors(prev => ({ ...prev, nationalId: '' })); return true;
   };
 
   const validatePhone = () => {
@@ -175,7 +169,7 @@ export default function CaptainRegister() {
 
   const switchTab = (tab: 'basic' | 'vehicle') => {
     if (tab === 'vehicle') {
-      if (!validateName() || !validatePhone() || !validatePassword() || !validateConfirmPassword()) {
+      if (!validateName() || !validateNationalId() || !validatePhone() || !validatePassword() || !validateConfirmPassword()) {
         Alert.alert('تنبيه', 'برجاء تصحيح الأخطاء في البيانات الأساسية أولاً.');
         return;
       }
@@ -241,6 +235,7 @@ export default function CaptainRegister() {
     let missingFields = []; 
 
     if (!validateName()) missingFields.push('الاسم الرباعي');
+    if (!validateNationalId()) missingFields.push('الرقم القومي (14 رقم)');
     if (!validatePhone()) missingFields.push('رقم الهاتف الصحيح');
     if (!validatePassword()) missingFields.push('كلمة المرور');
     if (!validateConfirmPassword()) missingFields.push('تأكيد كلمة المرور');
@@ -271,8 +266,10 @@ export default function CaptainRegister() {
     } else if (vehicleCategory === 'scooter') {
       if (!validateScooterModel()) missingFields.push('موديل السكوتر');
       if (!images.scooterImage) missingFields.push('صورة السكوتر');
-    } else {
-      if (!images.tuktukImage) missingFields.push('صورة بديل التوكتوك');
+    } else if (vehicleCategory === 'tuktuk_alt') {
+      // 👈 التحقق من اختيار النوع لبديل التوكتوك
+      if (!tuktukAltType) missingFields.push('تحديد نوع بديل التوكتوك');
+      if (!images.tuktukImage) missingFields.push('صورة المركبة');
     }
 
     if (missingFields.length > 0) {
@@ -282,15 +279,26 @@ export default function CaptainRegister() {
 
     setIsLoading(true);
     try {
-      const q = query(collection(db, 'captains'), where('phone', '==', phone));
-      if (!(await getDocs(q)).empty) { Alert.alert('تنبيه', 'رقم الهاتف مسجل بالفعل.'); setIsLoading(false); return; }
+      const vehicleName = vehicleCategory === 'car' ? 'سيارة' : vehicleCategory === 'scooter' ? 'سكوتر' : 'بديل توكتوك';
+
+      const phoneQ = query(collection(db, 'captains'), where('phone', '==', phone), where('vehicleCategory', '==', vehicleCategory));
+      if (!(await getDocs(phoneQ)).empty) { 
+        Alert.alert('تنبيه', `هذا الرقم مسجل بالفعل ككابتن على (${vehicleName}). يمكنك التسجيل بمركبة أخرى.`); 
+        setIsLoading(false); return; 
+      }
+
+      const idQ = query(collection(db, 'captains'), where('nationalId', '==', nationalId), where('vehicleCategory', '==', vehicleCategory));
+      if (!(await getDocs(idQ)).empty) { 
+        Alert.alert('تنبيه', `الرقم القومي مسجل بالفعل لحساب كابتن على (${vehicleName}). يمكنك التسجيل بمركبة أخرى.`); 
+        setIsLoading(false); return; 
+      }
 
       const avatarUrl = await uploadImageToStorage(images.profile, 'profile_image.jpg');
       const idFrontUrl = await uploadImageToStorage(images.idFront, 'id_front.jpg');
       const idBackUrl = await uploadImageToStorage(images.idBack, 'id_back.jpg');
 
       const captainData: any = {
-        name, phone, password, 
+        name, nationalId, phone, password, 
         avatar: avatarUrl, 
         idFront: idFrontUrl, 
         idBack: idBackUrl,
@@ -316,11 +324,12 @@ export default function CaptainRegister() {
         Object.assign(captainData, { tuktukNumber, vehicleImage: scooterImgUrl, vehicle: `سكوتر ${scooterModel}` });
       } else {
         const tuktukImgUrl = await uploadImageToStorage(images.tuktukImage, 'tuktuk_image.jpg');
-        Object.assign(captainData, { tuktukNumber, vehicleImage: tuktukImgUrl, vehicle: 'بديل توكتوك' });
+        // 👈 تسجيل نوع بديل التوكتوك في خانة vehicle ليظهر للراكب
+        Object.assign(captainData, { tuktukNumber, vehicleImage: tuktukImgUrl, vehicle: `بديل توكتوك (${tuktukAltType})` });
       }
 
       await addDoc(collection(db, 'captains'), captainData);
-      Alert.alert('نجاح ⚡', 'تم تسجيل طلبك بنجاح. سيتم مراجعة بياناتك وتفعيل حسابك قريباً.', [{ text: 'حسناً', onPress: () => router.replace('/captain-login') }]);
+      Alert.alert('نجاح ⚡', 'تم التسجيل بنجاح ستتم الموافقة بعد المراجعة خلال 24 ساعة على الأكثر', [{ text: 'حسناً', onPress: () => router.replace('/captain-login') }]);
     } catch (error: any) { 
       Alert.alert('حدث خطأ 🛑', `تفاصيل الخطأ:\n${error.message}`); 
     } finally { 
@@ -355,6 +364,10 @@ export default function CaptainRegister() {
               <Text style={styles.label}>الاسم</Text>
               <TextInput rejectResponderTermination={false} style={[styles.input, errors.name ? styles.inputError : null]} placeholder="ادخل اسمك" value={name} onChangeText={setName} onBlur={validateName} textAlign="right" />
               {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
+
+              <Text style={styles.label}>الرقم القومي</Text>
+              <TextInput rejectResponderTermination={false} style={[styles.input, errors.nationalId ? styles.inputError : null]} placeholder="أدخل الرقم القومي (14 رقم)" value={nationalId} onChangeText={setNationalId} onBlur={validateNationalId} keyboardType="numeric" textAlign="right" maxLength={14} />
+              {errors.nationalId ? <Text style={styles.errorText}>{errors.nationalId}</Text> : null}
 
               <Text style={styles.label}>رقم الهاتف</Text>
               <TextInput rejectResponderTermination={false} style={[styles.input, errors.phone ? styles.inputError : null]} placeholder="مثال: 01012345678" value={phone} onChangeText={setPhone} onBlur={validatePhone} keyboardType="phone-pad" textAlign="right" maxLength={11} />
@@ -436,6 +449,17 @@ export default function CaptainRegister() {
 
               {vehicleCategory === 'tuktuk_alt' && (
                 <View>
+                  {/* 👈 أزرار اختيار نوع بديل التوكتوك */}
+                  <Text style={styles.label}>نوع بديل التوكتوك</Text>
+                  <View style={{ flexDirection: 'row-reverse', gap: 10, marginTop: 5, marginBottom: 10 }}>
+                    <TouchableOpacity style={[styles.vTypeBtn, tuktukAltType === 'كيوت 3 راكب' && styles.vTypeBtnActive]} onPress={() => setTuktukAltType('كيوت 3 راكب')}>
+                      <Text style={[styles.vTypeText, tuktukAltType === 'كيوت 3 راكب' && styles.vTypeTextActive]}>كيوت 3 راكب</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.vTypeBtn, tuktukAltType === 'بديل 7 راكب' && styles.vTypeBtnActive]} onPress={() => setTuktukAltType('بديل 7 راكب')}>
+                      <Text style={[styles.vTypeText, tuktukAltType === 'بديل 7 راكب' && styles.vTypeTextActive]}>بديل 7 راكب</Text>
+                    </TouchableOpacity>
+                  </View>
+
                   <Text style={styles.label}>رقم المركبة (إن وجد)</Text>
                   <TextInput rejectResponderTermination={false} style={styles.input} placeholder="أدخل الرقم أو اتركها فارغة" value={tuktukNumber} onChangeText={setTuktukNumber} textAlign="right" />
                   <Text style={styles.sectionSubtitle}>صورة المركبة</Text>

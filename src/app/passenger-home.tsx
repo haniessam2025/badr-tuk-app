@@ -39,6 +39,7 @@ export default function PassengerHome() {
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number, longitude: number } | null>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
   const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
+  const [passengersCount, setPassengersCount] = useState('1'); // 👈 متغير عدد الركاب
   const [price, setPrice] = useState('');
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
@@ -397,13 +398,12 @@ export default function PassengerHome() {
       else if (vType === 'scooter') base = 10 + ((validDests.length - 1) * 5);
       else base = 15 + ((validDests.length - 1) * 10);
 
-      // --- تطبيق تسعير الذروة (Surge Pricing) ديناميكياً بناءً على الوقت ---
       const currentHour = new Date().getHours();
       const isMorningRush = currentHour >= 7 && currentHour <= 9;
       const isAfternoonRush = currentHour >= 14 && currentHour <= 17;
 
       if (isMorningRush || isAfternoonRush) {
-        base = Math.ceil(base * 1.15); // زيادة 15% في أوقات الذروة
+        base = Math.ceil(base * 1.15); 
         setIsSurgeActive(true);
       } else {
         setIsSurgeActive(false);
@@ -473,7 +473,6 @@ export default function PassengerHome() {
   };
 
   const handleSearchCaptain = async () => {
-    // --- فحص الحظر المؤقت للراكب قبل بدء أي بحث ---
     try {
       const passengerIdStr = passengerProfile.id || await AsyncStorage.getItem('currentPassengerId');
       if (passengerIdStr) {
@@ -493,7 +492,6 @@ export default function PassengerHome() {
     } catch (error) {
       console.log('Error checking ban status:', error);
     }
-    // --- نهاية فحص الحظر ---
 
     const validDests = destinations.filter(d => d.trim() !== '');
     if (!pickup || validDests.length === 0 || !price) {
@@ -524,6 +522,8 @@ export default function PassengerHome() {
         price: price,
         notes: notes.trim(),
         requestedVehicleType,
+        // 👈 إرسال عدد الركاب في حالة اختيار بديل التوكتوك
+        passengersCount: requestedVehicleType === 'tuktuk_alt' ? passengersCount : null,
         offers: [],
         status: 'pending',
         timestamp: new Date().getTime(),
@@ -591,7 +591,6 @@ export default function PassengerHome() {
     if (!currentRideId) return;
 
     try {
-      // التحقق مما إذا كان الإلغاء تم بعد قبول الكابتن للرحلة وتطبيق المخالفة
       if (rideStatus === 'accepted' || rideStatus === 'captain_arrived') {
         const passengerIdStr = passengerProfile.id || await AsyncStorage.getItem('currentPassengerId');
         if (passengerIdStr) {
@@ -759,6 +758,25 @@ export default function PassengerHome() {
               <Text style={[styles.vTypeText, requestedVehicleType === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
             </TouchableOpacity>
           </View>
+
+          {/* 👈 قائمة تحديد عدد الركاب تظهر فقط لبديل التوكتوك */}
+          {requestedVehicleType === 'tuktuk_alt' && (
+            <View style={styles.passengerCountContainer}>
+              <Text style={styles.label}>حدد عدد الركاب 👥</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row-reverse', paddingVertical: 5 }}>
+                {['1', '2', '3', '4', '5', '6', '7'].map((num) => (
+                  <TouchableOpacity
+                    key={num}
+                    style={[styles.countBtn, passengersCount === num && styles.countBtnActive]}
+                    onPress={() => setPassengersCount(num)}
+                  >
+                    <Text style={[styles.countBtnText, passengersCount === num && styles.countBtnTextActive]}>{num}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
           <Text style={styles.label}>موقع الانطلاق الحالي</Text>
           <View style={styles.rowInputContainer}>
             <TextInput style={styles.inputWithButton} placeholder="اكتب مكان الانطلاق" placeholderTextColor="#94a3b8" value={pickup} onChangeText={handlePickupChange} />
@@ -1069,6 +1087,14 @@ const styles = StyleSheet.create({
   vTypeBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 2 },
   vTypeText: { fontSize: 14, fontWeight: 'bold', color: '#64748b' },
   vTypeTextActive: { color: '#2563eb' },
+  
+  // 👈 ستايل قائمة اختيار الركاب
+  passengerCountContainer: { marginBottom: 15 },
+  countBtn: { backgroundColor: '#f1f5f9', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginHorizontal: 5, borderWidth: 1, borderColor: '#cbd5e1' },
+  countBtnActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
+  countBtnText: { fontSize: 16, fontWeight: 'bold', color: '#64748b' },
+  countBtnTextActive: { color: '#ffffff' },
+
   rowInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   inputWithButton: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right', marginLeft: 8 },
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },

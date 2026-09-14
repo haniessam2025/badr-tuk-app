@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
+// import * as Notifications from 'expo-notifications';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -12,13 +12,13 @@ import { db } from '../firebaseConfig';
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Notifications.setNotificationHandler({
+//   handleNotification: async () => ({
+//     shouldShowAlert: true,
+//     shouldPlaySound: true,
+//     shouldSetBadge: false,
+//   }),
+// });
 
 const getSafeAvatar = (imgStr: any) => {
   if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
@@ -35,7 +35,6 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
   const mapRef = useRef<MapView>(null);
   const passRating = item.passengerRating || 5;
 
-  // --- حساب وقت الذروة للطلب ---
   const requestHour = new Date(item.timestamp || Date.now()).getHours();
   const isSurge = (requestHour >= 7 && requestHour <= 9) || (requestHour >= 14 && requestHour <= 17);
 
@@ -82,6 +81,12 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
             )}
           </View>
           <View style={styles.routeLeftSide}>
+            {/* 👈 إضافة ظهور عدد الركاب بوضوح للكابتن لبديل التوكتوك */}
+            {item.requestedVehicleType === 'tuktuk_alt' && item.passengersCount && (
+              <View style={styles.passengerCountBadge}>
+                <Text style={styles.passengerCountText}>👥 عدد الركاب المطلوب: {item.passengersCount}</Text>
+              </View>
+            )}
             <Text style={styles.routeSplitText} numberOfLines={2}>{item.pickupLocation}</Text>
             {destinationsList.map((d: string, i: number) => (<Text key={i} style={styles.routeSplitText} numberOfLines={1}>وجهة {i + 1}: {d}</Text>))}
           </View>
@@ -180,13 +185,11 @@ export default function CaptainHome() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const sidebarAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
 
-  // --- متغيرات البحث الذكي لجوجل (Google Places Autocomplete) ---
-  // --- متغيرات فلتر "مشوار في سكتي" ---
   const [isDestinationFilterActive, setIsDestinationFilterActive] = useState(false);
   const [destinationFilterText, setDestinationFilterText] = useState('');
-  const [confirmedDestinationFilter, setConfirmedDestinationFilter] = useState(''); // الوجهة المؤكدة برمجياً  const [placesSuggestions, setPlacesSuggestions] = useState<any[]>([]);
+  const [confirmedDestinationFilter, setConfirmedDestinationFilter] = useState(''); 
+  const [placesSuggestions, setPlacesSuggestions] = useState<any[]>([]);
   
-  // ⚠️ ضع مفتاح الـ API الخاص بخرائط جوجل هنا ⚠️
   const GOOGLE_API_KEY = 'ضع_مفتاح_جوجل_هنا';
 
   const fetchPlaceSuggestions = async (text: string) => {
@@ -208,7 +211,7 @@ export default function CaptainHome() {
 
   const handleSelectPlace = (placeName: string) => {
     setDestinationFilterText(placeName);
-    setPlacesSuggestions([]); // إخفاء القائمة بعد الاختيار
+    setPlacesSuggestions([]);
   };
 
   const generateAndShowQR = async () => {
@@ -269,19 +272,40 @@ export default function CaptainHome() {
       const captainId = await AsyncStorage.getItem('currentCaptainId');
       if (captainId) {
         const docRef = doc(db, 'captains', captainId);
-        const docSnap = await getDoc(docRef);
-        const ratingQ = query(collection(db, 'ratings'), where('captainId', '==', captainId), where('type', '==', 'passenger_rating_captain'));
-        const ratingSnap = await getDocs(ratingQ);
-        let sum = 0;
-        ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
-        const rCount = ratingSnap.docs.length;
-        const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : 5;
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const finalAvatar = getSafeAvatar(data.profileImage || data.avatar || data.image);
-          setCaptainProfile({ id: captainId, name: data.name || '', phone: data.phone || '', vehicle: data.tukTukNumber || data.vehicle || 'توكتوك', vehicleCategory: data.vehicleCategory || 'tuktuk_alt', avatar: finalAvatar, walletBalance: data.walletBalance || 0, averageRating: Number(avgRate), ratingCount: rCount });
-          if (data.isOnline !== undefined) { setIsOnline(data.isOnline); toggleAnim.setValue(data.isOnline ? 100 : 0); }
-        }
+        onSnapshot(docRef, async (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const ratingQ = query(collection(db, 'ratings'), where('captainId', '==', captainId), where('type', '==', 'passenger_rating_captain'));
+            const ratingSnap = await getDocs(ratingQ);
+            let sum = 0;
+            ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
+            const rCount = ratingSnap.docs.length;
+            const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : 5;
+            
+            const finalAvatar = getSafeAvatar(data.profileImage || data.avatar || data.image);
+            
+            // 👈 تحديث بيانات الكابتن في التطبيق لحظياً وتخزينها في AsyncStorage ليتم إرسالها دائمًا بأحدث التعديلات
+            const updatedProfile = { 
+              id: captainId, 
+              name: data.name || '', 
+              phone: data.phone || '', 
+              vehicle: data.vehicleNumber || data.tukTukNumber || data.vehicle || 'توكتوك', 
+              vehicleCategory: data.vehicleCategory || 'tuktuk_alt', 
+              avatar: finalAvatar, 
+              walletBalance: data.walletBalance || 0, 
+              averageRating: Number(avgRate), 
+              ratingCount: rCount 
+            };
+            
+            setCaptainProfile(updatedProfile);
+            await AsyncStorage.setItem('captain_profile', JSON.stringify(updatedProfile));
+            
+            if (data.isOnline !== undefined) { 
+              setIsOnline(data.isOnline); 
+              toggleAnim.setValue(data.isOnline ? 100 : 0); 
+            }
+          }
+        });
       } else router.replace('/captain-login');
     } catch (e) {}
   };
@@ -317,12 +341,11 @@ export default function CaptainHome() {
         
         if (rideVehicleType === captainProfile.vehicleCategory) {
           if (data.timestamp && (currentTime - data.timestamp < 900000)) {
-            // --- فلترة "مشوار في سكتي" بناءً على زر التأكيد ---
             if (isDestinationFilterActive && confirmedDestinationFilter.trim() !== '') {
               const destText = (data.destinationLocation || '').toLowerCase();
               const filterStr = confirmedDestinationFilter.toLowerCase().trim();
               if (!destText.includes(filterStr)) {
-                return; // تخطي هذا الطلب لأنه لا يطابق وجهة الكابتن
+                return;
               }
             }
             pendingRequests.push({ id: docSnap.id, ...data });
@@ -339,7 +362,7 @@ export default function CaptainHome() {
     if (!captainProfile.id) return;
     const q = query(collection(db, 'rides'), where('captainId', '==', captainProfile.id));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
       const active = docs.find(d => ['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
       if (active) {
         setActiveRide(active); setUnreadChatCount(active.unreadCountCaptain || 0);
@@ -549,8 +572,6 @@ export default function CaptainHome() {
       
       {!activeRide ? (
         <>
-          {/* --- قسم البحث الذكي للوجهات المربوط بجوجل --- */}
-{/* --- قسم مشوار في سكتي (Destination Filter) --- */}
           {isOnline && (
             <View style={styles.destinationFilterContainer}>
               <View style={styles.filterHeaderRow}>
@@ -558,7 +579,7 @@ export default function CaptainHome() {
                 <TouchableOpacity onPress={() => {
                   setIsDestinationFilterActive(!isDestinationFilterActive);
                   if (isDestinationFilterActive) {
-                    setConfirmedDestinationFilter(''); // مسح الفلتر عند إيقاف الخاصية
+                    setConfirmedDestinationFilter('');
                   }
                 }} style={[styles.filterToggle, isDestinationFilterActive && styles.filterToggleActive]}>
                   <Text style={[styles.filterToggleText, isDestinationFilterActive && styles.filterToggleTextActive]}>{isDestinationFilterActive ? 'مُفعل' : 'إيقاف'}</Text>
@@ -574,8 +595,7 @@ export default function CaptainHome() {
                       onChangeText={setDestinationFilterText}
                       textAlign="right"
                    />
-                   {/* اقتراحات أحياء مدينة بدر */}
-                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} inverted>
+                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} >
                      {['الحي المتميز', 'دار مصر', 'سكن مصر', 'الإسكان الاجتماعي', 'الحي الأول', 'الحي الثاني', 'الحي الثالث', 'الجامعة الروسية', 'جامعة بدر', 'المنطقة الصناعية'].map((area, idx) => (
                        <TouchableOpacity 
                          key={idx} 
@@ -587,7 +607,6 @@ export default function CaptainHome() {
                      ))}
                    </ScrollView>
 
-                   {/* زر التأكيد الجديد */}
                    <TouchableOpacity 
                      style={{backgroundColor: '#2563eb', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12}}
                      onPress={() => {
@@ -601,7 +620,6 @@ export default function CaptainHome() {
                    >
                      <Text style={{color: '#ffffff', fontWeight: 'bold', fontSize: 15}}>تأكيد الوجهة للبحث</Text>
                    </TouchableOpacity>
-
                  </View>
               )}
             </View>
@@ -835,7 +853,6 @@ const styles = StyleSheet.create({
   toggleText: { color: '#ffffff', fontSize: 11, fontWeight: 'bold', zIndex: 1 },
   toggleCircle: { position: 'absolute', right: 4, width: 26, height: 26, borderRadius: 13, backgroundColor: '#ffffff', elevation: 3 },
   
-  // -- ستايل فلتر "مشوار في سكتي" مع البحث الذكي --
   destinationFilterContainer: { backgroundColor: '#ffffff', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#cbd5e1', elevation: 1, zIndex: 10 },
   filterHeaderRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' },
   filterTitle: { fontSize: 15, fontWeight: 'bold', color: '#0f172a' },
@@ -844,10 +861,13 @@ const styles = StyleSheet.create({
   filterToggleText: { color: '#64748b', fontSize: 12, fontWeight: 'bold' },
   filterToggleTextActive: { color: '#ffffff' },
   filterInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 10, fontSize: 14, marginTop: 10, color: '#0f172a', textAlign: 'right' },
+  areaChip: { backgroundColor: '#f1f5f9', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 16, marginRight: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  areaChipActive: { backgroundColor: '#2563eb', borderColor: '#1d4ed8' },
+  areaChipText: { fontSize: 13, color: '#475569', fontWeight: 'bold' },
+  areaChipTextActive: { color: '#ffffff' },
   suggestionsBox: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, marginTop: 5, maxHeight: 150, elevation: 3 },
   suggestionItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   suggestionItemText: { fontSize: 14, color: '#334155', textAlign: 'right' },
-  // ---------------------------------
 
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'right' },
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -866,14 +886,16 @@ const styles = StyleSheet.create({
   passengerRightSide: { width: 85, alignItems: 'center', borderLeftWidth: 1, borderColor: '#f1f5f9', paddingLeft: 8 },
   passengerAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#cbd5e1', marginBottom: 4 },
   passengerName: { fontSize: 13, fontWeight: 'bold', color: '#0f172a', textAlign: 'center' },
-  
-  // -- ستايل وقت الذروة --
   surgeBadgeCard: { backgroundColor: '#fee2e2', color: '#ef4444', fontSize: 10, fontWeight: 'bold', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginTop: 4, textAlign: 'center', overflow: 'hidden' },
-
   showMapBtnCard: { backgroundColor: '#e0f2fe', paddingVertical: 4, paddingHorizontal: 6, borderRadius: 6, borderWidth: 1, borderColor: '#bae6fd', marginTop: 4 },
   showMapBtnTextCard: { color: '#0369a1', fontSize: 10, fontWeight: 'bold' },
   routeLeftSide: { flex: 1, paddingRight: 10, justifyContent: 'center' },
   routeSplitText: { fontSize: 15, color: '#1e293b', fontWeight: 'bold', marginBottom: 2, textAlign: 'right' },
+  
+  // 👈 ستايل عدد الركاب للكابتن
+  passengerCountBadge: { backgroundColor: '#fef9c3', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, marginBottom: 8, alignSelf: 'flex-end', borderWidth: 1, borderColor: '#fde047' },
+  passengerCountText: { color: '#a16207', fontSize: 12, fontWeight: 'bold' },
+
   miniMapWrapper: { height: 120, width: '100%', borderRadius: 12, overflow: 'hidden', marginBottom: 10, borderWidth: 1, borderColor: '#e2e8f0' },
   miniMap: { ...StyleSheet.absoluteFillObject },
   notesContainer: { backgroundColor: '#fef3c7', padding: 8, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#fcd34d' },

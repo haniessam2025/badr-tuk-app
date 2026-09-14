@@ -1,7 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
@@ -44,38 +43,55 @@ export default function PassengerSignupScreen() {
 
     setLoading(true);
     try {
-      const q = query(collection(db, 'passengers'), where('name', '==', name.trim()));
-      const querySnapshot = await getDocs(q);
-
-      if (!querySnapshot.empty) {
+      // 1. فحص تكرار الاسم
+      const nameQuery = query(collection(db, 'passengers'), where('name', '==', name.trim()));
+      const nameSnapshot = await getDocs(nameQuery);
+      if (!nameSnapshot.empty) {
         setLoading(false);
-        Alert.alert('خطأ', 'اسم المستخدم مسجل بالفعل. يرجى اختيار اسم آخر أو تسجيل الدخول.');
+        Alert.alert('خطأ', 'اسم المستخدم مسجل بالفعل. يرجى اختيار اسم آخر.');
         return;
       }
 
-      // إضافة صورة افتراضية في حال لم يقم المستخدم باختيار صورة
+      // 2. فحص تكرار رقم الموبايل
+      const phoneQuery = query(collection(db, 'passengers'), where('phone', '==', phone.trim()));
+      const phoneSnapshot = await getDocs(phoneQuery);
+      if (!phoneSnapshot.empty) {
+        setLoading(false);
+        Alert.alert('تنبيه', 'رقم الهاتف مسجل بالفعل لحساب راكب آخر.');
+        return; 
+      }
+
+      // 3. فحص تكرار الرقم القومي
+      const nationalIdQuery = query(collection(db, 'passengers'), where('nationalId', '==', nationalId.trim()));
+      const nationalIdSnapshot = await getDocs(nationalIdQuery);
+      if (!nationalIdSnapshot.empty) {
+        setLoading(false);
+        Alert.alert('تنبيه', 'الرقم القومي مسجل بالفعل لحساب راكب آخر.');
+        return; 
+      }
+
+      // إضافة بيانات الراكب مع حالة قيد المراجعة
       const newPassenger = {
         name: name.trim(),
         nationalId: nationalId.trim(),
         phone: phone.trim(),
         password: password.trim(),
         avatar: image || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+        status: 'pending',
+        timestamp: serverTimestamp()
       };
 
-      const docRef = await addDoc(collection(db, 'passengers'), newPassenger);
-
-      await AsyncStorage.multiRemove([
-        'currentPassengerId',
-        'passenger_profile',
-        'active_ride'
-      ]);
-
-      await AsyncStorage.setItem('currentPassengerId', docRef.id);
-      await AsyncStorage.setItem('passenger_profile', JSON.stringify(newPassenger));
+      await addDoc(collection(db, 'passengers'), newPassenger);
 
       setLoading(false);
       
-      router.replace('/passenger-home'); 
+      // إظهار رسالة النجاح وتوجيه المستخدم لتسجيل الدخول بدلاً من الصفحة الرئيسية
+      Alert.alert(
+        'نجاح', 
+        'تم التسجيل بنجاح ستتم الموافقة بعد المراجعة خلال 24 ساعة على الأكثر', 
+        [{ text: 'حسناً', onPress: () => router.replace('/passenger-login') }]
+      );
+      
     } catch (error) {
       setLoading(false);
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إنشاء الحساب. حاول مرة أخرى.');

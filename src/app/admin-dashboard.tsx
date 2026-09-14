@@ -30,7 +30,6 @@ export default function AdminDashboard() {
   const [transactionType, setTransactionType] = useState<'deposit' | 'deduction'>('deposit');
   const [processingWallet, setProcessingWallet] = useState(false);
 
-  // حالات الرسائل المباشرة من داخل البروفايل
   const [profileMsgModalVisible, setProfileMsgModalVisible] = useState(false);
   const [profileMsgTitle, setProfileMsgTitle] = useState('');
   const [profileMsgText, setProfileMsgText] = useState('');
@@ -73,22 +72,34 @@ export default function AdminDashboard() {
     return () => { unsubCaptains(); unsubPassengers(); unsubComplaints(); unsubUpdates(); };
   }, []);
 
-  const pendingCaptains = captains.filter(c => c.status === 'pending_approval');
+  const pendingCaptains = captains.filter(c => c.status === 'pending' || c.status === 'pending_approval');
+  const pendingPassengers = passengers.filter(p => p.status === 'pending');
+  const totalPending = pendingCaptains.length + pendingPassengers.length;
   
   const activeCaptainsFiltered = captains.filter(c => 
-    c.status !== 'pending_approval' && 
+    c.status !== 'pending' && c.status !== 'pending_approval' && 
     (c.name?.includes(searchCaptain) || c.phone?.includes(searchCaptain) || c.vehicle?.includes(searchCaptain))
   );
 
-  const passengersFiltered = passengers.filter(p => 
-    p.name?.includes(searchPassenger) || p.phone?.includes(searchPassenger)
+  const activePassengersFiltered = passengers.filter(p => 
+    p.status !== 'pending' &&
+    (p.name?.includes(searchPassenger) || p.phone?.includes(searchPassenger))
   );
 
-  const approveCaptain = async (id: string) => {
-    try { await updateDoc(doc(db, 'captains', id), { status: 'active' }); Alert.alert('تم ✅', 'تم تفعيل الحساب.'); } catch (e) {}
+  const approveRegistration = async (id: string, type: 'captain' | 'passenger') => {
+    const collectionName = type === 'captain' ? 'captains' : 'passengers';
+    try { 
+      await updateDoc(doc(db, collectionName, id), { status: 'active' }); 
+      Alert.alert('تم ✅', 'تم تفعيل الحساب بنجاح.'); 
+    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء التفعيل.'); }
   };
-  const rejectCaptain = async (id: string) => {
-    try { await updateDoc(doc(db, 'captains', id), { status: 'rejected' }); Alert.alert('تم 🛑', 'تم الرفض.'); } catch (e) {}
+
+  const rejectRegistration = async (id: string, type: 'captain' | 'passenger') => {
+    const collectionName = type === 'captain' ? 'captains' : 'passengers';
+    try { 
+      await updateDoc(doc(db, collectionName, id), { status: 'rejected' }); 
+      Alert.alert('تم 🛑', 'تم رفض الطلب.'); 
+    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.'); }
   };
 
   const handleApproveUpdate = async (req: any) => {
@@ -99,7 +110,7 @@ export default function AdminDashboard() {
         vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt',
         vehicleDetails: req.newData.vehicleDetails || null,
         avatar: req.newData.avatar,
-        profileImage: req.newData.avatar // للتوافق القديم
+        profileImage: req.newData.avatar
       });
       await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
       await addDoc(collection(db, 'notifications'), {
@@ -260,7 +271,7 @@ export default function AdminDashboard() {
       <View style={styles.tabsRow}>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
           <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>تسجيل</Text>
-          {pendingCaptains.length > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{pendingCaptains.length}</Text></View>}
+          {totalPending > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{totalPending}</Text></View>}
         </TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'updates' && styles.tabBtnActive]} onPress={() => setActiveTab('updates')}>
           <Text style={[styles.tabBtnText, activeTab === 'updates' && styles.tabBtnTextActive]}>تعديلات</Text>
@@ -275,24 +286,45 @@ export default function AdminDashboard() {
       
       activeTab === 'pending' ? (
         <ScrollView showsVerticalScrollIndicator={false}>
-          {pendingCaptains.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
-            pendingCaptains.map(item => (
-              <View key={item.id} style={styles.userCard}>
-                <View style={styles.cardHeader}>
-                  <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardName}>{item.name}</Text>
-                    <Text style={styles.cardDetail}>📞 {item.phone}</Text>
-                    <Text style={styles.cardDetail}>🛺 {item.vehicle}</Text>
+          {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
+            <>
+              {pendingCaptains.map(item => (
+                <View key={item.id} style={styles.userCard}>
+                  <View style={styles.cardHeader}>
+                    <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
+                    <View style={styles.cardInfo}>
+                      <Text style={styles.userTypeBadgeCard}>👨‍✈️ طلب كابتن جديد</Text>
+                      <Text style={styles.cardName}>{item.name}</Text>
+                      <Text style={styles.cardDetail}>📞 {item.phone}</Text>
+                      <Text style={styles.cardDetail}>🛺 {item.vehicle}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs(item)}><Text style={styles.inspectDocsBtnText}>🔍 معاينة المستندات</Text></TouchableOpacity>
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectRegistration(item.id, 'captain')}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
+                    <TouchableOpacity style={styles.approveBtn} onPress={() => approveRegistration(item.id, 'captain')}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
                   </View>
                 </View>
-                <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs(item)}><Text style={styles.inspectDocsBtnText}>🔍 معاينة المستندات</Text></TouchableOpacity>
-                <View style={styles.actionRow}>
-                  <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectCaptain(item.id)}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
-                  <TouchableOpacity style={styles.approveBtn} onPress={() => approveCaptain(item.id)}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
+              ))}
+
+              {pendingPassengers.map(item => (
+                <View key={item.id} style={styles.userCard}>
+                  <View style={styles.cardHeader}>
+                    <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
+                    <View style={styles.cardInfo}>
+                      <Text style={[styles.userTypeBadgeCard, {color: '#38bdf8'}]}>👤 طلب راكب جديد</Text>
+                      <Text style={styles.cardName}>{item.name}</Text>
+                      <Text style={styles.cardDetail}>📞 {item.phone}</Text>
+                      <Text style={styles.cardDetail}>🪪 {item.nationalId || 'لم يحدد'}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectRegistration(item.id, 'passenger')}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
+                    <TouchableOpacity style={styles.approveBtn} onPress={() => approveRegistration(item.id, 'passenger')}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            ))
+              ))}
+            </>
           )}
         </ScrollView>
       ) : activeTab === 'updates' ? (
@@ -352,7 +384,7 @@ export default function AdminDashboard() {
         <View style={{ flex: 1 }}>
           <TextInput style={styles.searchInput} placeholder="بحث عن راكب (اسم أو رقم)..." placeholderTextColor="#64748b" value={searchPassenger} onChangeText={setSearchPassenger} textAlign="right" />
           <ScrollView showsVerticalScrollIndicator={false}>
-            {passengersFiltered.map(item => (
+            {activePassengersFiltered.map(item => (
               <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'passenger')}>
                 <View style={styles.cardHeader}>
                   <View style={styles.balanceBadge}><Text style={styles.balanceLabelText}>المحفظة</Text><Text style={[styles.balanceNum, { color: '#10b981' }]}>{item.walletBalance ? item.walletBalance.toFixed(2) : '0'} ج</Text></View>
@@ -563,6 +595,7 @@ const styles = StyleSheet.create({
   avatarImg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#334155' },
   avatarImgMini: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#334155', marginLeft: 10 },
   cardInfo: { flex: 1, marginRight: 12, alignItems: 'flex-end' },
+  userTypeBadgeCard: { color: '#eab308', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
   cardName: { color: '#f8fafc', fontSize: 16, fontWeight: 'bold', marginBottom: 2 },
   cardDetail: { color: '#94a3b8', fontSize: 13, marginBottom: 1 },
   statusText: { color: '#10b981', fontSize: 12, fontWeight: 'bold', marginTop: 2 },
@@ -570,7 +603,6 @@ const styles = StyleSheet.create({
   balanceLabelText: { color: '#64748b', fontSize: 11, fontWeight: 'bold' },
   balanceNum: { fontSize: 15, fontWeight: 'bold' },
 
-  // تنسيقات بطاقة طلبات التعديل
   updateRequestHeader: { color: '#eab308', fontWeight: 'bold', marginBottom: 5, textAlign: 'right', fontSize: 16 },
   updateRequestPhone: { color: '#94a3b8', textAlign: 'right', marginBottom: 15, fontSize: 13 },
   updateComparisonBox: { flexDirection: 'row-reverse', backgroundColor: '#0f172a', borderRadius: 10, padding: 12, marginBottom: 15 },
