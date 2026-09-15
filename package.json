@@ -34,7 +34,6 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-autocomplete-dropdown": "^5.1.0",
-    "react-native-document-scanner-plugin": "^2.0.4",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-keyboard-aware-scroll-view": "^0.9.5",
     "react-native-maps": "1.27.2",

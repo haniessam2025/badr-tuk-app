@@ -39,11 +39,15 @@ export default function PassengerHome() {
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number, longitude: number } | null>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
   const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
-  const [passengersCount, setPassengersCount] = useState('1'); // 👈 متغير عدد الركاب
+  const [requestedTuktukType, setRequestedTuktukType] = useState('كيوت 3 راكب');
+  const [passengersCount, setPassengersCount] = useState('1'); 
   const [price, setPrice] = useState('');
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
-  const [isSurgeActive, setIsSurgeActive] = useState(false);
+  
+  const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
+  const debounceTimer = useRef<any>(null);
+
   const [notes, setNotes] = useState('');
   const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'captain_arrived' | 'passenger_on_the_way' | 'waiting_for_scan' | 'in_progress'>('idle');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
@@ -54,6 +58,31 @@ export default function PassengerHome() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState('');
   const latestMsgTimer = useRef<any>(null);
+
+  // 👈 متغيرات الأنيميشن لتغيير صورة المركبة
+  const vehicleImageAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    // حركة أنيميشن ناعمة لما المستخدم يغير نوع المركبة
+    Animated.sequence([
+      Animated.timing(vehicleImageAnim, { toValue: 0.5, duration: 150, useNativeDriver: true }),
+      Animated.timing(vehicleImageAnim, { toValue: 1, duration: 200, useNativeDriver: true })
+    ]).start();
+  }, [requestedVehicleType, requestedTuktukType]);
+
+  // 👈 منطق تحديد صورة المركبة المناسبة من ملفات المشروع
+  let headerImageSource;
+  if (requestedVehicleType === 'car') {
+    headerImageSource = require('../../assets/images/car.png');
+  } else if (requestedVehicleType === 'scooter') {
+    headerImageSource = require('../../assets/images/scooter.png');
+  } else {
+    if (requestedTuktukType === 'كيوت 3 راكب') {
+      headerImageSource = require('../../assets/images/cute.png');
+    } else {
+      headerImageSource = require('../../assets/images/galaxy.png');
+    }
+  }
 
   useEffect(() => {
     if (latestMessage) {
@@ -307,8 +336,10 @@ export default function PassengerHome() {
           locationSubscription = await Location.watchPositionAsync(
             { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
             (loc) => {
-              updateDoc(doc(db, 'rides', currentRideId), { liveCoords: { latitude: loc.coords.latitude, longitude: loc.coords.longitude } })
-                .catch(e => console.log("Error updating live location:", e));
+              if (currentRideId) { 
+                updateDoc(doc(db, 'rides', currentRideId), { liveCoords: { latitude: loc.coords.latitude, longitude: loc.coords.longitude } })
+                  .catch(e => console.log("Error updating live location:", e));
+              }
             }
           );
         }
@@ -340,6 +371,7 @@ export default function PassengerHome() {
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
     setScanned(true);
+    if (!currentRideId) return; 
     try {
       const qrData = JSON.parse(data);
       if (qrData.rideId === currentRideId) {
@@ -390,49 +422,114 @@ export default function PassengerHome() {
     }
   };
 
-  const updatePriceCalculation = (pickupText: string, dests: string[], vType: string = requestedVehicleType) => {
+  const fallbackCalculation = (validDests: string[], vType: string, passCountStr: string) => {
+     let base = 0;
+     if (vType === 'car') base = 25 + ((validDests.length - 1) * 12);
+     else if (vType === 'scooter') base = 12 + ((validDests.length - 1) * 5);
+     else {
+        let basePriceForOne = 17 + ((validDests.length - 1) * 7);
+        const count = parseInt(passCountStr) || 1;
+        const extraPassengers = count - 1;
+        const passengerMultiplier = 1 + (extraPassengers * 0.40);
+        base = basePriceForOne * passengerMultiplier;
+     }
+
+     let finalBase = Math.ceil(base);
+     setCalculatedBasePrice(finalBase); 
+     setBasePriceForSuggestions(finalBase);
+     setPrice(finalBase.toString());
+  };
+
+  const updatePriceCalculation = async (pickupText: string, dests: string[], vType: string = requestedVehicleType, passCountStr: string = passengersCount) => {
     const validDests = dests.filter(d => d.trim().length > 0);
+    
     if (pickupText.trim().length > 0 && validDests.length > 0) {
-      let base = 0;
-      if (vType === 'car') base = 25 + ((validDests.length - 1) * 15);
-      else if (vType === 'scooter') base = 10 + ((validDests.length - 1) * 5);
-      else base = 15 + ((validDests.length - 1) * 10);
+      setIsCalculatingPrice(true);
+      try {
+        let startCoords = pickupCoords;
+        if (!startCoords && pickupText !== 'موقعي الحالي') {
+          const geoStart = await Location.geocodeAsync(pickupText + ' مصر');
+          if (geoStart.length > 0) startCoords = { latitude: geoStart[0].latitude, longitude: geoStart[0].longitude };
+        }
 
-      const currentHour = new Date().getHours();
-      const isMorningRush = currentHour >= 7 && currentHour <= 9;
-      const isAfternoonRush = currentHour >= 14 && currentHour <= 17;
+        let destsCoords = [];
+        for (let dest of validDests) {
+          const geoDest = await Location.geocodeAsync(dest + ' مصر');
+          if (geoDest.length > 0) destsCoords.push({ latitude: geoDest[0].latitude, longitude: geoDest[0].longitude });
+        }
 
-      if (isMorningRush || isAfternoonRush) {
-        base = Math.ceil(base * 1.15); 
-        setIsSurgeActive(true);
-      } else {
-        setIsSurgeActive(false);
+        if (startCoords && destsCoords.length === validDests.length) {
+          let coordsString = `${startCoords.longitude},${startCoords.latitude}`;
+          destsCoords.forEach(c => { coordsString += `;${c.longitude},${c.latitude}`; });
+
+          const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=false`;
+          const response = await fetch(osrmUrl);
+          const data = await response.json();
+
+          if (data.code === 'Ok') {
+             const totalDistanceKm = data.routes[0].distance / 1000;
+
+             let calculatedPrice = 0;
+             if (vType === 'car') {
+               calculatedPrice = Math.max(25, totalDistanceKm * 12);
+             } else if (vType === 'scooter') {
+               calculatedPrice = Math.max(12, totalDistanceKm * 5);
+             } else {
+               let basePriceForOne = Math.max(15, totalDistanceKm * 7);
+               const count = parseInt(passCountStr) || 1;
+               const extraPassengers = count - 1;
+               const passengerMultiplier = 1 + (extraPassengers * 0.40); 
+               calculatedPrice = basePriceForOne * passengerMultiplier;
+             }
+
+             let finalBase = Math.ceil(calculatedPrice);
+             setCalculatedBasePrice(finalBase);
+             setBasePriceForSuggestions(finalBase);
+             setPrice(finalBase.toString());
+             
+          } else {
+             fallbackCalculation(validDests, vType, passCountStr);
+          }
+        } else {
+           fallbackCalculation(validDests, vType, passCountStr);
+        }
+      } catch(e) {
+         fallbackCalculation(validDests, vType, passCountStr);
+      } finally {
+         setIsCalculatingPrice(false);
       }
-      
-      setCalculatedBasePrice(base); setBasePriceForSuggestions(base);
-      setPrice(base.toString());
     } else {
       setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setPrice('');
-      setIsSurgeActive(false);
+      setIsCalculatingPrice(false);
     }
   };
 
   const handlePickupChange = (text: string) => {
     setPickup(text);
     setPickupCoords(null);
-    updatePriceCalculation(text, destinations);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    setIsCalculatingPrice(true);
+    debounceTimer.current = setTimeout(() => {
+      updatePriceCalculation(text, destinations);
+    }, 1500);
   };
 
   const handleDestinationChange = (text: string, index: number) => {
     const newDests = [...destinations];
     newDests[index] = text;
     setDestinations(newDests);
-    updatePriceCalculation(pickup, newDests);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    setIsCalculatingPrice(true);
+    debounceTimer.current = setTimeout(() => {
+      updatePriceCalculation(pickup, newDests);
+    }, 1500);
   };
 
   const addDestinationField = () => {
-    if (destinations.length < 3) setDestinations([...destinations, '']);
-    else Alert.alert('تنبيه', 'الحد الأقصى 3 وجهات في الطلب الواحد');
+    if (destinations.length < 3) {
+      const newDests = [...destinations, ''];
+      setDestinations(newDests);
+    } else Alert.alert('تنبيه', 'الحد الأقصى 3 وجهات في الطلب الواحد');
   };
 
   const removeDestinationField = (index: number) => {
@@ -503,7 +600,7 @@ export default function PassengerHome() {
     let finalPickupCoords = pickupCoords;
     if (!finalPickupCoords) {
       try {
-        const geocoded = await Location.geocodeAsync(pickup);
+        const geocoded = await Location.geocodeAsync(pickup + ' مصر');
         if (geocoded.length > 0) finalPickupCoords = { latitude: geocoded[0].latitude, longitude: geocoded[0].longitude };
       } catch (error) {}
     }
@@ -522,7 +619,7 @@ export default function PassengerHome() {
         price: price,
         notes: notes.trim(),
         requestedVehicleType,
-        // 👈 إرسال عدد الركاب في حالة اختيار بديل التوكتوك
+        requestedTuktukType: requestedVehicleType === 'tuktuk_alt' ? requestedTuktukType : null,
         passengersCount: requestedVehicleType === 'tuktuk_alt' ? passengersCount : null,
         offers: [],
         status: 'pending',
@@ -536,7 +633,20 @@ export default function PassengerHome() {
       Alert.alert('نجاح', 'تم إرسال الطلب، في انتظار عروض الكباتن...');
 
       try {
-        const captainsQuery = query(collection(db, 'captains'));
+        let captainsQuery;
+        if (requestedVehicleType === 'tuktuk_alt') {
+          captainsQuery = query(
+            collection(db, 'captains'), 
+            where('vehicleCategory', '==', 'tuktuk_alt'),
+            where('tuktukAltType', '==', requestedTuktukType)
+          );
+        } else {
+          captainsQuery = query(
+            collection(db, 'captains'), 
+            where('vehicleCategory', '==', requestedVehicleType)
+          );
+        }
+        
         const captainsSnapshot = await getDocs(captainsQuery);
         captainsSnapshot.forEach((docSnap) => {
           const captainData = docSnap.data();
@@ -744,8 +854,17 @@ export default function PassengerHome() {
         </TouchableOpacity>
       </View>
       {rideStatus === 'idle' && (
-        <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <Text style={styles.cardTitle}>اطلب مشوارك الآن</Text>
+        <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 90 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" overScrollMode="never">
+          
+          <View style={styles.requestHeaderRow}>
+            <Text style={styles.cardTitle}>اطلب مشوارك الآن</Text>
+            <Animated.Image 
+              source={headerImageSource} 
+              style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} 
+              resizeMode="contain" 
+            />
+          </View>
+
           <Text style={styles.label}>اختر نوع براقك</Text>
           <View style={styles.vehicleTypeTabs}>
             <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
@@ -759,21 +878,33 @@ export default function PassengerHome() {
             </TouchableOpacity>
           </View>
 
-          {/* 👈 قائمة تحديد عدد الركاب تظهر فقط لبديل التوكتوك */}
           {requestedVehicleType === 'tuktuk_alt' && (
             <View style={styles.passengerCountContainer}>
+              <Text style={styles.label}>اختر نوع بديل التوكتوك 🛺</Text>
+              <View style={{ flexDirection: 'row-reverse', gap: 10, marginBottom: 15 }}>
+                <TouchableOpacity style={[styles.vTypeBtn, requestedTuktukType === 'كيوت 3 راكب' && styles.vTypeBtnActive]} onPress={() => { setRequestedTuktukType('كيوت 3 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
+                  <Text style={[styles.vTypeText, requestedTuktukType === 'كيوت 3 راكب' && styles.vTypeTextActive]}>كيوت 3 راكب</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.vTypeBtn, requestedTuktukType === 'جالاكسي 7 راكب' && styles.vTypeBtnActive]} onPress={() => { setRequestedTuktukType('جالاكسي 7 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
+                  <Text style={[styles.vTypeText, requestedTuktukType === 'جالاكسي 7 راكب' && styles.vTypeTextActive]}>جالاكسي 7 راكب</Text>
+                </TouchableOpacity>
+              </View>
+
               <Text style={styles.label}>حدد عدد الركاب 👥</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row-reverse', paddingVertical: 5 }}>
-                {['1', '2', '3', '4', '5', '6', '7'].map((num) => (
-                  <TouchableOpacity
-                    key={num}
-                    style={[styles.countBtn, passengersCount === num && styles.countBtnActive]}
-                    onPress={() => setPassengersCount(num)}
+              <View style={{ flexDirection: 'row-reverse', justifyContent: 'center', flexWrap: 'wrap', paddingVertical: 5, gap: 8 }}>
+                {(requestedTuktukType === 'كيوت 3 راكب' ? ['1', '2', '3'] : ['1', '2', '3', '4', '5', '6', '7']).map((num) => (
+                  <TouchableOpacity 
+                    key={num} 
+                    style={[styles.countBtn, passengersCount === num && styles.countBtnActive, { marginBottom: 8 }]} 
+                    onPress={() => {
+                      setPassengersCount(num);
+                      updatePriceCalculation(pickup, destinations, requestedVehicleType, num);
+                    }}
                   >
                     <Text style={[styles.countBtnText, passengersCount === num && styles.countBtnTextActive]}>{num}</Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
             </View>
           )}
 
@@ -800,28 +931,37 @@ export default function PassengerHome() {
               <Text style={styles.addDestBtnText}>+ إضافة وجهة أخرى</Text>
             </TouchableOpacity>
           )}
+          
           <Text style={styles.label}>ملاحظات للكابتن (اختياري)</Text>
           <TextInput style={styles.notesInput} placeholder="مثال معايا أغراض خفيفة ..." placeholderTextColor="#94a3b8" value={notes} onChangeText={setNotes} multiline={true} />
-          
-          <View style={{flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center'}}>
-            <Text style={styles.label}>أجرة الرحلة المقترحة</Text>
-            {isSurgeActive && <Text style={{color: '#ef4444', fontSize: 12, fontWeight: 'bold', marginBottom: 6}}>🔥 وقت الذروة</Text>}
-          </View>
 
-          <View style={[styles.priceDisplayContainer, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20, borderColor: isSurgeActive ? '#ef4444' : '#d97706' }]}>
-            <Text style={[styles.priceTextDisplay, isSurgeActive && {color: '#ef4444'}]}>{price ? `${price} جنيه` : '---'}</Text>
-            <TouchableOpacity style={[styles.editPriceBtn, isSurgeActive && {backgroundColor: '#ef4444'}]} onPress={openEditPriceModal}>
+          <Text style={[styles.label, {marginTop: 10}]}>أجرة الرحلة المقترحة</Text>
+          <View style={[styles.priceDisplayContainer, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
+            {isCalculatingPrice ? (
+              <Text style={[styles.priceTextDisplay, {color: '#94a3b8', fontSize: 15}]}>جاري حساب المسافة...</Text>
+            ) : (
+              <View style={{flex: 1, alignItems: 'flex-end'}}>
+                <Text style={styles.priceTextDisplay}>{price ? `${price} جنيه` : '---'}</Text>
+                {price && parseInt(passengersCount) > 1 && requestedVehicleType === 'tuktuk_alt' && (
+                  <Text style={{color: '#10b981', fontSize: 12, fontWeight: 'bold', marginTop: 2}}>
+                    (حوالي {Math.ceil(parseInt(price) / parseInt(passengersCount))} جنيه للفرد)
+                  </Text>
+                )}
+              </View>
+            )}
+            <TouchableOpacity style={[styles.editPriceBtn, {alignSelf: 'center'}]} onPress={openEditPriceModal}>
               <Text style={styles.editPriceBtnText}>تعديل السعر</Text>
             </TouchableOpacity>
           </View>
-          {basePriceForSuggestions > 0 && pickup.trim() !== '' && destinations[0].trim() !== '' && (
+          
+          {basePriceForSuggestions > 0 && pickup.trim() !== '' && destinations[0].trim() !== '' && !isCalculatingPrice && (
             <View style={styles.suggestionsRow}>
               {[1.2, 1.4, 1.6].map((multiplier, index) => {
                 const suggestedPrice = Math.round(basePriceForSuggestions * multiplier);
                 const isSelected = price === suggestedPrice.toString();
                 const percentage = Math.round((multiplier - 1) * 100);
                 return (
-                  <TouchableOpacity key={index} style={[styles.suggestionBtn, isSelected && styles.suggestionBtnActive, isSelected && isSurgeActive && {backgroundColor: '#ef4444', borderColor: '#ef4444'}]} onPress={() => setPrice(suggestedPrice.toString())}>
+                  <TouchableOpacity key={index} style={[styles.suggestionBtn, isSelected && styles.suggestionBtnActive]} onPress={() => setPrice(suggestedPrice.toString())}>
                     <Text style={[styles.suggestionText, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
                     <Text style={[styles.suggestionSubText, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
                   </TouchableOpacity>
@@ -1074,7 +1214,12 @@ const styles = StyleSheet.create({
   inlineToast: { backgroundColor: '#1e293b', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 12, marginBottom: 10, width: '100%', flexDirection: 'row-reverse', alignItems: 'center', elevation: 3 },
   inlineToastText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', textAlign: 'right', flex: 1 },
   card: { backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#e2e8f0', elevation: 4, flex: 1, marginBottom: 10 },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 15, textAlign: 'right' },
+  
+  // الاستايلات الجديدة للصورة والعنوان
+  requestHeaderRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
+  vehicleHeaderImg: { width: 75, height: 50 },
+
   cardActive: { flex: 1, backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 2, borderColor: '#d97706', elevation: 6, marginBottom: 10 },
   cardArrivalPulse: { flex: 1, borderRadius: 20, padding: 20, borderWidth: 3, borderColor: '#047857', elevation: 10, shadowColor: '#000000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 5, marginBottom: 10 },
   superArrivalTitle: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', marginBottom: 8, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
@@ -1087,8 +1232,6 @@ const styles = StyleSheet.create({
   vTypeBtnActive: { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 2 },
   vTypeText: { fontSize: 14, fontWeight: 'bold', color: '#64748b' },
   vTypeTextActive: { color: '#2563eb' },
-  
-  // 👈 ستايل قائمة اختيار الركاب
   passengerCountContainer: { marginBottom: 15 },
   countBtn: { backgroundColor: '#f1f5f9', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginHorizontal: 5, borderWidth: 1, borderColor: '#cbd5e1' },
   countBtnActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
@@ -1155,11 +1298,32 @@ const styles = StyleSheet.create({
   freeCallBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
   cancelCallBtn: { paddingVertical: 10, marginTop: 10 },
   cancelCallBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
+  modalOverlayQR: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  qrHeader: { color: '#ffffff', fontSize: 20, fontWeight: 'bold', marginBottom: 30 },
+  qrScannerBox: { width: 300, height: 300, borderRadius: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#10b981', elevation: 10 },
+  cancelScanBtn: { marginTop: 40, paddingVertical: 12, paddingHorizontal: 30, backgroundColor: '#ef4444', borderRadius: 10 },
+  cancelScanBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
+  headerMenuBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', marginLeft: 10 },
+  headerMenuText: { fontSize: 20, color: '#1e293b' },
+  sidebarOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', flexDirection: 'row-reverse' },
+  sidebarCloseArea: { flex: 1 },
+  sidebarPanel: { width: '75%', backgroundColor: '#ffffff', height: '100%', elevation: 15 },
+  sidebarHeader: { backgroundColor: '#1e293b', padding: 20, paddingTop: 50, alignItems: 'center', borderBottomWidth: 3, borderColor: '#3b82f6' },
+  sidebarAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#3b82f6', marginBottom: 10 },
+  sidebarName: { fontSize: 18, fontWeight: 'bold', color: '#ffffff' },
+  sidebarPhone: { fontSize: 14, color: '#94a3b8', marginTop: 5 },
+  sidebarLinks: { padding: 20 },
+  sidebarLink: { paddingVertical: 18, borderBottomWidth: 1, borderColor: '#f1f5f9' },
+  sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
+  sidebarLogoutBtn: { backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
+  sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
+
+  // الاستايلات اللي كانت ناقصة والمهمة جداً
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },
   searchButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
-  captainCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef3c7', padding: 12, borderRadius: 14, marginBottom: 15 },
-  captainAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1' },
-  captainDetails: { flex: 1, marginHorizontal: 15 },
+  captainCard: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#fef3c7', padding: 12, borderRadius: 14, marginBottom: 15 },
+  captainAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#cbd5e1', marginLeft: 15 },
+  captainDetails: { flex: 1 },
   captainText: { fontSize: 14, fontWeight: 'bold', color: '#1e293b', marginBottom: 2, textAlign: 'right' },
   authContainer: { alignItems: 'center', backgroundColor: '#1e293b', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
   orText: { fontSize: 14, fontWeight: 'bold', color: '#94a3b8', marginVertical: 12 },
@@ -1183,24 +1347,5 @@ const styles = StyleSheet.create({
   cancelOrderBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 1 },
   cancelOrderBtnText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
   editEmergencyBtn: { backgroundColor: '#e2e8f0', paddingVertical: 10, borderRadius: 10, alignItems: 'center', marginBottom: 15 },
-  editEmergencyText: { color: '#475569', fontSize: 13, fontWeight: 'bold' },
-  modalOverlayQR: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  qrHeader: { color: '#ffffff', fontSize: 20, fontWeight: 'bold', marginBottom: 30 },
-  qrScannerBox: { width: 300, height: 300, borderRadius: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#10b981', elevation: 10 },
-  cancelScanBtn: { marginTop: 40, paddingVertical: 12, paddingHorizontal: 30, backgroundColor: '#ef4444', borderRadius: 10 },
-  cancelScanBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
-  headerMenuBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', marginLeft: 10 },
-  headerMenuText: { fontSize: 20, color: '#1e293b' },
-  sidebarOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', flexDirection: 'row-reverse' },
-  sidebarCloseArea: { flex: 1 },
-  sidebarPanel: { width: '75%', backgroundColor: '#ffffff', height: '100%', elevation: 15 },
-  sidebarHeader: { backgroundColor: '#1e293b', padding: 20, paddingTop: 50, alignItems: 'center', borderBottomWidth: 3, borderColor: '#3b82f6' },
-  sidebarAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#3b82f6', marginBottom: 10 },
-  sidebarName: { fontSize: 18, fontWeight: 'bold', color: '#ffffff' },
-  sidebarPhone: { fontSize: 14, color: '#94a3b8', marginTop: 5 },
-  sidebarLinks: { padding: 20 },
-  sidebarLink: { paddingVertical: 18, borderBottomWidth: 1, borderColor: '#f1f5f9' },
-  sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
-  sidebarLogoutBtn: { backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
-  sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' }
+  editEmergencyText: { color: '#475569', fontSize: 13, fontWeight: 'bold' }
 });

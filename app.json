@@ -45,12 +45,6 @@
         {
           "locationAlwaysPermission": "Allow $(PRODUCT_NAME) to access your location."
         }
-      ],
-      [
-        "react-native-document-scanner-plugin",
-        {
-          "cameraPermission": "نحتاج إلى الوصول للكاميرا لمسح وتصوير بطاقة ورخصة الكابتن بدقة."
-        }
       ]
     ],
     "experiments": {

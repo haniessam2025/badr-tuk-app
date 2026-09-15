@@ -46,6 +46,14 @@ export default function AdminDashboard() {
   const [replyText, setReplyText] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
 
+  const [stats, setStats] = useState({
+    total: 0, totalRevenue: 0,
+    car: 0, carRevenue: 0,
+    cute: 0, cuteRevenue: 0,
+    galaxy: 0, galaxyRevenue: 0,
+    scooter: 0, scooterRevenue: 0
+  });
+
   useEffect(() => {
     const unsubCaptains = onSnapshot(collection(db, 'captains'), (snapshot) => {
       setCaptains(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -57,19 +65,46 @@ export default function AdminDashboard() {
     });
 
     const unsubComplaints = onSnapshot(collection(db, 'complaints'), (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      list.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setComplaints(list);
     });
 
     const unsubUpdates = onSnapshot(collection(db, 'update_requests'), (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      const pendingUpdates = list.filter(r => r.status === 'pending');
-      pendingUpdates.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const pendingUpdates = list.filter((r: any) => r.status === 'pending');
+      pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setUpdateRequests(pendingUpdates);
     });
 
-    return () => { unsubCaptains(); unsubPassengers(); unsubComplaints(); unsubUpdates(); };
+    const unsubRides = onSnapshot(collection(db, 'rides'), (snapshot) => {
+      let counts = { total: 0, totalRevenue: 0, car: 0, carRevenue: 0, cute: 0, cuteRevenue: 0, galaxy: 0, galaxyRevenue: 0, scooter: 0, scooterRevenue: 0 };
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        
+        // 👈 السر هنا: مش هنعد ولا نجمع مبالغ إلا لو الرحلة مكتملة!
+        if (data.status === 'completed') {
+          counts.total++;
+          let ridePrice = parseFloat(data.price) || 0;
+          counts.totalRevenue += ridePrice;
+
+          if (data.requestedVehicleType === 'car') { 
+            counts.car++; counts.carRevenue += ridePrice; 
+          } else if (data.requestedVehicleType === 'scooter') { 
+            counts.scooter++; counts.scooterRevenue += ridePrice; 
+          } else if (data.requestedVehicleType === 'tuktuk_alt') {
+            if (data.requestedTuktukType === 'كيوت 3 راكب') { 
+              counts.cute++; counts.cuteRevenue += ridePrice; 
+            } else if (data.requestedTuktukType === 'جالاكسي 7 راكب') { 
+              counts.galaxy++; counts.galaxyRevenue += ridePrice; 
+            }
+          }
+        }
+      });
+      setStats(counts);
+    });
+
+    return () => { unsubCaptains(); unsubPassengers(); unsubComplaints(); unsubUpdates(); unsubRides(); };
   }, []);
 
   const pendingCaptains = captains.filter(c => c.status === 'pending' || c.status === 'pending_approval');
@@ -268,6 +303,39 @@ export default function AdminDashboard() {
         <Text style={styles.headerTitle}>لوحة التحكم 👑</Text>
       </View>
 
+      <View style={styles.topDashboardRow}>
+        <View style={styles.mainRevenueBox}>
+          <Text style={styles.mainRevenueTitle}>المبيعات المكتملة 💰</Text>
+          <Text style={styles.mainRevenueVal}>{stats.totalRevenue.toFixed(0)} ج</Text>
+        </View>
+        <TouchableOpacity style={styles.historyBtn} onPress={() => router.push('/admin-rides')}>
+          <Text style={styles.historyBtnText}>سجل الرحلات 📊</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.statsGrid}>
+        <View style={[styles.statSmallBox, { borderColor: '#3b82f6' }]}>
+          <Text style={styles.statSmallTitle}>سيارة 🚗</Text>
+          <Text style={[styles.statSmallRev, { color: '#3b82f6' }]}>{stats.carRevenue.toFixed(0)} ج</Text>
+          <Text style={styles.statSmallCount}>{stats.car} رحلة</Text>
+        </View>
+        <View style={[styles.statSmallBox, { borderColor: '#10b981' }]}>
+          <Text style={styles.statSmallTitle}>كيوت 3 🛺</Text>
+          <Text style={[styles.statSmallRev, { color: '#10b981' }]}>{stats.cuteRevenue.toFixed(0)} ج</Text>
+          <Text style={styles.statSmallCount}>{stats.cute} رحلة</Text>
+        </View>
+        <View style={[styles.statSmallBox, { borderColor: '#f59e0b' }]}>
+          <Text style={styles.statSmallTitle}>جالاكسي 7 🛺</Text>
+          <Text style={[styles.statSmallRev, { color: '#f59e0b' }]}>{stats.galaxyRevenue.toFixed(0)} ج</Text>
+          <Text style={styles.statSmallCount}>{stats.galaxy} رحلة</Text>
+        </View>
+        <View style={[styles.statSmallBox, { borderColor: '#8b5cf6' }]}>
+          <Text style={styles.statSmallTitle}>سكوتر 🛵</Text>
+          <Text style={[styles.statSmallRev, { color: '#8b5cf6' }]}>{stats.scooterRevenue.toFixed(0)} ج</Text>
+          <Text style={styles.statSmallCount}>{stats.scooter} رحلة</Text>
+        </View>
+      </View>
+
       <View style={styles.tabsRow}>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
           <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>تسجيل</Text>
@@ -420,7 +488,7 @@ export default function AdminDashboard() {
         </ScrollView>
       )}
 
-      {/* مودال الملف الشخصي الشامل */}
+      {/* Profile Modal ... (نفس الكود) */}
       <Modal visible={profileModalVisible} transparent={true} animationType="slide">
         <View style={styles.fullScreenModal}>
           <View style={styles.profileModalHeader}>
@@ -431,17 +499,12 @@ export default function AdminDashboard() {
 
           {selectedUser && (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
-              
               <View style={styles.profileHeaderBox}>
                 <Image source={{ uri: selectedUser.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.profileBigAvatar} />
-                
                 <View style={styles.profileAvgRatingRow}>
-                  <Text style={styles.profileAvgStars}>
-                    {'⭐'.repeat(averageRating)}{'☆'.repeat(5 - averageRating)}
-                  </Text>
+                  <Text style={styles.profileAvgStars}>{'⭐'.repeat(averageRating)}{'☆'.repeat(5 - averageRating)}</Text>
                   <Text style={styles.profileRatingCount}>({userRatings.length})</Text>
                 </View>
-
                 <Text style={styles.profileBigName}>{selectedUser.name}</Text>
                 <Text style={styles.profileBigPhone}>📞 {selectedUser.phone}</Text>
                 {selectedUserType === 'captain' && <Text style={styles.profileBigVehicle}>🛺 {selectedUser.vehicle}</Text>}
@@ -479,7 +542,6 @@ export default function AdminDashboard() {
                         finalSenderName = cap ? cap.name : 'كابتن (حساب محذوف)';
                       }
                     }
-
                     return (
                       <View key={idx} style={styles.ratingItem}>
                         <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}>
@@ -510,12 +572,8 @@ export default function AdminDashboard() {
             <TextInput style={styles.inputModal} placeholder="عنوان الرسالة (تنبيه، مكافأة...)" placeholderTextColor="#64748b" value={profileMsgTitle} onChangeText={setProfileMsgTitle} textAlign="right" />
             <TextInput style={[styles.inputModal, { minHeight: 80, textAlignVertical: 'top' }]} placeholder="اكتب نص الرسالة هنا..." placeholderTextColor="#64748b" multiline value={profileMsgText} onChangeText={setProfileMsgText} textAlign="right" />
             <View style={styles.actionRowModal}>
-              <TouchableOpacity style={styles.confirmModalBtn} onPress={handleSendProfileMessage} disabled={sendingProfileMsg}>
-                {sendingProfileMsg ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmModalBtnText}>إرسال الإشعار فوراً</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelModalBtn} onPress={() => setProfileMsgModalVisible(false)}>
-                <Text style={styles.cancelModalBtnText}>إلغاء</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmModalBtn} onPress={handleSendProfileMessage} disabled={sendingProfileMsg}><Text style={styles.confirmModalBtnText}>إرسال الإشعار فوراً</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.cancelModalBtn} onPress={() => setProfileMsgModalVisible(false)}><Text style={styles.cancelModalBtnText}>إلغاء</Text></TouchableOpacity>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -532,7 +590,7 @@ export default function AdminDashboard() {
             <TextInput style={styles.inputModal} placeholder="المبلغ" placeholderTextColor="#64748b" keyboardType="numeric" value={walletAmount} onChangeText={setWalletAmount} textAlign="right" />
             <TextInput style={styles.inputModal} placeholder="السبب..." placeholderTextColor="#64748b" value={walletReason} onChangeText={setWalletReason} textAlign="right" />
             <View style={styles.actionRowModal}>
-              <TouchableOpacity style={styles.confirmModalBtn} onPress={executeWalletAdjustment} disabled={processingWallet}>{processingWallet ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmModalBtnText}>تأكيد</Text>}</TouchableOpacity>
+              <TouchableOpacity style={styles.confirmModalBtn} onPress={executeWalletAdjustment} disabled={processingWallet}><Text style={styles.confirmModalBtnText}>تأكيد</Text></TouchableOpacity>
               <TouchableOpacity style={styles.cancelModalBtn} onPress={() => setWalletModalVisible(false)}><Text style={styles.cancelModalBtnText}>إلغاء</Text></TouchableOpacity>
             </View>
           </View>
@@ -544,11 +602,8 @@ export default function AdminDashboard() {
           <View style={styles.docsModalContent}>
             <TouchableOpacity onPress={() => setSelectedDocs(null)} style={{alignSelf: 'flex-start'}}><Text style={styles.closeBtnText}>إغلاق ✖</Text></TouchableOpacity>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {selectedDocs?.idFront && <Text style={styles.imgLabel}>الوجه</Text>}
               {selectedDocs?.idFront && <Image source={{ uri: selectedDocs.idFront }} style={styles.docImage} />}
-              {selectedDocs?.idBack && <Text style={styles.imgLabel}>الظهر</Text>}
               {selectedDocs?.idBack && <Image source={{ uri: selectedDocs.idBack }} style={styles.docImage} />}
-              {selectedDocs?.vehicleImage && <Text style={styles.imgLabel}>المركبة</Text>}
               {selectedDocs?.vehicleImage && <Image source={{ uri: selectedDocs.vehicleImage }} style={styles.docImage} />}
             </ScrollView>
           </View>
@@ -561,7 +616,7 @@ export default function AdminDashboard() {
             <Text style={styles.modalTitleText}>رد على الشكوى</Text>
             <TextInput style={[styles.inputModal, { minHeight: 80, textAlignVertical: 'top' }]} placeholder="اكتب ردك..." placeholderTextColor="#64748b" multiline value={replyText} onChangeText={setReplyText} textAlign="right" />
             <View style={styles.actionRowModal}>
-              <TouchableOpacity style={styles.confirmModalBtn} onPress={handleReplyComplaint} disabled={sendingReply}>{sendingReply ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmModalBtnText}>إرسال</Text>}</TouchableOpacity>
+              <TouchableOpacity style={styles.confirmModalBtn} onPress={handleReplyComplaint} disabled={sendingReply}><Text style={styles.confirmModalBtnText}>إرسال</Text></TouchableOpacity>
               <TouchableOpacity style={styles.cancelModalBtn} onPress={() => setReplyModalVisible(false)}><Text style={styles.cancelModalBtnText}>إلغاء</Text></TouchableOpacity>
             </View>
           </View>
@@ -577,6 +632,20 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#eab308', fontSize: 20, fontWeight: 'bold' },
   logoutBtn: { backgroundColor: '#334155', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
   logoutBtnText: { color: '#f8fafc', fontSize: 13, fontWeight: 'bold' },
+  
+  topDashboardRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  mainRevenueBox: { flex: 1, backgroundColor: '#10b981', padding: 12, borderRadius: 12, alignItems: 'center', marginLeft: 10, elevation: 3 },
+  mainRevenueTitle: { color: '#ecfdf5', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
+  mainRevenueVal: { color: '#ffffff', fontSize: 22, fontWeight: 'bold' },
+  historyBtn: { flex: 1, backgroundColor: '#2563eb', padding: 18, borderRadius: 12, alignItems: 'center', elevation: 3 },
+  historyBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
+  
+  statsGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 15 },
+  statSmallBox: { width: '48%', backgroundColor: '#1e293b', padding: 15, borderRadius: 12, borderWidth: 1, alignItems: 'center', marginBottom: 12, elevation: 1 },
+  statSmallTitle: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
+  statSmallRev: { fontSize: 18, fontWeight: 'bold', marginBottom: 4 },
+  statSmallCount: { color: '#64748b', fontSize: 11, fontWeight: 'bold' },
+
   tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },
   tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, position: 'relative' },
   tabBtnActive: { backgroundColor: '#eab308' },
