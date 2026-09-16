@@ -45,7 +45,9 @@
         {
           "locationAlwaysPermission": "Allow $(PRODUCT_NAME) to access your location."
         }
-      ]
+      ],
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

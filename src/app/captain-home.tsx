@@ -293,13 +293,16 @@ export default function CaptainHome() {
               id: captainId, 
               name: data.name || '', 
               phone: data.phone || '', 
-              vehicle: data.vehicleNumber || data.tukTukNumber || data.vehicle || 'توكتوك', 
+              vehicle: data.vehicle || data.vehicleDetails?.type || 'مركبة', 
               vehicleCategory: data.vehicleCategory || 'tuktuk_alt', 
-              tuktukAltType: data.tuktukAltType || '', // 👈 قراءة النوع الجديد
+              tuktukAltType: data.tuktukAltType || '', 
               avatar: finalAvatar, 
               walletBalance: data.walletBalance || 0, 
               averageRating: Number(avgRate), 
-              ratingCount: rCount 
+              ratingCount: rCount,
+              vehicleImage: data.vehicleImage || data.vehicleDetails?.image || data.carImage || data.tuktukImage || '',
+              // 👈 ضفنا كل الاحتمالات اللي ممكن تكون اللوحة متسجلة بيها في الداتا بيز القديمة
+              plateNumber: data.plateNumber || data.vehicleDetails?.plateNumber || data.carPlate || data.carNumber || data.vehicleNumber || data.tukTukNumber || ''
             };
             
             setCaptainProfile(updatedProfile);
@@ -711,9 +714,23 @@ export default function CaptainHome() {
               </View>
             </View>
             {activeRide.status !== 'in_progress' ? (
-              <View style={styles.tripRouteContainer}>
-                <Text style={styles.routeTextActive}>الانطلاق: {activeRide.pickupLocation}</Text>
-                <Text style={styles.priceTagActive}>الأجرة: {activeRide.price} جنيه</Text>
+              <View style={styles.navigationContainer}>
+                <Text style={styles.navigationHeader}>نقطة التقابل (مكان الراكب):</Text>
+                <TouchableOpacity style={styles.navButton} onPress={() => {
+                  // فتح جوجل ماب ورسم المسار من موقع الكابتن لموقع الراكب مباشرة
+                  if (activeRide.pickupCoords && activeRide.pickupCoords.latitude) {
+                    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${activeRide.pickupCoords.latitude},${activeRide.pickupCoords.longitude}`);
+                  } else {
+                    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeRide.pickupLocation)}`);
+                  }
+                }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.navButtonTitle}>اضغط لفتح خريطة جوجل</Text>
+                    <Text style={styles.navButtonText} numberOfLines={2}>{activeRide.pickupLocation}</Text>
+                  </View>
+                  <Text style={[styles.navIcon, {backgroundColor: '#3b82f6'}]}>📍 تتبع</Text>
+                </TouchableOpacity>
+                <Text style={[styles.priceTagActive, {marginTop: 10}]}>الأجرة المتفق عليها: {activeRide.price} جنيه</Text>
               </View>
             ) : (
               <View style={styles.navigationContainer}>

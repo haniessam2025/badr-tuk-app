@@ -6,16 +6,20 @@ import { db } from '../firebaseConfig';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'support'>('pending');
+  
+  // 👈 غيرنا التاب من support لـ vehicles
+  const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'vehicles'>('pending');
   
   const [captains, setCaptains] = useState<any[]>([]);
   const [passengers, setPassengers] = useState<any[]>([]);
-  const [complaints, setComplaints] = useState<any[]>([]);
   const [updateRequests, setUpdateRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [searchCaptain, setSearchCaptain] = useState('');
   const [searchPassenger, setSearchPassenger] = useState('');
+
+  // 👈 متغير لتحديد المركبة المختارة جوه تاب المركبات
+  const [selectedVehicleCategory, setSelectedVehicleCategory] = useState<string | null>(null);
 
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -35,25 +39,6 @@ export default function AdminDashboard() {
   const [profileMsgText, setProfileMsgText] = useState('');
   const [sendingProfileMsg, setSendingProfileMsg] = useState(false);
 
-  const [msgPhone, setMsgPhone] = useState('');
-  const [msgUserType, setMsgUserType] = useState<'captain' | 'passenger'>('captain');
-  const [msgTitle, setMsgTitle] = useState('');
-  const [msgText, setMsgText] = useState('');
-  const [sendingMsg, setSendingMsg] = useState(false);
-  
-  const [replyModalVisible, setReplyModalVisible] = useState(false);
-  const [selectedComplaint, setSelectedComplaint] = useState<any>(null);
-  const [replyText, setReplyText] = useState('');
-  const [sendingReply, setSendingReply] = useState(false);
-
-  const [stats, setStats] = useState({
-    total: 0, totalRevenue: 0,
-    car: 0, carRevenue: 0,
-    cute: 0, cuteRevenue: 0,
-    galaxy: 0, galaxyRevenue: 0,
-    scooter: 0, scooterRevenue: 0
-  });
-
   useEffect(() => {
     const unsubCaptains = onSnapshot(collection(db, 'captains'), (snapshot) => {
       setCaptains(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -64,12 +49,6 @@ export default function AdminDashboard() {
       setPassengers(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    const unsubComplaints = onSnapshot(collection(db, 'complaints'), (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-      list.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
-      setComplaints(list);
-    });
-
     const unsubUpdates = onSnapshot(collection(db, 'update_requests'), (snapshot) => {
       const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
       const pendingUpdates = list.filter((r: any) => r.status === 'pending');
@@ -77,34 +56,7 @@ export default function AdminDashboard() {
       setUpdateRequests(pendingUpdates);
     });
 
-    const unsubRides = onSnapshot(collection(db, 'rides'), (snapshot) => {
-      let counts = { total: 0, totalRevenue: 0, car: 0, carRevenue: 0, cute: 0, cuteRevenue: 0, galaxy: 0, galaxyRevenue: 0, scooter: 0, scooterRevenue: 0 };
-      snapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        
-        // 👈 السر هنا: مش هنعد ولا نجمع مبالغ إلا لو الرحلة مكتملة!
-        if (data.status === 'completed') {
-          counts.total++;
-          let ridePrice = parseFloat(data.price) || 0;
-          counts.totalRevenue += ridePrice;
-
-          if (data.requestedVehicleType === 'car') { 
-            counts.car++; counts.carRevenue += ridePrice; 
-          } else if (data.requestedVehicleType === 'scooter') { 
-            counts.scooter++; counts.scooterRevenue += ridePrice; 
-          } else if (data.requestedVehicleType === 'tuktuk_alt') {
-            if (data.requestedTuktukType === 'كيوت 3 راكب') { 
-              counts.cute++; counts.cuteRevenue += ridePrice; 
-            } else if (data.requestedTuktukType === 'جالاكسي 7 راكب') { 
-              counts.galaxy++; counts.galaxyRevenue += ridePrice; 
-            }
-          }
-        }
-      });
-      setStats(counts);
-    });
-
-    return () => { unsubCaptains(); unsubPassengers(); unsubComplaints(); unsubUpdates(); unsubRides(); };
+    return () => { unsubCaptains(); unsubPassengers(); unsubUpdates(); };
   }, []);
 
   const pendingCaptains = captains.filter(c => c.status === 'pending' || c.status === 'pending_approval');
@@ -120,6 +72,34 @@ export default function AdminDashboard() {
     p.status !== 'pending' &&
     (p.name?.includes(searchPassenger) || p.phone?.includes(searchPassenger))
   );
+
+  // 👈 فلاتر الكباتن حسب نوع المركبة لتاب "المركبات"
+  const onlyActiveCaptains = captains.filter(c => c.status !== 'pending' && c.status !== 'pending_approval' && c.status !== 'rejected');
+  const carCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سيارة') || c.vehicleCategory === 'car');
+  const scooterCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سكوتر') || c.vehicleCategory === 'scooter');
+  
+  // 👈 البحث عن كلمة جالاكسي في كل تفاصيل الكابتن لمنع التداخل
+  const galaxyCaptains = onlyActiveCaptains.filter(c => 
+    c.vehicle?.includes('جالاكسي') || 
+    c.vehicleDetails?.type?.includes('جالاكسي') || 
+    c.requestedTuktukType?.includes('جالاكسي')
+  );
+
+  // 👈 الكيوت هو أي بديل توكتوك بشرط إنه ميكونش جالاكسي
+  const cuteCaptains = onlyActiveCaptains.filter(c => {
+    const isGalaxy = c.vehicle?.includes('جالاكسي') || c.vehicleDetails?.type?.includes('جالاكسي') || c.requestedTuktukType?.includes('جالاكسي');
+    if (isGalaxy) return false; 
+    
+    return c.vehicleCategory === 'tuktuk_alt' || c.vehicle?.includes('كيوت') || c.vehicleDetails?.type?.includes('كيوت');
+  });
+
+  const getSelectedCaptainsList = () => {
+    if (selectedVehicleCategory === 'سيارات') return carCaptains;
+    if (selectedVehicleCategory === 'كيوت 3 راكب') return cuteCaptains;
+    if (selectedVehicleCategory === 'جالاكسي 7 راكب') return galaxyCaptains;
+    if (selectedVehicleCategory === 'سكوتر') return scooterCaptains;
+    return [];
+  };
 
   const approveRegistration = async (id: string, type: 'captain' | 'passenger') => {
     const collectionName = type === 'captain' ? 'captains' : 'passengers';
@@ -264,31 +244,6 @@ export default function AdminDashboard() {
     } catch (error) { Alert.alert('خطأ', 'تعذر إرسال الإشعار.'); } finally { setSendingProfileMsg(false); }
   };
 
-  const handleSendMessage = async () => {
-    if (!msgPhone.trim() || !msgTitle.trim() || !msgText.trim()) { Alert.alert('تنبيه', 'برجاء استكمال البيانات.'); return; }
-    setSendingMsg(true);
-    try {
-      const collectionName = msgUserType === 'captain' ? 'captains' : 'passengers';
-      const q = query(collection(db, collectionName), where('phone', '==', msgPhone.trim()));
-      const querySnapshot = await getDocs(q);
-      if (querySnapshot.empty) { Alert.alert('خطأ', 'لم يتم العثور على هذا الرقم.'); setSendingMsg(false); return; }
-      
-      const targetUser = querySnapshot.docs[0];
-      await addDoc(collection(db, 'notifications'), { userId: targetUser.id, userType: msgUserType, title: msgTitle.trim(), message: msgText.trim(), timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
-      Alert.alert('نجاح 📩', 'تم الإرسال.'); setMsgPhone(''); setMsgTitle(''); setMsgText('');
-    } catch (e) { Alert.alert('خطأ', 'تعذر الإرسال.'); } finally { setSendingMsg(false); }
-  };
-
-  const handleReplyComplaint = async () => {
-    if (!replyText.trim()) { Alert.alert('تنبيه', 'لا يمكن إرسال رد فارغ.'); return; }
-    setSendingReply(true);
-    try {
-      await updateDoc(doc(db, 'complaints', selectedComplaint.id), { status: 'replied', adminReply: replyText.trim(), replyTimestamp: serverTimestamp() });
-      await addDoc(collection(db, 'notifications'), { userId: selectedComplaint.senderId, userType: selectedComplaint.senderType, title: 'رد الإدارة', message: replyText.trim(), timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
-      Alert.alert('نجاح', 'تم إرسال الرد.'); setReplyModalVisible(false); setReplyText(''); setSelectedComplaint(null);
-    } catch (e) {} finally { setSendingReply(false); }
-  };
-
   const getAverageRating = () => {
     if (userRatings.length === 0) return 5;
     const total = userRatings.reduce((sum, current) => sum + (current.rating || 0), 0);
@@ -303,38 +258,9 @@ export default function AdminDashboard() {
         <Text style={styles.headerTitle}>لوحة التحكم 👑</Text>
       </View>
 
-      <View style={styles.topDashboardRow}>
-        <View style={styles.mainRevenueBox}>
-          <Text style={styles.mainRevenueTitle}>المبيعات المكتملة 💰</Text>
-          <Text style={styles.mainRevenueVal}>{stats.totalRevenue.toFixed(0)} ج</Text>
-        </View>
-        <TouchableOpacity style={styles.historyBtn} onPress={() => router.push('/admin-rides')}>
-          <Text style={styles.historyBtnText}>سجل الرحلات 📊</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.statsGrid}>
-        <View style={[styles.statSmallBox, { borderColor: '#3b82f6' }]}>
-          <Text style={styles.statSmallTitle}>سيارة 🚗</Text>
-          <Text style={[styles.statSmallRev, { color: '#3b82f6' }]}>{stats.carRevenue.toFixed(0)} ج</Text>
-          <Text style={styles.statSmallCount}>{stats.car} رحلة</Text>
-        </View>
-        <View style={[styles.statSmallBox, { borderColor: '#10b981' }]}>
-          <Text style={styles.statSmallTitle}>كيوت 3 🛺</Text>
-          <Text style={[styles.statSmallRev, { color: '#10b981' }]}>{stats.cuteRevenue.toFixed(0)} ج</Text>
-          <Text style={styles.statSmallCount}>{stats.cute} رحلة</Text>
-        </View>
-        <View style={[styles.statSmallBox, { borderColor: '#f59e0b' }]}>
-          <Text style={styles.statSmallTitle}>جالاكسي 7 🛺</Text>
-          <Text style={[styles.statSmallRev, { color: '#f59e0b' }]}>{stats.galaxyRevenue.toFixed(0)} ج</Text>
-          <Text style={styles.statSmallCount}>{stats.galaxy} رحلة</Text>
-        </View>
-        <View style={[styles.statSmallBox, { borderColor: '#8b5cf6' }]}>
-          <Text style={styles.statSmallTitle}>سكوتر 🛵</Text>
-          <Text style={[styles.statSmallRev, { color: '#8b5cf6' }]}>{stats.scooterRevenue.toFixed(0)} ج</Text>
-          <Text style={styles.statSmallCount}>{stats.scooter} رحلة</Text>
-        </View>
-      </View>
+      <TouchableOpacity style={styles.fullWidthHistoryBtn} onPress={() => router.push('/admin-rides')}>
+        <Text style={styles.fullWidthHistoryBtnText}>سجل الرحلات 📊</Text>
+      </TouchableOpacity>
 
       <View style={styles.tabsRow}>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
@@ -347,7 +273,11 @@ export default function AdminDashboard() {
         </TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'captains' && styles.tabBtnActive]} onPress={() => setActiveTab('captains')}><Text style={[styles.tabBtnText, activeTab === 'captains' && styles.tabBtnTextActive]}>كباتن</Text></TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'passengers' && styles.tabBtnActive]} onPress={() => setActiveTab('passengers')}><Text style={[styles.tabBtnText, activeTab === 'passengers' && styles.tabBtnTextActive]}>ركاب</Text></TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'support' && styles.tabBtnActive]} onPress={() => setActiveTab('support')}><Text style={[styles.tabBtnText, activeTab === 'support' && styles.tabBtnTextActive]}>تواصل</Text></TouchableOpacity>
+        
+        {/* 👈 التاب الجديد للمركبات */}
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'vehicles' && styles.tabBtnActive]} onPress={() => { setActiveTab('vehicles'); setSelectedVehicleCategory(null); }}>
+          <Text style={[styles.tabBtnText, activeTab === 'vehicles' && styles.tabBtnTextActive]}>مركبات</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? <View style={styles.centerContainer}><ActivityIndicator size="large" color="#eab308" /></View> : 
@@ -464,31 +394,74 @@ export default function AdminDashboard() {
           </ScrollView>
         </View>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <View style={styles.messagingContainer}>
-            <Text style={styles.sectionTitle}>إرسال رسالة مباشرة 📩</Text>
-            <View style={styles.typeSelectorRow}>
-              <TouchableOpacity style={[styles.typeOption, msgUserType === 'captain' && styles.typeOptionSelected]} onPress={() => setMsgUserType('captain')}><Text style={[styles.typeOptionText, msgUserType === 'captain' && { color: '#000' }]}>👨‍✈️ كابتن</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.typeOption, msgUserType === 'passenger' && styles.typeOptionSelected]} onPress={() => setMsgUserType('passenger')}><Text style={[styles.typeOptionText, msgUserType === 'passenger' && { color: '#000' }]}>👤 راكب</Text></TouchableOpacity>
+        /* 👈 قسم المركبات الجديد بالكامل */
+        <View style={{ flex: 1 }}>
+          {!selectedVehicleCategory ? (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.vehiclesSectionTitle}>أسطول الكباتن حسب المركبة 🚖</Text>
+              <Text style={styles.vehiclesSectionHint}>اختر تصنيف لعرض الكباتن التابعين له</Text>
+
+              <View style={styles.vehiclesGrid}>
+                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#3b82f6' }]} onPress={() => setSelectedVehicleCategory('سيارات')}>
+                  <Text style={styles.vehicleCatIcon}>🚗</Text>
+                  <Text style={styles.vehicleCatTitle}>سيارات</Text>
+                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#3b82f6' }]}>{carCaptains.length} كابتن</Text></View>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#10b981' }]} onPress={() => setSelectedVehicleCategory('كيوت 3 راكب')}>
+                  <Text style={styles.vehicleCatIcon}>🛺</Text>
+                  <Text style={styles.vehicleCatTitle}>كيوت 3 راكب</Text>
+                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#10b981' }]}>{cuteCaptains.length} كابتن</Text></View>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#f59e0b' }]} onPress={() => setSelectedVehicleCategory('جالاكسي 7 راكب')}>
+                  <Text style={styles.vehicleCatIcon}>🛺</Text>
+                  <Text style={styles.vehicleCatTitle}>جالاكسي 7 راكب</Text>
+                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#f59e0b' }]}>{galaxyCaptains.length} كابتن</Text></View>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#8b5cf6' }]} onPress={() => setSelectedVehicleCategory('سكوتر')}>
+                  <Text style={styles.vehicleCatIcon}>🛵</Text>
+                  <Text style={styles.vehicleCatTitle}>سكوتر</Text>
+                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#8b5cf6' }]}>{scooterCaptains.length} كابتن</Text></View>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <View style={styles.vehicleListHeader}>
+                <TouchableOpacity onPress={() => setSelectedVehicleCategory(null)} style={styles.backBtnCategory}>
+                  <Text style={styles.backBtnCategoryText}>رجوع ✖</Text>
+                </TouchableOpacity>
+                <View>
+                   <Text style={styles.vehicleListTitle}>كباتن ({selectedVehicleCategory})</Text>
+                   <Text style={styles.vehicleListSub}>العدد الإجمالي: {getSelectedCaptainsList().length}</Text>
+                </View>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {getSelectedCaptainsList().length === 0 ? (
+                  <Text style={styles.emptyText}>لا يوجد كباتن مسجلين بهذه المركبة حالياً.</Text>
+                ) : (
+                  getSelectedCaptainsList().map((cap, idx) => (
+                    <View key={idx} style={styles.capListCard}>
+                      <TouchableOpacity style={styles.capListProfileBtn} onPress={() => openUserProfile(cap, 'captain')}>
+                        <Text style={styles.capListProfileBtnText}>عرض الملف 👤</Text>
+                      </TouchableOpacity>
+                      <View style={styles.capListInfo}>
+                        <Text style={styles.capListName}>{cap.name}</Text>
+                        <Text style={styles.capListPhone}>📞 {cap.phone}</Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
             </View>
-            <TextInput style={styles.supportInput} placeholder="رقم الهاتف..." placeholderTextColor="#64748b" keyboardType="phone-pad" value={msgPhone} onChangeText={setMsgPhone} textAlign="right" />
-            <TextInput style={styles.supportInput} placeholder="عنوان الرسالة..." placeholderTextColor="#64748b" value={msgTitle} onChangeText={setMsgTitle} textAlign="right" />
-            <TextInput style={[styles.supportInput, { minHeight: 80, textAlignVertical: 'top' }]} placeholder="النص..." placeholderTextColor="#64748b" multiline value={msgText} onChangeText={setMsgText} textAlign="right" />
-            <TouchableOpacity style={styles.sendMsgBtn} onPress={handleSendMessage} disabled={sendingMsg}>{sendingMsg ? <ActivityIndicator color="#000" /> : <Text style={styles.sendMsgBtnText}>إرسال</Text>}</TouchableOpacity>
-          </View>
-          
-          <Text style={styles.sectionTitle}>الشكاوى والمقترحات 📬</Text>
-          {complaints.length === 0 ? <Text style={styles.emptyTextSupport}>لا توجد شكاوى.</Text> : complaints.map(comp => (
-            <View key={comp.id} style={[styles.complaintCard, comp.status === 'replied' && styles.complaintCardReplied]}>
-              <View style={styles.complaintHeader}><Text style={styles.complaintTypeBadge}>{comp.senderType === 'captain' ? '👨‍✈️ كابتن' : '👤 راكب'}</Text><Text style={styles.complaintSenderName}>{comp.senderName}</Text></View>
-              <Text style={styles.complaintText}>"{comp.text}"</Text>
-              {comp.status === 'replied' ? (<View style={styles.adminReplyBox}><Text style={styles.adminReplyTitle}>ردك:</Text><Text style={styles.adminReplyText}>{comp.adminReply}</Text></View>) : (<TouchableOpacity style={styles.replyBtn} onPress={() => { setSelectedComplaint(comp); setReplyModalVisible(true); }}><Text style={styles.replyBtnText}>رد ✍️</Text></TouchableOpacity>)}
-            </View>
-          ))}
-        </ScrollView>
+          )}
+        </View>
       )}
 
-      {/* Profile Modal ... (نفس الكود) */}
+      {/* مودال الملف الشخصي (مهم جداً ومكمل معانا) */}
       <Modal visible={profileModalVisible} transparent={true} animationType="slide">
         <View style={styles.fullScreenModal}>
           <View style={styles.profileModalHeader}>
@@ -507,7 +480,20 @@ export default function AdminDashboard() {
                 </View>
                 <Text style={styles.profileBigName}>{selectedUser.name}</Text>
                 <Text style={styles.profileBigPhone}>📞 {selectedUser.phone}</Text>
-                {selectedUserType === 'captain' && <Text style={styles.profileBigVehicle}>🛺 {selectedUser.vehicle}</Text>}
+                
+                {/* 👈 التعديل الذكي لقراءة نوع المركبة لمنع تحويل الجالاكسي لكيوت */}
+                {selectedUserType === 'captain' && (
+                  <Text style={styles.profileBigVehicle}>
+                    {selectedUser.vehicleCategory === 'car' || selectedUser.vehicle?.includes('سيارة') ? '🚗 سيارة' :
+                     selectedUser.vehicleCategory === 'scooter' || selectedUser.vehicle?.includes('سكوتر') ? '🛵 سكوتر' :
+                     (selectedUser.vehicle?.includes('جالاكسي') || selectedUser.vehicleDetails?.type?.includes('جالاكسي') || selectedUser.requestedTuktukType?.includes('جالاكسي')) ? '🛺 جالاكسي 7 راكب' :
+                     (selectedUser.vehicle?.includes('كيوت') || selectedUser.vehicleDetails?.type?.includes('كيوت') || selectedUser.requestedTuktukType?.includes('كيوت')) ? '🛺 كيوت 3 راكب' :
+                     selectedUser.vehicleCategory === 'tuktuk_alt' ? '🛺 كيوت 3 راكب' :
+                     selectedUser.vehicle ? `🛺 ${selectedUser.vehicle}` : 
+                     '⚠️ نوع المركبة غير مسجل بالدقة المطلوبة'}
+                  </Text>
+                )}
+
                 <Text style={[styles.profileStatusBadge, selectedUser.status === 'banned' && { backgroundColor: '#ef4444' }]}>{selectedUser.status === 'banned' ? 'محظور من التسجيل 🚫' : 'حساب نشط 🟢'}</Text>
               </View>
 
@@ -530,7 +516,7 @@ export default function AdminDashboard() {
 
               <View style={styles.ratingsSection}>
                 <Text style={styles.sectionTitleProfile}>سجل التقييمات ({userRatings.length})</Text>
-                {loadingProfile ? <ActivityIndicator color="#eab308" /> : userRatings.length === 0 ? <Text style={styles.emptyTextSupport}>لم يتلقَ أي تقييمات بعد.</Text> : (
+                {loadingProfile ? <ActivityIndicator color="#eab308" /> : userRatings.length === 0 ? <Text style={styles.emptyText}>لم يتلقَ أي تقييمات بعد.</Text> : (
                   userRatings.map((rating, idx) => {
                     let finalSenderName = rating.senderName;
                     if (!finalSenderName) {
@@ -610,18 +596,6 @@ export default function AdminDashboard() {
         </View>
       </Modal>
 
-      <Modal visible={replyModalVisible} transparent={true} animationType="fade">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlayCentered}>
-          <View style={styles.walletModalContent}>
-            <Text style={styles.modalTitleText}>رد على الشكوى</Text>
-            <TextInput style={[styles.inputModal, { minHeight: 80, textAlignVertical: 'top' }]} placeholder="اكتب ردك..." placeholderTextColor="#64748b" multiline value={replyText} onChangeText={setReplyText} textAlign="right" />
-            <View style={styles.actionRowModal}>
-              <TouchableOpacity style={styles.confirmModalBtn} onPress={handleReplyComplaint} disabled={sendingReply}><Text style={styles.confirmModalBtnText}>إرسال</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.cancelModalBtn} onPress={() => setReplyModalVisible(false)}><Text style={styles.cancelModalBtnText}>إلغاء</Text></TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 }
@@ -633,18 +607,8 @@ const styles = StyleSheet.create({
   logoutBtn: { backgroundColor: '#334155', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
   logoutBtnText: { color: '#f8fafc', fontSize: 13, fontWeight: 'bold' },
   
-  topDashboardRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  mainRevenueBox: { flex: 1, backgroundColor: '#10b981', padding: 12, borderRadius: 12, alignItems: 'center', marginLeft: 10, elevation: 3 },
-  mainRevenueTitle: { color: '#ecfdf5', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
-  mainRevenueVal: { color: '#ffffff', fontSize: 22, fontWeight: 'bold' },
-  historyBtn: { flex: 1, backgroundColor: '#2563eb', padding: 18, borderRadius: 12, alignItems: 'center', elevation: 3 },
-  historyBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
-  
-  statsGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 15 },
-  statSmallBox: { width: '48%', backgroundColor: '#1e293b', padding: 15, borderRadius: 12, borderWidth: 1, alignItems: 'center', marginBottom: 12, elevation: 1 },
-  statSmallTitle: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
-  statSmallRev: { fontSize: 18, fontWeight: 'bold', marginBottom: 4 },
-  statSmallCount: { color: '#64748b', fontSize: 11, fontWeight: 'bold' },
+  fullWidthHistoryBtn: { backgroundColor: '#2563eb', paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20, elevation: 3 },
+  fullWidthHistoryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
 
   tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },
   tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, position: 'relative' },
@@ -657,7 +621,7 @@ const styles = StyleSheet.create({
   searchInput: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyState: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#64748b', fontSize: 16 },
+  emptyText: { color: '#64748b', fontSize: 16, textAlign: 'center', marginTop: 20 },
 
   userCard: { backgroundColor: '#1e293b', borderRadius: 14, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
   cardHeader: { flexDirection: 'row-reverse', alignItems: 'center' },
@@ -690,6 +654,30 @@ const styles = StyleSheet.create({
   inspectDocsBtn: { backgroundColor: '#334155', paddingVertical: 8, borderRadius: 8, alignItems: 'center', marginTop: 12 },
   inspectDocsBtnText: { color: '#38bdf8', fontSize: 13, fontWeight: 'bold' },
 
+  // 👈 ستايلات قسم المركبات الجديد
+  vehiclesSectionTitle: { color: '#f8fafc', fontSize: 18, fontWeight: 'bold', textAlign: 'right', marginBottom: 5 },
+  vehiclesSectionHint: { color: '#94a3b8', fontSize: 13, textAlign: 'right', marginBottom: 20 },
+  vehiclesGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', justifyContent: 'space-between' },
+  vehicleCatBox: { width: '48%', backgroundColor: '#1e293b', padding: 20, borderRadius: 16, borderWidth: 1, alignItems: 'center', marginBottom: 15, elevation: 2 },
+  vehicleCatIcon: { fontSize: 36, marginBottom: 10 },
+  vehicleCatTitle: { color: '#f8fafc', fontSize: 15, fontWeight: 'bold', marginBottom: 10 },
+  vehicleCatBadge: { backgroundColor: '#0f172a', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  vehicleCatCount: { fontSize: 14, fontWeight: 'bold' },
+
+  vehicleListHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
+  vehicleListTitle: { color: '#eab308', fontSize: 16, fontWeight: 'bold', textAlign: 'right' },
+  vehicleListSub: { color: '#94a3b8', fontSize: 12, textAlign: 'right', marginTop: 2 },
+  backBtnCategory: { backgroundColor: '#334155', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  backBtnCategoryText: { color: '#ef4444', fontSize: 13, fontWeight: 'bold' },
+
+  capListCard: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', padding: 15, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
+  capListInfo: { flex: 1, alignItems: 'flex-end', marginRight: 15 },
+  capListName: { color: '#f8fafc', fontSize: 15, fontWeight: 'bold', marginBottom: 4 },
+  capListPhone: { color: '#38bdf8', fontSize: 13, fontWeight: 'bold' },
+  capListProfileBtn: { backgroundColor: '#2563eb', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  capListProfileBtnText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+
+  // Profile Modal Styles
   fullScreenModal: { flex: 1, backgroundColor: '#0f172a' },
   profileModalHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#1e293b', borderBottomWidth: 1, borderColor: '#334155' },
   profileHeaderBox: { alignItems: 'center', marginBottom: 20, backgroundColor: '#1e293b', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#334155' },
@@ -730,38 +718,18 @@ const styles = StyleSheet.create({
   deleteBtnBig: { backgroundColor: '#991b1b', padding: 15, borderRadius: 12, alignItems: 'center' },
   deleteBtnBigText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
 
-  sectionTitle: { color: '#eab308', fontSize: 18, fontWeight: 'bold', textAlign: 'right', marginBottom: 15, marginTop: 10 },
-  messagingContainer: { backgroundColor: '#1e293b', padding: 15, borderRadius: 14, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-  supportInput: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
-  sendMsgBtn: { backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginTop: 5 },
-  sendMsgBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
-  emptyTextSupport: { color: '#64748b', textAlign: 'center', marginTop: 10 },
-  complaintCard: { backgroundColor: '#1e293b', padding: 15, borderRadius: 14, marginBottom: 12, borderWidth: 1, borderColor: '#ef4444' },
-  complaintCardReplied: { borderColor: '#10b981' },
-  complaintHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  complaintTypeBadge: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold', backgroundColor: '#0f172a', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6 },
-  complaintSenderName: { color: '#f8fafc', fontSize: 14, fontWeight: 'bold' },
-  complaintText: { color: '#cbd5e1', fontSize: 13, textAlign: 'right', marginBottom: 15, lineHeight: 20 },
-  replyBtn: { backgroundColor: '#334155', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  replyBtnText: { color: '#38bdf8', fontWeight: 'bold' },
-  adminReplyBox: { backgroundColor: '#0f172a', padding: 10, borderRadius: 8, borderRightWidth: 3, borderColor: '#10b981' },
-  adminReplyTitle: { color: '#10b981', fontSize: 12, fontWeight: 'bold', textAlign: 'right', marginBottom: 4 },
-  adminReplyText: { color: '#f8fafc', fontSize: 13, textAlign: 'right' },
-
   overlayCentered: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 15 },
   walletModalContent: { backgroundColor: '#1e293b', width: '90%', borderRadius: 16, padding: 20 },
   docsModalContent: { backgroundColor: '#1e293b', width: '100%', maxHeight: '85%', borderRadius: 16, padding: 15 },
   modalTitleText: { color: '#f8fafc', fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
   closeBtnText: { color: '#ef4444', fontSize: 14, fontWeight: 'bold', marginBottom: 15 },
-  imgLabel: { color: '#eab308', fontSize: 13, fontWeight: 'bold', textAlign: 'right', marginTop: 10, marginBottom: 5 },
   docImage: { width: '100%', height: 180, borderRadius: 10, backgroundColor: '#0f172a', marginBottom: 10, resizeMode: 'contain' },
   
   typeSelectorRow: { flexDirection: 'row-reverse', gap: 10, marginBottom: 15 },
   typeOption: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
-  typeOptionSelected: { backgroundColor: '#eab308', borderColor: '#eab308' },
-  typeOptionText: { color: '#94a3b8', fontWeight: 'bold' },
   typeOptionDeposit: { backgroundColor: '#10b981', borderColor: '#10b981' },
   typeOptionDeduction: { backgroundColor: '#ef4444', borderColor: '#ef4444' },
+  typeOptionText: { color: '#94a3b8', fontWeight: 'bold' },
   inputModal: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
   actionRowModal: { flexDirection: 'row-reverse', gap: 10, marginTop: 10 },
   confirmModalBtn: { flex: 2, backgroundColor: '#eab308', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },

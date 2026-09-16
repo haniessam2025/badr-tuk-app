@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av'; // 👈 استدعاء مكتبة الصوت
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
@@ -62,15 +63,41 @@ export default function PassengerHome() {
   // 👈 متغيرات الأنيميشن لتغيير صورة المركبة
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
 
+  // 👈 عداد عشان نراقب بيه عدد العروض اللي جات للصوت
+  const prevOffersCountRef = useRef(0);
+
+  // 👈 دالة تشغيل التنبيه الصوتي
+  const playAlertSound = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        require('../../assets/ringtone.mp3') // ⚠️ مسار ملف الصوت
+      );
+      
+      await sound.playAsync();
+      
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (status.didJustFinish) {
+          sound.unloadAsync();
+        }
+      });
+    } catch (error) {
+      console.log('Error playing sound:', error);
+    }
+  };
+
   useEffect(() => {
-    // حركة أنيميشن ناعمة لما المستخدم يغير نوع المركبة
     Animated.sequence([
       Animated.timing(vehicleImageAnim, { toValue: 0.5, duration: 150, useNativeDriver: true }),
       Animated.timing(vehicleImageAnim, { toValue: 1, duration: 200, useNativeDriver: true })
     ]).start();
   }, [requestedVehicleType, requestedTuktukType]);
 
-  // 👈 منطق تحديد صورة المركبة المناسبة من ملفات المشروع
   let headerImageSource;
   if (requestedVehicleType === 'car') {
     headerImageSource = require('../../assets/images/car.png');
@@ -130,7 +157,7 @@ export default function PassengerHome() {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
 
   const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0 });
-  const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR });
+  const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
 
   const getValidAvatar = (imgStr: any) => {
     if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return DEFAULT_AVATAR;
@@ -215,13 +242,16 @@ export default function PassengerHome() {
         if (activeRide.status === 'pending') {
           setRideStatus('searching');
           setOffers(activeRide.offers || []);
+          prevOffersCountRef.current = (activeRide.offers || []).length;
         } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
           setRideStatus(activeRide.status);
           setCaptainInfo({
             name: activeRide.captainName || '',
             phone: activeRide.captainPhone || 'غير مسجل',
             vehicle: activeRide.captainVehicle || 'مركبة',
-            avatar: getValidAvatar(activeRide.captainAvatar)
+            avatar: getValidAvatar(activeRide.captainAvatar),
+            vehicleImage: getValidAvatar(activeRide.captainVehicleImage),
+            plateNumber: activeRide.captainPlateNumber || ''
           });
         }
         await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
@@ -242,7 +272,15 @@ export default function PassengerHome() {
         const firebaseData = docSnap.data();
         if (firebaseData.status === 'pending') {
           setRideStatus('searching');
-          setOffers(firebaseData.offers || []);
+          
+          const currentOffers = firebaseData.offers || [];
+          // 👈 تشغيل التنبيه الصوتي لو فيه عرض جديد جه!
+          if (currentOffers.length > prevOffersCountRef.current) {
+            playAlertSound();
+          }
+          prevOffersCountRef.current = currentOffers.length;
+          
+          setOffers(currentOffers);
         }
         setUnreadChatCount(firebaseData.unreadCountPassenger || 0);
         if (firebaseData.numericSecret) setNumericSecret(firebaseData.numericSecret);
@@ -253,7 +291,9 @@ export default function PassengerHome() {
             name: firebaseData.captainName || 'كابتن',
             phone: firebaseData.captainPhone || 'غير مسجل',
             vehicle: firebaseData.captainVehicle || 'مركبة',
-            avatar: getValidAvatar(firebaseData.captainAvatar)
+            avatar: getValidAvatar(firebaseData.captainAvatar),
+            vehicleImage: getValidAvatar(firebaseData.captainVehicleImage),
+            plateNumber: firebaseData.captainPlateNumber || ''
           });
         } else if (firebaseData.status === 'completed') {
           setRideToRate({ firebaseData, id: currentRideId });
@@ -262,6 +302,7 @@ export default function PassengerHome() {
           setRideStatus('idle');
           setPickup(''); setPickupCoords(null); setDestinations(['']);
           setPrice(''); setOffers([]);
+          prevOffersCountRef.current = 0;
           setUnreadChatCount(0); setNotes(''); setLatestMessage('');
           setNumericSecret('');
         } else if (firebaseData.status === 'canceled') {
@@ -269,6 +310,7 @@ export default function PassengerHome() {
           setRideStatus('idle');
           setPickup(''); setPickupCoords(null); setDestinations(['']);
           setPrice(''); setOffers([]);
+          prevOffersCountRef.current = 0;
           setUnreadChatCount(0); setNotes(''); setLatestMessage('');
           setNumericSecret('');
         }
@@ -597,6 +639,8 @@ export default function PassengerHome() {
     }
     setRideStatus('searching');
     setOffers([]);
+    prevOffersCountRef.current = 0; // إعادة العداد للصفر عند بدء بحث جديد
+    
     let finalPickupCoords = pickupCoords;
     if (!finalPickupCoords) {
       try {
@@ -678,7 +722,8 @@ export default function PassengerHome() {
         captainName: String(offer?.captainName || 'غير مسجل'),
         captainPhone: String(offer?.captainPhone || ''),
         captainVehicle: String(offer?.captainVehicle || 'مركبة'),
-        captainAvatar: getValidAvatar(offer?.captainAvatar)
+        captainAvatar: getValidAvatar(offer?.captainAvatar),
+        captainPlateNumber: String(offer?.captainPlateNumber || '')
       };
 
       await setDoc(doc(db, 'rides', rideId), cleanData, { merge: true }); 
@@ -737,6 +782,7 @@ export default function PassengerHome() {
       setCurrentRideId(null);
       setRideStatus('idle');
       setOffers([]);
+      prevOffersCountRef.current = 0;
 
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إلغاء الرحلة');
@@ -979,24 +1025,47 @@ export default function PassengerHome() {
           <Text style={styles.cardTitle}>جاري استقبال العروض ...</Text>
           {offers.length === 0 ? (<Text style={styles.subText}>يرجى الانتظار قليلاً لتلقي عروض الكباتن...</Text>) : null}
           <ScrollView style={styles.offersContainer} showsVerticalScrollIndicator={false}>
-            {offers.map((offer, index) => (
-              <View key={index} style={styles.offerCard}>
-                <Image source={{ uri: getValidAvatar(offer.captainAvatar) }} style={styles.offerAvatar} />
-                <View style={styles.offerDetails}>
-                  <Text style={styles.offerName}>{offer.captainName}</Text>
-                  <View style={{ flexDirection: 'row-reverse', marginTop: 2 }}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
-                    ))}
+            {offers.map((offer, index) => {
+              let vIcon = '🛺';
+              if (offer.captainVehicleCategory === 'car' || offer.captainVehicle?.includes('سيارة')) vIcon = '🚗';
+              else if (offer.captainVehicleCategory === 'scooter' || offer.captainVehicle?.includes('سكوتر')) vIcon = '🛵';
+
+              return (
+                <View key={index} style={styles.offerCardPro}>
+                  
+                  {/* 1. الصف العلوي: الكابتن يمين والسعر شمال */}
+                  <View style={styles.offerTopRow}>
+                    <View style={styles.offerCaptainSide}>
+                      <Image source={{ uri: getValidAvatar(offer.captainAvatar) }} style={styles.offerAvatarPro} />
+                      <View style={styles.offerInfoCol}>
+                        <Text style={styles.offerNamePro} numberOfLines={1}>{offer.captainName}</Text>
+                        <View style={{ flexDirection: 'row-reverse', marginTop: 2 }}>
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
+                          ))}
+                        </View>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.offerActionSide}>
+                      <Text style={styles.offerPricePro}>{offer.price} ج</Text>
+                      <TouchableOpacity style={styles.acceptOfferBtnPro} onPress={() => acceptCaptainOffer(offer)}>
+                        <Text style={styles.acceptOfferBtnTextPro}>قبول العرض</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <Text style={styles.offerVehicle}>{offer.captainVehicle}</Text>
-                  <Text style={styles.offerPrice}>{offer.price} جنيه</Text>
+
+                  {/* 2. الصف السفلي: شريط تفاصيل العربية واللوحة كامل */}
+                  <View style={styles.offerBottomRow}>
+                    <Text style={styles.offerFullVehicleText} numberOfLines={2}>
+                      {offer.captainVehicle} {offer.captainPlateNumber && offer.captainPlateNumber !== 'لم يسجل لوحة' ? ` | لوحة: ${offer.captainPlateNumber}` : ''}
+                    </Text>
+                    <Text style={styles.offerVehicleIcon}>{vIcon}</Text>
+                  </View>
+
                 </View>
-                <TouchableOpacity style={styles.acceptOfferBtn} onPress={() => acceptCaptainOffer(offer)}>
-                  <Text style={styles.acceptOfferBtnText}>قبول</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+              );
+            })}
           </ScrollView>
           <TouchableOpacity style={styles.cancelBtnOnly} onPress={() => Alert.alert('إلغاء الطلب', 'هل أنت متأكد من إلغاء البحث؟', [{ text: 'تراجع', style: 'cancel' }, { text: 'نعم، إلغاء', onPress: handleCancelRide }])}>
             <Text style={styles.cancelBtnOnlyText}>إلغاء الطلب</Text>
@@ -1027,8 +1096,11 @@ export default function PassengerHome() {
           <View style={styles.captainCard}>
             <Image source={{ uri: getValidAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
             <View style={styles.captainDetails}>
-              <Text style={styles.captainText}>الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText}>المركبة: {captainInfo.vehicle}</Text>
+              <Text style={styles.captainText} numberOfLines={1}>الكابتن: {captainInfo.name}</Text>
+              <Text style={styles.captainText} numberOfLines={2}>المركبة: {captainInfo.vehicle}</Text>
+              {captainInfo.plateNumber && captainInfo.plateNumber !== 'لم يسجل لوحة' ? (
+                <Text style={styles.captainText} numberOfLines={1}>لوحة: {captainInfo.plateNumber}</Text>
+              ) : null}
             </View>
           </View>
           {rideStatus === 'waiting_for_scan' && (
@@ -1215,7 +1287,6 @@ const styles = StyleSheet.create({
   inlineToastText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', textAlign: 'right', flex: 1 },
   card: { backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#e2e8f0', elevation: 4, flex: 1, marginBottom: 10 },
   
-  // الاستايلات الجديدة للصورة والعنوان
   requestHeaderRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
   vehicleHeaderImg: { width: 75, height: 50 },
@@ -1261,14 +1332,21 @@ const styles = StyleSheet.create({
   suggestionSubText: { fontSize: 11, color: '#64748b', marginTop: 2 },
   suggestionSubTextActive: { color: '#fef3c7' },
   offersContainer: { maxHeight: 300, marginBottom: 15 },
-  offerCard: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#cbd5e1' },
-  offerAvatar: { width: 55, height: 55, borderRadius: 27.5, marginLeft: 12, backgroundColor: '#e2e8f0' },
-  offerDetails: { flex: 1, alignItems: 'flex-end' },
-  offerName: { fontSize: 15, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
-  offerVehicle: { fontSize: 13, color: '#64748b', textAlign: 'right', marginTop: 2 },
-  offerPrice: { fontSize: 16, fontWeight: 'bold', color: '#10b981', textAlign: 'right', marginTop: 4 },
-  acceptOfferBtn: { backgroundColor: '#10b981', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
-  acceptOfferBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  
+  offerCardPro: { backgroundColor: '#ffffff', borderRadius: 16, marginBottom: 15, borderWidth: 1, borderColor: '#cbd5e1', elevation: 4, overflow: 'hidden' },
+  offerTopRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f8fafc' },
+  offerCaptainSide: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1 },
+  offerAvatarPro: { width: 50, height: 50, borderRadius: 25, marginLeft: 12, backgroundColor: '#e2e8f0', borderWidth: 1, borderColor: '#cbd5e1' },
+  offerInfoCol: { flex: 1 },
+  offerNamePro: { fontSize: 16, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
+  offerActionSide: { alignItems: 'flex-start', paddingRight: 15, borderRightWidth: 1, borderRightColor: '#f1f5f9' },
+  offerPricePro: { fontSize: 22, fontWeight: 'bold', color: '#10b981', marginBottom: 5 },
+  acceptOfferBtnPro: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 22, borderRadius: 10, elevation: 2 },
+  acceptOfferBtnTextPro: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
+  offerBottomRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#eff6ff', paddingVertical: 12, paddingHorizontal: 15, borderTopWidth: 1, borderTopColor: '#bfdbfe' },
+  offerFullVehicleText: { flex: 1, fontSize: 14, color: '#1e3a8a', fontWeight: 'bold', textAlign: 'right', marginLeft: 10, lineHeight: 22 },
+  offerVehicleIcon: { fontSize: 24 },
+
   cancelBtnOnly: { backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
   cancelBtnOnlyText: { color: '#dc2626', fontWeight: 'bold', fontSize: 15 },
   modaloverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -1315,10 +1393,9 @@ const styles = StyleSheet.create({
   sidebarLinks: { padding: 20 },
   sidebarLink: { paddingVertical: 18, borderBottomWidth: 1, borderColor: '#f1f5f9' },
   sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
-  sidebarLogoutBtn: { backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
+  sidebarLogoutBtn: {backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
   sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
 
-  // الاستايلات اللي كانت ناقصة والمهمة جداً
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },
   searchButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
   captainCard: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#fef3c7', padding: 12, borderRadius: 14, marginBottom: 15 },
