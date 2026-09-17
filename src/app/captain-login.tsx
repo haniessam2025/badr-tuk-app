@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 export default function CaptainLogin() {
   const router = useRouter();
@@ -149,7 +149,7 @@ export default function CaptainLogin() {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.registerRedirect} onPress={() => router.push('/captain-register')}>
+        <TouchableOpacity style={styles.registerRedirect} onPress={() => router.push('/captain-register' as any)}>
           <Text style={styles.registerRedirectText}>ليس لديك حساب؟ <Text style={styles.registerLink}>سجل ككابتن جديد</Text></Text>
         </TouchableOpacity>
 

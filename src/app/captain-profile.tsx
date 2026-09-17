@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 export default function CaptainProfile() {
   const router = useRouter();

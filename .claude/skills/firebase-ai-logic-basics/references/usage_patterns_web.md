@@ -12,11 +12,11 @@ import { getAI, getGenerativeModel, GoogleAIBackend } from "firebase/ai";
 // If running in Firebase App Hosting, you can skip Firebase Config and instead use:
 // const app = initializeApp();
 
-const firebaseConfig = {
+const firebase = {
   // ... your firebase config
 };
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebase);
 
 // Initialize the AI Logic service (defaults to Gemini Developer API)
 // To set the AI provider, set the backend as the second parameter
@@ -123,7 +123,7 @@ import { getAI, getGenerativeModel, GoogleAIBackend, ResponseModality } from "fi
 
 
 // Initialize FirebaseApp
-const firebaseApp = initializeApp(firebaseConfig);
+const firebaseApp = initializeApp(firebase);
 
 // Initialize the Gemini Developer API backend service
 const ai = getAI(firebaseApp, { backend: new GoogleAIBackend() });

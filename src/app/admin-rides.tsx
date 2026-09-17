@@ -1,7 +1,7 @@
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 const { width } = Dimensions.get('window');
 

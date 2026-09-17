@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 export default function CaptainWallet() {
   const router = useRouter();

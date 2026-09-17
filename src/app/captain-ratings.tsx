@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 export default function CaptainRatings() {
   const router = useRouter();

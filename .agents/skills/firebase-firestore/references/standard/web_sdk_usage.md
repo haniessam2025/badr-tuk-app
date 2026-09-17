@@ -12,11 +12,11 @@ import { getFirestore } from "firebase/firestore";
 // If running in Firebase App Hosting, you can skip Firebase Config and instead use:
 // const app = initializeApp();
 
-const firebaseConfig = {
+const firebase = {
   // Your config options. Get the values by running 'npx -y firebase-tools@latest apps:sdkconfig <platform> <app-id>'
 };
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebase);
 const db = getFirestore(app);
 
 ```

@@ -1,12 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av'; // 👈 استدعاء مكتبة الصوت
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
+// تم إزالة expo-speech وإضافة expo-av
+import { Audio } from 'expo-av';
 import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { db } from '../firebase';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -60,36 +61,30 @@ export default function PassengerHome() {
   const [latestMessage, setLatestMessage] = useState('');
   const latestMsgTimer = useRef<any>(null);
 
-  // 👈 متغيرات الأنيميشن لتغيير صورة المركبة
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
-
-  // 👈 عداد عشان نراقب بيه عدد العروض اللي جات للصوت
   const prevOffersCountRef = useRef(0);
 
-  // 👈 دالة تشغيل التنبيه الصوتي
-  const playAlertSound = async () => {
-    try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-      });
+  // 👈 إضافة حالة لحفظ ملف الصوت
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
 
-      const { sound } = await Audio.Sound.createAsync(
-        require('../../assets/ringtone.mp3') // ⚠️ مسار ملف الصوت
+  // 👈 دالة التنبيه الجديدة (اهتزاز + تشغيل الرنة من assets)
+  const playOfferRingtone = async () => {
+    try {
+      Vibration.vibrate([0, 500, 200, 500]); // اهتزاز للتنبيه الفوري
+      const { sound: newSound } = await Audio.Sound.createAsync(
+         require('../../assets/ringtone.mp3') 
       );
-      
-      await sound.playAsync();
-      
-      sound.setOnPlaybackStatusUpdate((status: any) => {
-        if (status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
+      setSound(newSound);
+      await newSound.playAsync();
     } catch (error) {
-      console.log('Error playing sound:', error);
+      console.log('Error playing ringtone:', error);
     }
   };
+
+  // 👈 تنظيف الذاكرة لملف الصوت لما الشاشة تتقفل
+  useEffect(() => {
+    return sound ? () => { sound.unloadAsync(); } : undefined;
+  }, [sound]);
 
   useEffect(() => {
     Animated.sequence([
@@ -274,9 +269,10 @@ export default function PassengerHome() {
           setRideStatus('searching');
           
           const currentOffers = firebaseData.offers || [];
-          // 👈 تشغيل التنبيه الصوتي لو فيه عرض جديد جه!
+          
+          // 👈 تشغيل الرنة مع الهزاز عند وجود عرض جديد
           if (currentOffers.length > prevOffersCountRef.current) {
-            playAlertSound();
+            playOfferRingtone();
           }
           prevOffersCountRef.current = currentOffers.length;
           
@@ -639,7 +635,7 @@ export default function PassengerHome() {
     }
     setRideStatus('searching');
     setOffers([]);
-    prevOffersCountRef.current = 0; // إعادة العداد للصفر عند بدء بحث جديد
+    prevOffersCountRef.current = 0; 
     
     let finalPickupCoords = pickupCoords;
     if (!finalPickupCoords) {

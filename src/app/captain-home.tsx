@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const SCREEN_WIDTH = Dimensions.get('window').width;

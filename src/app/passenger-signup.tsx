@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { addDoc, collection, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 export default function PassengerSignupScreen() {
   const [image, setImage] = useState<string | null>(null);

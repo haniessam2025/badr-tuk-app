@@ -13,11 +13,11 @@ Initialize the SDK and Firestore instance:
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
+const firebase = {
   // Retrieve values using 'firebase apps:sdkconfig web <app-id>'
 };
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebase);
 const db = getFirestore(app);
 ```
 

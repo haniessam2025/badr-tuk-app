@@ -240,13 +240,13 @@ import { getAuth } from 'firebase/auth';
 import { getDataConnect, connectDataConnectEmulator } from 'firebase/data-connect';
 import { connectorConfig } from '@myapp/dataconnect';
 
-const firebaseConfig = {
+const firebase = {
   apiKey: "...",
   authDomain: "...",
   projectId: "...",
 };
 
-export const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebase);
 export const auth = getAuth(app);
 export const dataConnect = getDataConnect(app, connectorConfig);
 

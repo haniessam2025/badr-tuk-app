@@ -5,7 +5,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { db, storage } from '../firebaseConfig';
+import { db, storage } from '../firebase';
 
 const YEARS = Array.from({ length: 28 }, (_, i) => (2000 + i).toString()).reverse();
 const CAR_COLORS = ['أبيض', 'أسود', 'فضي', 'رمادي', 'أحمر', 'أزرق', 'كحلي', 'ذهبي / شامبين', 'أخضر', 'نبيتي', 'أخرى'];
