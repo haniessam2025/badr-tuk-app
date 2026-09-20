@@ -1,12 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av'; // 👈 استدعاء مكتبة الصوت
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
+// تم استبدال expo-speech بـ expo-notifications
+import * as Notifications from 'expo-notifications';
 import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebaseConfig';
+
+// 👈 إعدادات الإشعارات عشان تظهر وتضرب رنة حتى لو التطبيق مفتوح قدامك
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -60,34 +70,35 @@ export default function PassengerHome() {
   const [latestMessage, setLatestMessage] = useState('');
   const latestMsgTimer = useRef<any>(null);
 
-  // 👈 متغيرات الأنيميشن لتغيير صورة المركبة
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
-
-  // 👈 عداد عشان نراقب بيه عدد العروض اللي جات للصوت
   const prevOffersCountRef = useRef(0);
 
-  // 👈 دالة تشغيل التنبيه الصوتي
+  // 👈 1. إنشاء قناة الإشعارات الخاصة بالرنة عند فتح الشاشة
+  useEffect(() => {
+    Notifications.setNotificationChannelAsync('captain-offers-channel', {
+      name: 'عروض الكباتن',
+      importance: Notifications.AndroidImportance.MAX,
+      sound: 'ringtone.mp3', // 👈 اسم ملف الرنة بتاعك
+      vibrationPattern: [0, 500, 200, 500],
+    });
+  }, []);
+
+  // 👈 2. استدعاء الرنة عند وصول عرض جديد بدلاً من الصوت الآلي
   const playAlertSound = async () => {
     try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-      });
-
-      const { sound } = await Audio.Sound.createAsync(
-        require('../../assets/ringtone.mp3') // ⚠️ مسار ملف الصوت
-      );
-      
-      await sound.playAsync();
-      
-      sound.setOnPlaybackStatusUpdate((status: any) => {
-        if (status.didJustFinish) {
-          sound.unloadAsync();
-        }
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "عرض جديد! 🚖",
+          body: "وصلك عرض سعر جديد لرحلتك",
+          sound: 'ringtone.mp3', 
+        },
+        trigger: {
+          channelId: 'captain-offers-channel', // 👈 السر كله هنا لربط الإشعار بالرنة
+          seconds: 1, // يشتغل فوراً
+        },
       });
     } catch (error) {
-      console.log('Error playing sound:', error);
+      console.log('Error triggering alert:', error);
     }
   };
 
@@ -274,7 +285,8 @@ export default function PassengerHome() {
           setRideStatus('searching');
           
           const currentOffers = firebaseData.offers || [];
-          // 👈 تشغيل التنبيه الصوتي لو فيه عرض جديد جه!
+          
+          // 👈 تشغيل الإشعار بالرنة الجديدة أول ما يوصل عرض جديد
           if (currentOffers.length > prevOffersCountRef.current) {
             playAlertSound();
           }
@@ -639,7 +651,7 @@ export default function PassengerHome() {
     }
     setRideStatus('searching');
     setOffers([]);
-    prevOffersCountRef.current = 0; // إعادة العداد للصفر عند بدء بحث جديد
+    prevOffersCountRef.current = 0; 
     
     let finalPickupCoords = pickupCoords;
     if (!finalPickupCoords) {
