@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "بَرّاق",
+    "name": "Badr App",
     "slug": "badr-tuk-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -24,7 +24,11 @@
         "googleMaps": {
           "apiKey": ""
         }
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "output": "static",
@@ -47,7 +51,15 @@
         }
       ],
       "expo-image",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/badr_alert.mp3"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
@@ -56,7 +68,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "4afe900d-b1df-4276-87bd-f21929fb5971"
+        "projectId": "a741dafc-39fc-467e-ba7e-6f1b125a653e"
       }
     }
   }

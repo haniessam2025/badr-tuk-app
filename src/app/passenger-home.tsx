@@ -2,12 +2,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
+<<<<<<< HEAD
 // تم إزالة expo-speech وإضافة expo-av
 import { Audio } from 'expo-av';
+=======
+// تم استبدال expo-speech بـ expo-notifications
+import * as Notifications from 'expo-notifications';
+>>>>>>> 5d6d03f (تفعيل الإشعارات المحلية والرنة المخصصة للراكب)
 import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { db } from '../firebase';
+
+// 👈 إعدادات الإشعارات عشان تظهر وتضرب رنة حتى لو التطبيق مفتوح قدامك
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -64,6 +78,7 @@ export default function PassengerHome() {
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
   const prevOffersCountRef = useRef(0);
 
+<<<<<<< HEAD
   // 👈 إضافة حالة لحفظ ملف الصوت
   const [sound, setSound] = useState<Audio.Sound | null>(null);
 
@@ -78,6 +93,34 @@ export default function PassengerHome() {
       await newSound.playAsync();
     } catch (error) {
       console.log('Error playing ringtone:', error);
+=======
+  // 👈 1. إنشاء قناة الإشعارات الخاصة بالرنة عند فتح الشاشة
+  useEffect(() => {
+    Notifications.setNotificationChannelAsync('captain-offers-channel', {
+      name: 'عروض الكباتن',
+      importance: Notifications.AndroidImportance.MAX,
+      sound: 'ringtone.mp3', // 👈 اسم ملف الرنة بتاعك
+      vibrationPattern: [0, 500, 200, 500],
+    });
+  }, []);
+
+  // 👈 2. استدعاء الرنة عند وصول عرض جديد بدلاً من الصوت الآلي
+  const playAlertSound = async () => {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "عرض جديد! 🚖",
+          body: "وصلك عرض سعر جديد لرحلتك",
+          sound: 'ringtone.mp3', 
+        },
+        trigger: {
+          channelId: 'captain-offers-channel', // 👈 السر كله هنا لربط الإشعار بالرنة
+          seconds: 1, // يشتغل فوراً
+        },
+      });
+    } catch (error) {
+      console.log('Error triggering alert:', error);
+>>>>>>> 5d6d03f (تفعيل الإشعارات المحلية والرنة المخصصة للراكب)
     }
   };
 
@@ -270,7 +313,11 @@ export default function PassengerHome() {
           
           const currentOffers = firebaseData.offers || [];
           
+<<<<<<< HEAD
           // 👈 تشغيل الرنة مع الهزاز عند وجود عرض جديد
+=======
+          // 👈 تشغيل الإشعار بالرنة الجديدة أول ما يوصل عرض جديد
+>>>>>>> 5d6d03f (تفعيل الإشعارات المحلية والرنة المخصصة للراكب)
           if (currentOffers.length > prevOffersCountRef.current) {
             playOfferRingtone();
           }
