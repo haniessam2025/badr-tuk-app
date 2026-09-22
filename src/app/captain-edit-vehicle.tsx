@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 const YEARS = Array.from({ length: 28 }, (_, i) => (2000 + i).toString()).reverse();
 const CAR_BRANDS = ['كيا', 'هيونداي', 'بي واي دي', 'نيسان', 'شيفروليه', 'تويوتا', 'رينو', 'بيجو', 'سكودا', 'ام جي', 'شيري', 'لادا', 'سوزوكي', 'فيات', 'أخرى'];

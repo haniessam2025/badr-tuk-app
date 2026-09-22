@@ -2,12 +2,11 @@ import { useRouter } from 'expo-router';
 import { addDoc, collection, deleteDoc, doc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 export default function AdminDashboard() {
   const router = useRouter();
   
-  // 👈 غيرنا التاب من support لـ vehicles
   const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'vehicles'>('pending');
   
   const [captains, setCaptains] = useState<any[]>([]);
@@ -18,7 +17,6 @@ export default function AdminDashboard() {
   const [searchCaptain, setSearchCaptain] = useState('');
   const [searchPassenger, setSearchPassenger] = useState('');
 
-  // 👈 متغير لتحديد المركبة المختارة جوه تاب المركبات
   const [selectedVehicleCategory, setSelectedVehicleCategory] = useState<string | null>(null);
 
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -73,19 +71,16 @@ export default function AdminDashboard() {
     (p.name?.includes(searchPassenger) || p.phone?.includes(searchPassenger))
   );
 
-  // 👈 فلاتر الكباتن حسب نوع المركبة لتاب "المركبات"
   const onlyActiveCaptains = captains.filter(c => c.status !== 'pending' && c.status !== 'pending_approval' && c.status !== 'rejected');
   const carCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سيارة') || c.vehicleCategory === 'car');
   const scooterCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سكوتر') || c.vehicleCategory === 'scooter');
   
-  // 👈 البحث عن كلمة جالاكسي في كل تفاصيل الكابتن لمنع التداخل
   const galaxyCaptains = onlyActiveCaptains.filter(c => 
     c.vehicle?.includes('جالاكسي') || 
     c.vehicleDetails?.type?.includes('جالاكسي') || 
     c.requestedTuktukType?.includes('جالاكسي')
   );
 
-  // 👈 الكيوت هو أي بديل توكتوك بشرط إنه ميكونش جالاكسي
   const cuteCaptains = onlyActiveCaptains.filter(c => {
     const isGalaxy = c.vehicle?.includes('جالاكسي') || c.vehicleDetails?.type?.includes('جالاكسي') || c.requestedTuktukType?.includes('جالاكسي');
     if (isGalaxy) return false; 
@@ -274,7 +269,6 @@ export default function AdminDashboard() {
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'captains' && styles.tabBtnActive]} onPress={() => setActiveTab('captains')}><Text style={[styles.tabBtnText, activeTab === 'captains' && styles.tabBtnTextActive]}>كباتن</Text></TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'passengers' && styles.tabBtnActive]} onPress={() => setActiveTab('passengers')}><Text style={[styles.tabBtnText, activeTab === 'passengers' && styles.tabBtnTextActive]}>ركاب</Text></TouchableOpacity>
         
-        {/* 👈 التاب الجديد للمركبات */}
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'vehicles' && styles.tabBtnActive]} onPress={() => { setActiveTab('vehicles'); setSelectedVehicleCategory(null); }}>
           <Text style={[styles.tabBtnText, activeTab === 'vehicles' && styles.tabBtnTextActive]}>مركبات</Text>
         </TouchableOpacity>
@@ -394,7 +388,6 @@ export default function AdminDashboard() {
           </ScrollView>
         </View>
       ) : (
-        /* 👈 قسم المركبات الجديد بالكامل */
         <View style={{ flex: 1 }}>
           {!selectedVehicleCategory ? (
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -461,7 +454,12 @@ export default function AdminDashboard() {
         </View>
       )}
 
-      {/* مودال الملف الشخصي (مهم جداً ومكمل معانا) */}
+      {/* 👈 زرار الشكاوى والمقترحات الجديد تحت خالص */}
+      <TouchableOpacity style={styles.fullWidthComplaintsBtn} onPress={() => router.push('/admin-complaints')}>
+        <Text style={styles.fullWidthComplaintsBtnText}>الشكاوى والمقترحات 📬</Text>
+      </TouchableOpacity>
+
+      {/* مودال الملف الشخصي */}
       <Modal visible={profileModalVisible} transparent={true} animationType="slide">
         <View style={styles.fullScreenModal}>
           <View style={styles.profileModalHeader}>
@@ -481,7 +479,6 @@ export default function AdminDashboard() {
                 <Text style={styles.profileBigName}>{selectedUser.name}</Text>
                 <Text style={styles.profileBigPhone}>📞 {selectedUser.phone}</Text>
                 
-                {/* 👈 التعديل الذكي لقراءة نوع المركبة لمنع تحويل الجالاكسي لكيوت */}
                 {selectedUserType === 'captain' && (
                   <Text style={styles.profileBigVehicle}>
                     {selectedUser.vehicleCategory === 'car' || selectedUser.vehicle?.includes('سيارة') ? '🚗 سيارة' :
@@ -610,6 +607,10 @@ const styles = StyleSheet.create({
   fullWidthHistoryBtn: { backgroundColor: '#2563eb', paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20, elevation: 3 },
   fullWidthHistoryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
 
+  // 👈 ستايل زرار الشكاوى الجديد
+  fullWidthComplaintsBtn: { backgroundColor: '#be123c', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 15, elevation: 3 },
+  fullWidthComplaintsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
+
   tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },
   tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, position: 'relative' },
   tabBtnActive: { backgroundColor: '#eab308' },
@@ -654,7 +655,6 @@ const styles = StyleSheet.create({
   inspectDocsBtn: { backgroundColor: '#334155', paddingVertical: 8, borderRadius: 8, alignItems: 'center', marginTop: 12 },
   inspectDocsBtnText: { color: '#38bdf8', fontSize: 13, fontWeight: 'bold' },
 
-  // 👈 ستايلات قسم المركبات الجديد
   vehiclesSectionTitle: { color: '#f8fafc', fontSize: 18, fontWeight: 'bold', textAlign: 'right', marginBottom: 5 },
   vehiclesSectionHint: { color: '#94a3b8', fontSize: 13, textAlign: 'right', marginBottom: 20 },
   vehiclesGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', justifyContent: 'space-between' },
@@ -677,7 +677,6 @@ const styles = StyleSheet.create({
   capListProfileBtn: { backgroundColor: '#2563eb', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   capListProfileBtnText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
 
-  // Profile Modal Styles
   fullScreenModal: { flex: 1, backgroundColor: '#0f172a' },
   profileModalHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#1e293b', borderBottomWidth: 1, borderColor: '#334155' },
   profileHeaderBox: { alignItems: 'center', marginBottom: 20, backgroundColor: '#1e293b', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#334155' },

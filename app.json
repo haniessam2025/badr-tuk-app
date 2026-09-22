@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "بَرّاق",
+    "name": "Badr App",
     "slug": "badr-tuk-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -51,7 +51,15 @@
         }
       ],
       "expo-image",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/badr_alert.mp3"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
-import { db } from '../firebaseConfig';
+import { db } from '../firebase';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -844,13 +844,15 @@ export default function CaptainHome() {
               <Text style={styles.sidebarPhone}>{captainProfile.phone}</Text>
             </View>
             <ScrollView style={styles.sidebarLinks}>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-wallet'); }}><Text style={styles.sidebarLinkText}>الأرباح والمحفظة</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-wallet'); }}><Text style={styles.sidebarLinkText}>المحفظة</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-history'); }}><Text style={styles.sidebarLinkText}>سجل الرحلات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-ratings'); }}><Text style={styles.sidebarLinkText}>التقييمات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-docs'); }}><Text style={styles.sidebarLinkText}>المستندات الرسمية</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); Alert.alert("تنبيه", "سيتم تفعيل الإعدادات قريباً"); }}><Text style={styles.sidebarLinkText}>الإعدادات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/support'); }}><Text style={styles.sidebarLinkText}>الدعم الفني</Text></TouchableOpacity>
-            </ScrollView>
+            </ScrollView><TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}>
+  <Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text>
+</TouchableOpacity>
             <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}><Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text></TouchableOpacity>
           </Animated.View>
         </View>

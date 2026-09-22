@@ -6,8 +6,9 @@ import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebaseConfig';
+import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { db } from '../firebase';
+
 
 // 👈 إعدادات الإشعارات عشان تظهر وتضرب رنة حتى لو التطبيق مفتوح قدامك
 Notifications.setNotificationHandler({
@@ -73,6 +74,7 @@ export default function PassengerHome() {
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
   const prevOffersCountRef = useRef(0);
 
+<<<<<<< HEAD
   // 👈 1. إنشاء قناة الإشعارات الخاصة بالرنة عند فتح الشاشة
   useEffect(() => {
     Notifications.setNotificationChannelAsync('captain-offers-channel', {
@@ -99,6 +101,13 @@ export default function PassengerHome() {
       });
     } catch (error) {
       console.log('Error triggering alert:', error);
+=======
+  const notifyNewOffer = () => {
+    try {
+      Vibration.vibrate([0, 500, 200, 500]);
+    } catch (error) {
+      console.log('Error vibrating:', error);
+>>>>>>> updates
     }
   };
 
@@ -286,9 +295,12 @@ export default function PassengerHome() {
           
           const currentOffers = firebaseData.offers || [];
           
+<<<<<<< HEAD
           // 👈 تشغيل الإشعار بالرنة الجديدة أول ما يوصل عرض جديد
+=======
+>>>>>>> updates
           if (currentOffers.length > prevOffersCountRef.current) {
-            playAlertSound();
+            notifyNewOffer();
           }
           prevOffersCountRef.current = currentOffers.length;
           
@@ -1274,6 +1286,9 @@ export default function PassengerHome() {
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/support'); }}>
                 <Text style={styles.sidebarLinkText}>الدعم الفني</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/passenger-complaints'); }}>
+  <Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text>
+</TouchableOpacity>
             </ScrollView>
             <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}>
               <Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text>
@@ -1298,11 +1313,9 @@ const styles = StyleSheet.create({
   inlineToast: { backgroundColor: '#1e293b', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 12, marginBottom: 10, width: '100%', flexDirection: 'row-reverse', alignItems: 'center', elevation: 3 },
   inlineToastText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', textAlign: 'right', flex: 1 },
   card: { backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#e2e8f0', elevation: 4, flex: 1, marginBottom: 10 },
-  
   requestHeaderRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
   vehicleHeaderImg: { width: 75, height: 50 },
-
   cardActive: { flex: 1, backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 2, borderColor: '#d97706', elevation: 6, marginBottom: 10 },
   cardArrivalPulse: { flex: 1, borderRadius: 20, padding: 20, borderWidth: 3, borderColor: '#047857', elevation: 10, shadowColor: '#000000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 5, marginBottom: 10 },
   superArrivalTitle: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', marginBottom: 8, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
@@ -1320,7 +1333,6 @@ const styles = StyleSheet.create({
   countBtnActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
   countBtnText: { fontSize: 16, fontWeight: 'bold', color: '#64748b' },
   countBtnTextActive: { color: '#ffffff' },
-
   rowInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   inputWithButton: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right', marginLeft: 8 },
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },
@@ -1344,7 +1356,6 @@ const styles = StyleSheet.create({
   suggestionSubText: { fontSize: 11, color: '#64748b', marginTop: 2 },
   suggestionSubTextActive: { color: '#fef3c7' },
   offersContainer: { maxHeight: 300, marginBottom: 15 },
-  
   offerCardPro: { backgroundColor: '#ffffff', borderRadius: 16, marginBottom: 15, borderWidth: 1, borderColor: '#cbd5e1', elevation: 4, overflow: 'hidden' },
   offerTopRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f8fafc' },
   offerCaptainSide: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1 },
@@ -1358,7 +1369,6 @@ const styles = StyleSheet.create({
   offerBottomRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#eff6ff', paddingVertical: 12, paddingHorizontal: 15, borderTopWidth: 1, borderTopColor: '#bfdbfe' },
   offerFullVehicleText: { flex: 1, fontSize: 14, color: '#1e3a8a', fontWeight: 'bold', textAlign: 'right', marginLeft: 10, lineHeight: 22 },
   offerVehicleIcon: { fontSize: 24 },
-
   cancelBtnOnly: { backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
   cancelBtnOnlyText: { color: '#dc2626', fontWeight: 'bold', fontSize: 15 },
   modaloverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -1407,7 +1417,6 @@ const styles = StyleSheet.create({
   sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
   sidebarLogoutBtn: {backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
   sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
-
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },
   searchButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
   captainCard: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#fef3c7', padding: 12, borderRadius: 14, marginBottom: 15 },
