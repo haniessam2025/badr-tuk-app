@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -8,21 +8,18 @@ import { db } from '../firebase';
 export default function ChatScreen() {
   const router = useRouter();
   
-  // الحل السحري لاستقبال رقم المشوار بأي صيغة (سواء L سمول أو I كابيتال)
   const params = useLocalSearchParams();
   const senderType = params.senderType;
   const paramRideId = params.rideId || params.rideld; 
 
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
-  // توحيد اسم المتغير عشان ميحصلش أي تضارب
   const [rideId, setRideId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    // تشغيل الشات مباشرة برقم المشوار بدون الانتظار
     if (paramRideId) {
       const activeRideId = Array.isArray(paramRideId) ? paramRideId[0] : paramRideId;
       setRideId(activeRideId);
@@ -76,7 +73,6 @@ export default function ChatScreen() {
       if (userId) {
         const q = query(collection(db, 'rides'), where(field, '==', userId));
         const snap = await getDocs(q);
-        // ضفنا waiting_for_scan عشان الشات يقرأ المشوار في كل الحالات
         const activeDoc = snap.docs.find(d => ['accepted', 'captain_arrived', 'passenger_on_the_way', 'in_progress', 'waiting_for_scan'].includes(d.data().status));
         
         if (activeDoc) {
@@ -108,12 +104,38 @@ export default function ChatScreen() {
     }
   };
 
+  // 👈 دالة المراقبة لحل مشكلة الإشعار المعلق: تصفر العداد لو زاد أثناء ما الشاشة مفتوحة
+  useEffect(() => {
+    if (!rideId) return;
+    
+    const rideRef = doc(db, 'rides', rideId);
+    const unsubscribeRide = onSnapshot(rideRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const rideData = docSnap.data();
+        if (senderType === 'passenger' && rideData.unreadCountPassenger > 0) {
+          markMessagesAsRead(rideId);
+        } else if (senderType === 'captain' && rideData.unreadCountCaptain > 0) {
+          markMessagesAsRead(rideId);
+        }
+      }
+    });
+
+    // 👈 تصفير أخير للضمان عند غلق الشاشة
+    return () => {
+      unsubscribeRide();
+      markMessagesAsRead(rideId); 
+    };
+  }, [rideId, senderType]);
+
+
   const listenToMessages = (id: string) => {
     const messagesRef = collection(db, 'rides', id, 'messages');
-    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    // 👈 تقييد سحب الرسائل لأحدث 50 رسالة لتوفير الباقة (مع الترتيب العكسي لتظهر الرسائل الحديثة تحت)
+    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(50));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // 👈 استلام أحدث 50 رسالة مرتبين من الأحدث للأقدم، فنقلبهم عشان الشات يظهر طبيعي
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
       setMessages(msgs);
       setLoading(false);
       

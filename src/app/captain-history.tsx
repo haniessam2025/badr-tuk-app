@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -10,7 +10,6 @@ export default function CaptainHistory() {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // متغيرات للإحصائيات
   const [totalRides, setTotalRides] = useState(0);
   const [totalEarnings, setTotalEarnings] = useState(0);
 
@@ -23,9 +22,12 @@ export default function CaptainHistory() {
       const captainId = await AsyncStorage.getItem('currentCaptainId');
       if (!captainId) return;
 
+      // 👈 تقييد القراءة لأحدث 50 رحلة فقط وتوفير استهلاك الفايربيز
       const q = query(
         collection(db, 'rides'),
-        where('captainId', '==', captainId)
+        where('captainId', '==', captainId),
+        orderBy('timestamp', 'desc'),
+        limit(50)
       );
 
       const querySnapshot = await getDocs(q);
@@ -38,7 +40,6 @@ export default function CaptainHistory() {
         if (data.status === 'completed' || data.status === 'canceled') {
           rides.push({ id: doc.id, ...data });
           
-          // حساب الإحصائيات للرحلات المكتملة فقط
           if (data.status === 'completed') {
             completedCount++;
             earningsSum += parseFloat(data.price) || 0;
@@ -46,8 +47,6 @@ export default function CaptainHistory() {
         }
       });
 
-      // ترتيب من الأحدث للأقدم
-      rides.sort((a, b) => b.timestamp - a.timestamp);
       setHistory(rides);
       setTotalRides(completedCount);
       setTotalEarnings(earningsSum);
@@ -91,7 +90,6 @@ export default function CaptainHistory() {
         <Text style={styles.headerTitle}>سجل الرحلات 📜</Text>
       </View>
 
-      {/* كارت ملخص الإحصائيات */}
       {!loading && (
         <View style={styles.summaryCard}>
           <View style={styles.summaryBox}>
@@ -130,7 +128,6 @@ const styles = StyleSheet.create({
   backBtn: { backgroundColor: '#e2e8f0', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   backBtnText: { color: '#334155', fontWeight: 'bold' },
   
-  // تنسيقات كارت الملخص
   summaryCard: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 20, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
   summaryBox: { flex: 1, alignItems: 'center' },
   summaryDivider: { width: 1, backgroundColor: '#334155', marginHorizontal: 10 },

@@ -1,4 +1,4 @@
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -26,7 +26,8 @@ export default function AdminRidesHistory() {
   const fetchRides = useCallback(async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, 'rides'), orderBy('timestamp', 'desc'));
+      // 👈 تقييد القراءة لأحدث 500 رحلة فقط بدلاً من قراءة أرشيف التطبيق بالكامل
+      const q = query(collection(db, 'rides'), orderBy('timestamp', 'desc'), limit(500));
       const snapshot = await getDocs(q);
       
       let fetchedRides: any[] = [];
@@ -107,7 +108,6 @@ export default function AdminRidesHistory() {
     return counts;
   }, [targetRides]);
 
-  // 👈 فلاتر ذكية مترابطة (Dynamic Cascading Lists)
   const availableDates = useMemo(() => {
     const filtered = targetRides.filter(r => {
       if (filterCaptain.length > 0 && !filterCaptain.includes(r.captainName)) return false;
@@ -148,7 +148,6 @@ export default function AdminRidesHistory() {
     return Array.from(new Set(filtered.map(r => getVehicleName(r))));
   }, [targetRides, filterDate, filterCaptain, filterPassenger]);
 
-  // 👈 قائمة الرحلات المفلترة النهائية اللي هتظهر في الشاشة
   const modalRides = useMemo(() => {
     return targetRides.filter(ride => {
       if (filterDate.length > 0 && !filterDate.includes(formatDateOnly(ride.timestamp))) return false;
@@ -291,7 +290,7 @@ export default function AdminRidesHistory() {
             
             <TouchableOpacity style={[styles.statBox, { backgroundColor: '#1e293b' }]} onPress={() => openListModal('الكل')} activeOpacity={0.8}>
               <Text style={styles.statNumber}>{stats.total}</Text>
-              <Text style={styles.statLabel}>إجمالي الرحلات ({mainTab === 'completed' ? 'المكتملة' : 'الملغاة'})</Text>
+              <Text style={styles.statLabel}>إجمالي أحدث الرحلات ({mainTab === 'completed' ? 'المكتملة' : 'الملغاة'})</Text>
               <View style={styles.mainRevenueBadge}>
                 <Text style={styles.mainRevenueText}>💰 {stats.totalRevenue.toFixed(0)} جنيه</Text>
               </View>

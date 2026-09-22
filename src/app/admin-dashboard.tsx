@@ -1,7 +1,7 @@
-import { useRouter } from 'expo-router';
-import { addDoc, collection, deleteDoc, doc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 
 export default function AdminDashboard() {
@@ -13,6 +13,7 @@ export default function AdminDashboard() {
   const [passengers, setPassengers] = useState<any[]>([]);
   const [updateRequests, setUpdateRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); // 👈 حالة التحديث الموفرة للباقة
 
   const [searchCaptain, setSearchCaptain] = useState('');
   const [searchPassenger, setSearchPassenger] = useState('');
@@ -37,25 +38,56 @@ export default function AdminDashboard() {
   const [profileMsgText, setProfileMsgText] = useState('');
   const [sendingProfileMsg, setSendingProfileMsg] = useState(false);
 
-  useEffect(() => {
-    const unsubCaptains = onSnapshot(collection(db, 'captains'), (snapshot) => {
-      setCaptains(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
+  const [complaintsCount, setComplaintsCount] = useState(0);
 
-    const unsubPassengers = onSnapshot(collection(db, 'passengers'), (snapshot) => {
-      setPassengers(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+  // 👈 دالة جلب البيانات الموفرة للباقة (مرة واحدة بدلاً من المراقبة المستمرة)
+  const fetchDashboardData = async () => {
+    try {
+      // 1. جلب الكباتن
+      const capSnap = await getDocs(query(collection(db, 'captains')));
+      setCaptains(capSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-    const unsubUpdates = onSnapshot(collection(db, 'update_requests'), (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-      const pendingUpdates = list.filter((r: any) => r.status === 'pending');
+      // 2. جلب الركاب
+      const passSnap = await getDocs(query(collection(db, 'passengers')));
+      setPassengers(passSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      // 3. جلب طلبات التعديل المعلقة فقط (لتوفير القراءات)
+      const updSnap = await getDocs(query(collection(db, 'update_requests'), where('status', '==', 'pending')));
+      const pendingUpdates = updSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setUpdateRequests(pendingUpdates);
-    });
 
-    return () => { unsubCaptains(); unsubPassengers(); unsubUpdates(); };
-  }, []);
+      // 4. جلب الشكاوى والمفقودات للعداد (أحدث 100 فقط لتوفير القراءات)
+      const compSnap = await getDocs(query(collection(db, 'support_tickets'), orderBy('timestamp', 'desc'), limit(100)));
+      let unreadCount = 0;
+      compSnap.docs.forEach(doc => {
+        const data = doc.data();
+        // التوافق مع نظام القراءة الجديد والقديم
+        if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
+          unreadCount++;
+        }
+      });
+      setComplaintsCount(unreadCount);
+
+    } catch (error) {
+      console.log('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // 👈 استخدام useFocusEffect لتحديث البيانات تلقائياً عند العودة من أي شاشة أخرى (زي شاشة الشكاوى) عشان العداد يختفي
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchDashboardData();
+  };
 
   const pendingCaptains = captains.filter(c => c.status === 'pending' || c.status === 'pending_approval');
   const pendingPassengers = passengers.filter(p => p.status === 'pending');
@@ -100,6 +132,7 @@ export default function AdminDashboard() {
     const collectionName = type === 'captain' ? 'captains' : 'passengers';
     try { 
       await updateDoc(doc(db, collectionName, id), { status: 'active' }); 
+      fetchDashboardData(); // تحديث محلي سريع
       Alert.alert('تم ✅', 'تم تفعيل الحساب بنجاح.'); 
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء التفعيل.'); }
   };
@@ -108,6 +141,7 @@ export default function AdminDashboard() {
     const collectionName = type === 'captain' ? 'captains' : 'passengers';
     try { 
       await updateDoc(doc(db, collectionName, id), { status: 'rejected' }); 
+      fetchDashboardData();
       Alert.alert('تم 🛑', 'تم رفض الطلب.'); 
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.'); }
   };
@@ -132,6 +166,7 @@ export default function AdminDashboard() {
         read: false,
         sender: 'الإدارة'
       });
+      fetchDashboardData();
       Alert.alert('نجاح', 'تمت الموافقة وتحديث بيانات الكابتن بنجاح.');
     } catch (e) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الموافقة على الطلب.');
@@ -150,6 +185,7 @@ export default function AdminDashboard() {
         read: false,
         sender: 'الإدارة'
       });
+      fetchDashboardData();
       Alert.alert('تم', 'تم رفض طلب التعديل.');
     } catch (e) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.');
@@ -166,6 +202,7 @@ export default function AdminDashboard() {
       } else {
         await deleteDoc(doc(db, 'banned_phones', user.phone));
       }
+      fetchDashboardData();
       Alert.alert('تم', `تم ${newStatus === 'banned' ? 'حظر الرقم نهائياً' : 'إلغاء حظر الرقم'}.`); 
       if (selectedUser?.id === user.id) setSelectedUser({ ...selectedUser, status: newStatus });
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الحظر.'); }
@@ -180,6 +217,7 @@ export default function AdminDashboard() {
             const collectionName = type === 'captain' ? 'captains' : 'passengers';
             try {
               await deleteDoc(doc(db, collectionName, userId));
+              fetchDashboardData();
               Alert.alert('تم الحذف 🗑️', 'تم مسح الحساب وبياناته بنجاح.');
               if (selectedUser?.id === userId) { setProfileModalVisible(false); setSelectedUser(null); }
             } catch (error) { Alert.alert('خطأ', 'فشلت عملية الحذف.'); }
@@ -214,6 +252,7 @@ export default function AdminDashboard() {
         amount: finalAmount, type: transactionType, reason: walletReason.trim(), date: serverTimestamp(), performedBy: 'Admin' 
       });
       setSelectedUser({ ...selectedUser, walletBalance: (selectedUser.walletBalance || 0) + finalAmount });
+      fetchDashboardData();
       setProcessingWallet(false); setWalletModalVisible(false); setWalletAmount(''); setWalletReason('');
       Alert.alert('نجاح ✅', 'تم تحديث المحفظة.');
     } catch (e) { setProcessingWallet(false); }
@@ -277,7 +316,7 @@ export default function AdminDashboard() {
       {loading ? <View style={styles.centerContainer}><ActivityIndicator size="large" color="#eab308" /></View> : 
       
       activeTab === 'pending' ? (
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
           {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
             <>
               {pendingCaptains.map(item => (
@@ -320,7 +359,7 @@ export default function AdminDashboard() {
           )}
         </ScrollView>
       ) : activeTab === 'updates' ? (
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
           {updateRequests.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات تعديل ✨</Text></View> : (
             updateRequests.map(req => (
               <View key={req.id} style={styles.userCard}>
@@ -360,7 +399,7 @@ export default function AdminDashboard() {
       ) : activeTab === 'captains' ? (
         <View style={{ flex: 1 }}>
           <TextInput style={styles.searchInput} placeholder="بحث عن كابتن (اسم، رقم، توكتوك)..." placeholderTextColor="#64748b" value={searchCaptain} onChangeText={setSearchCaptain} textAlign="right" />
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
             {activeCaptainsFiltered.map(item => (
               <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'captain')}>
                 <View style={styles.cardHeader}>
@@ -375,7 +414,7 @@ export default function AdminDashboard() {
       ) : activeTab === 'passengers' ? (
         <View style={{ flex: 1 }}>
           <TextInput style={styles.searchInput} placeholder="بحث عن راكب (اسم أو رقم)..." placeholderTextColor="#64748b" value={searchPassenger} onChangeText={setSearchPassenger} textAlign="right" />
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
             {activePassengersFiltered.map(item => (
               <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'passenger')}>
                 <View style={styles.cardHeader}>
@@ -390,7 +429,7 @@ export default function AdminDashboard() {
       ) : (
         <View style={{ flex: 1 }}>
           {!selectedVehicleCategory ? (
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
               <Text style={styles.vehiclesSectionTitle}>أسطول الكباتن حسب المركبة 🚖</Text>
               <Text style={styles.vehiclesSectionHint}>اختر تصنيف لعرض الكباتن التابعين له</Text>
 
@@ -432,7 +471,7 @@ export default function AdminDashboard() {
                 </View>
               </View>
 
-              <ScrollView showsVerticalScrollIndicator={false}>
+              <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
                 {getSelectedCaptainsList().length === 0 ? (
                   <Text style={styles.emptyText}>لا يوجد كباتن مسجلين بهذه المركبة حالياً.</Text>
                 ) : (
@@ -454,9 +493,14 @@ export default function AdminDashboard() {
         </View>
       )}
 
-      {/* 👈 زرار الشكاوى والمقترحات الجديد تحت خالص */}
+      {/* 👈 تحديث زرار الشكاوى بالمسمى الجديد وظبط العداد */}
       <TouchableOpacity style={styles.fullWidthComplaintsBtn} onPress={() => router.push('/admin-complaints')}>
-        <Text style={styles.fullWidthComplaintsBtnText}>الشكاوى والمقترحات 📬</Text>
+        <Text style={styles.fullWidthComplaintsBtnText}>الشكاوى والمقترحات والمفقودات 📬</Text>
+        {complaintsCount > 0 && (
+          <View style={styles.complaintBadge}>
+            <Text style={styles.complaintBadgeText}>{complaintsCount}</Text>
+          </View>
+        )}
       </TouchableOpacity>
 
       {/* مودال الملف الشخصي */}
@@ -607,9 +651,25 @@ const styles = StyleSheet.create({
   fullWidthHistoryBtn: { backgroundColor: '#2563eb', paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20, elevation: 3 },
   fullWidthHistoryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
 
-  // 👈 ستايل زرار الشكاوى الجديد
-  fullWidthComplaintsBtn: { backgroundColor: '#be123c', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 15, elevation: 3 },
+  fullWidthComplaintsBtn: { position: 'relative', backgroundColor: '#be123c', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 15, elevation: 3 },
   fullWidthComplaintsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
+  
+  complaintBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#ef4444',
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#0f172a',
+    zIndex: 10,
+    elevation: 4
+  },
+  complaintBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
 
   tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },
   tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, position: 'relative' },

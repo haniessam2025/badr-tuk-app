@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -19,15 +19,17 @@ export default function PassengerHistory() {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
       if (!passengerId) return;
 
+      // 👈 تقييد القراءة لأحدث 50 رحلة للراكب مع الترتيب المباشر من قاعدة البيانات
       const q = query(
         collection(db, 'rides'),
-        where('passengerId', '==', passengerId)
+        where('passengerId', '==', passengerId),
+        orderBy('timestamp', 'desc'),
+        limit(50)
       );
+      
       const snap = await getDocs(q);
       const fetchedRides = snap.docs.map(d => d.data());
       
-      // الترتيب من الأحدث للأقدم
-      fetchedRides.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       setRides(fetchedRides);
     } catch (error) {
       console.log('Error fetching history:', error);
@@ -40,6 +42,7 @@ export default function PassengerHistory() {
     switch (status) {
       case 'completed': return 'مكتملة ✅';
       case 'canceled': return 'ملغاة ❌';
+      case 'cancelled_by_passenger': return 'ملغاة ❌';
       default: return 'غير مكتملة ⏳';
     }
   };
