@@ -844,13 +844,15 @@ export default function CaptainHome() {
               <Text style={styles.sidebarPhone}>{captainProfile.phone}</Text>
             </View>
             <ScrollView style={styles.sidebarLinks}>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-wallet'); }}><Text style={styles.sidebarLinkText}>الأرباح والمحفظة</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-wallet'); }}><Text style={styles.sidebarLinkText}>المحفظة</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-history'); }}><Text style={styles.sidebarLinkText}>سجل الرحلات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-ratings'); }}><Text style={styles.sidebarLinkText}>التقييمات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-docs'); }}><Text style={styles.sidebarLinkText}>المستندات الرسمية</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); Alert.alert("تنبيه", "سيتم تفعيل الإعدادات قريباً"); }}><Text style={styles.sidebarLinkText}>الإعدادات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/support'); }}><Text style={styles.sidebarLinkText}>الدعم الفني</Text></TouchableOpacity>
-            </ScrollView>
+            </ScrollView><TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}>
+  <Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text>
+</TouchableOpacity>
             <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}><Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text></TouchableOpacity>
           </Animated.View>
         </View>
