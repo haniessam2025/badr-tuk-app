@@ -1,9 +1,10 @@
+import { Ionicons } from '@expo/vector-icons'; // 👈 استدعاء الأيقونات
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { addDoc, collection, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { db, storage } from '../firebase';
 
@@ -36,7 +37,8 @@ const DUMMY_IMAGE_URL = 'https://via.placeholder.com/400x250.png?text=Pending+Up
 export default function CaptainRegister() {
   const router = useRouter();
   const scrollViewRef = useRef<any>(null);
-  
+  const [isTermsAccepted, setIsTermsAccepted] = useState(false);
+  const [isPolicyModalVisible, setIsPolicyModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<'basic' | 'vehicle'>('basic');
   const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('car');
 
@@ -86,7 +88,6 @@ export default function CaptainRegister() {
   const uploadImageToStorage = async (uri: string, imageName: string) => {
     if (!uri) return DUMMY_IMAGE_URL; 
     
-    // 👈 الحل السحري: لو الصورة اتحولت لنص Base64، هنحفظها مباشرة في الداتا بيز (وهنتخطى مساحة التخزين المعطلة)
     if (uri.startsWith('data:image')) {
       return uri;
     }
@@ -130,9 +131,10 @@ export default function CaptainRegister() {
   };
 
   const validatePhone = () => {
+    // 👈 فحص رقم الهاتف المصري المكون من 11 رقم
     const phoneRegex = /^01[0125][0-9]{8}$/;
     if (!phoneRegex.test(phone)) {
-      setErrors(prev => ({ ...prev, phone: 'بيانات خاطئة، رقم هاتف مصري غير صالح' })); return false;
+      setErrors(prev => ({ ...prev, phone: 'برجاء إدخال رقم هاتف مصري صحيح' })); return false;
     }
     setErrors(prev => ({ ...prev, phone: '' })); return true;
   };
@@ -212,15 +214,14 @@ export default function CaptainRegister() {
     ], { cancelable: true });
   };
 
-  // 👈 تحويل الصورة لنص Base64 عشان تتسجل في الداتا بيز مباشرة
   const openCamera = async (field: string) => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') { Alert.alert('تنبيه', 'نحتاج صلاحية الكاميرا.'); return; }
     let result = await ImagePicker.launchCameraAsync({ 
       mediaTypes: ImagePicker.MediaTypeOptions.Images, 
       allowsEditing: true, 
-      quality: 0.1, // تقليل الجودة لضمان سرعة الرفع
-      base64: true  // 👈 أهم أمر
+      quality: 0.1,
+      base64: true
     });
     if (!result.canceled && result.assets && result.assets[0].base64) {
       const base64Img = `data:image/jpeg;base64,${result.assets[0].base64}`;
@@ -235,7 +236,7 @@ export default function CaptainRegister() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images, 
       allowsEditing: true, 
       quality: 0.1, 
-      base64: true // 👈 أهم أمر
+      base64: true 
     });
     if (!result.canceled && result.assets && result.assets[0].base64) {
       const base64Img = `data:image/jpeg;base64,${result.assets[0].base64}`;
@@ -325,8 +326,8 @@ export default function CaptainRegister() {
       const captainData: any = {
         name, nationalId, phone, password, 
         avatar: avatarUrl, 
-        profileImage: avatarUrl, // 👈 ضفناها مخصوص عشان لوحة التحكم
-        image: avatarUrl,        // 👈 ضفناها احتياطي عشان لوحة التحكم
+        profileImage: avatarUrl, 
+        image: avatarUrl,        
         idFront: idFrontUrl, 
         idBack: idBackUrl,
         vehicleCategory, walletBalance: 0, isOnline: false, 
@@ -513,7 +514,41 @@ export default function CaptainRegister() {
                 </View>
               )}
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleRegister} disabled={isLoading}>
+              {/* 👈 مربع الموافقة الإجباري وسياسة الخصوصية للكابتن */}
+              <View 
+                style={{ 
+                  flexDirection: 'row-reverse', 
+                  alignItems: 'center', 
+                  marginTop: 25,
+                  marginBottom: 10, 
+                  backgroundColor: '#f8fafc', 
+                  padding: 10, 
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: isTermsAccepted ? '#10b981' : '#cbd5e1'
+                }} 
+              >
+                <TouchableOpacity onPress={() => setIsTermsAccepted(!isTermsAccepted)} style={{ padding: 5 }}>
+                  <Ionicons 
+                    name={isTermsAccepted ? 'checkbox' : 'square-outline'} 
+                    size={26} 
+                    color={isTermsAccepted ? '#10b981' : '#94a3b8'} 
+                  />
+                </TouchableOpacity>
+                <Text style={{ flex: 1, textAlign: 'right', marginRight: 10, fontSize: 13, color: '#334155', lineHeight: 20 }}>
+                  أقر بأنني قرأت <Text onPress={() => setIsPolicyModalVisible(true)} style={{color: '#2563eb', fontWeight: 'bold', textDecorationLine: 'underline'}}>شروط العمل وإخلاء المسؤولية</Text> وأوافق عليها، وأتحمل المسؤولية القانونية الكاملة.
+                </Text>
+              </View>
+
+              {/* 👈 زر التسجيل محمي بشرط الموافقة */}
+              <TouchableOpacity 
+                style={[
+                  styles.submitBtn, 
+                  !isTermsAccepted && { backgroundColor: '#94a3b8', opacity: 0.7 }
+                ]} 
+                onPress={handleRegister} 
+                disabled={isLoading || !isTermsAccepted}
+              >
                 {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>إرسال طلب التسجيل ✅</Text>}
               </TouchableOpacity>
             </View>
@@ -530,6 +565,52 @@ export default function CaptainRegister() {
               <TouchableOpacity style={styles.modalItem} onPress={() => selectDropdownItem(item)}><Text style={styles.modalItemText}>{item}</Text></TouchableOpacity>
             )} />
             <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsDropdownVisible(false)}><Text style={styles.modalCancelText}>إلغاء</Text></TouchableOpacity>
+   </View>
+        </View>
+      </Modal>
+
+      {/* نافذة سياسة الخصوصية */}
+      <Modal animationType="fade" transparent={true} visible={isPolicyModalVisible}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', width: '100%', maxHeight: '80%', padding: 20, borderRadius: 16, elevation: 5 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 15 }}>شروط العمل وإخلاء المسؤولية</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={{ fontSize: 14, color: '#334155', textAlign: 'right', lineHeight: 24, marginBottom: 10 }}>
+                <Text style={{ fontWeight: 'bold' }}>1. طبيعة الخدمة:</Text> التطبيق هو منصة إلكترونية (وسيط تقني) تهدف إلى تسهيل الربط بين الركاب والكباتن. التطبيق لا يمتلك المركبة وأنت لست موظفاً لدينا بل مقاول مستقل.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>2. إخلاء المسؤولية التام:</Text>{"\n"}
+                • إدارة التطبيق ومالكه غير مسؤولين تماماً عن أي حوادث مرورية، أو إصابات جسدية، أو تلف لمركبتك يحدث أثناء استخدام التطبيق.{"\n"}
+                • التطبيق يخلي مسؤوليته القانونية عن أي نزاع، أو تعدي، أو فقدان للمتعلقات الشخصية.{"\n"}
+                • أنت تتحمل المسؤولية الشخصية والقانونية الكاملة عن سلامتك وسلامة الراكب والمركبة.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>3. صحة البيانات:</Text> تقر بأن جميع الأوراق والمستندات المرفوعة صحيحة وسارية المفعول، وتتحمل المسؤولية الجنائية في حال تزويرها.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>4. القبول بالشروط:</Text> استخدامك للتطبيق يعني موافقتك الصريحة والنهائية على جميع ما ورد في هذه الوثيقة، وتنازلك عن أي حق في مقاضاة مالك التطبيق.
+              </Text>
+            </ScrollView>
+            <TouchableOpacity onPress={() => setIsPolicyModalVisible(false)} style={{ backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 15 }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>إغلاق الشروط</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 👈 نافذة شروط العمل وإخلاء المسؤولية للكابتن */}
+      <Modal animationType="fade" transparent={true} visible={isPolicyModalVisible}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', width: '100%', maxHeight: '80%', padding: 20, borderRadius: 16, elevation: 5 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 15 }}>شروط العمل وإخلاء المسؤولية</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={{ fontSize: 14, color: '#334155', textAlign: 'right', lineHeight: 24, marginBottom: 10 }}>
+                <Text style={{ fontWeight: 'bold' }}>1. طبيعة العمل:</Text> أنت تعمل كمقاول مستقل وتستخدم المنصة لتلقي طلبات الركاب. أنت لست موظفاً لدى التطبيق، والتطبيق لا يمتلك المركبة.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>2. إخلاء المسؤولية التام:</Text>{"\n"}
+                • إدارة التطبيق غير مسؤولة تماماً عن أي حوادث مرورية، أو تلف للمركبة، أو أضرار مادية تحدث أثناء استخدام التطبيق.{"\n"}
+                • التطبيق يخلي مسؤوليته القانونية عن أي نزاع أو تعدي بينك وبين الراكب.{"\n"}
+                • أنت تتحمل المسؤولية الشخصية والقانونية الكاملة عن سلامتك وسلامة الراكب والمركبة.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>3. صحة البيانات:</Text> تقر بأن جميع الأوراق والمستندات المرفوعة (البطاقة، الرخص) صحيحة وسارية، وتتحمل المسؤولية الجنائية في حال تزويرها.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>4. القبول بالشروط:</Text> استخدامك للتطبيق يعني موافقتك الصريحة والنهائية على جميع ما ورد في هذه الوثيقة، وتنازلك عن أي حق في مقاضاة مالك التطبيق.
+              </Text>
+            </ScrollView>
+            <TouchableOpacity onPress={() => setIsPolicyModalVisible(false)} style={{ backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 15 }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>إغلاق الشروط</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

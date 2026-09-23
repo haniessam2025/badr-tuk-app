@@ -219,9 +219,8 @@ export default function CaptainHome() {
   const [isPriceModalVisible, setIsPriceModalVisible] = useState(false);
   const [selectedRideForPrice, setSelectedRideForPrice] = useState<any>(null);
   const [tempCaptainPrice, setTempCaptainPrice] = useState('');
-  const [offerPerks, setOfferPerks] = useState<string[]>([]); // 👈 حالة مميزات العرض
+  const [offerPerks, setOfferPerks] = useState<string[]>([]);
   const availablePerks = ['سيارة مكيفة ❄️', 'بلوتوث 🎵', 'شاحن USB 🔋', 'كابتن غير مدخن 🚭'];
-
   const [enteredNumericCode, setEnteredNumericCode] = useState('');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState('');
@@ -231,6 +230,7 @@ export default function CaptainHome() {
   const prevMsgIdRef = useRef<string | null>(null);
   const toastTimer = useRef<any>(null);
   const latestMsgTimer = useRef<any>(null);
+  const isEndingRide = useRef(false); // 👈 مفتاح أمان لمنع رسالة الإلغاء الوهمية
   const chatPulseAnim = useRef(new Animated.Value(0)).current;
   const [adminMessage, setAdminMessage] = useState<any>(null);
   const [isAdminMsgVisible, setIsAdminMsgVisible] = useState(false);
@@ -246,14 +246,45 @@ export default function CaptainHome() {
   
   const [enlargedAvatar, setEnlargedAvatar] = useState<string | null>(null);
 
+  // دالة فتح الصورة ومنع السكرين شوت
+  const handleImagePress = async (url: string) => {
+    setEnlargedAvatar(url);
+    try {
+      if (ScreenCapture && ScreenCapture.preventScreenCaptureAsync) {
+        await ScreenCapture.preventScreenCaptureAsync();
+      }
+    } catch (error) {
+      console.log("Screen capture prevent error:", error);
+    }
+  };
+
+  // دالة إغلاق الصورة والسماح بالسكرين شوت مرة تانية
+  const closeEnlargedImage = async () => {
+    setEnlargedAvatar(null);
+    try {
+      if (ScreenCapture && ScreenCapture.allowScreenCaptureAsync) {
+        await ScreenCapture.allowScreenCaptureAsync();
+      }
+    } catch (error) {
+      console.log("Screen capture allow error:", error);
+    }
+  };
+
   useEffect(() => {
     if (enlargedAvatar) {
-      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+      if (ScreenCapture && ScreenCapture.preventScreenCaptureAsync) {
+        ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+      }
     } else {
-      ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      if (ScreenCapture && ScreenCapture.allowScreenCaptureAsync) {
+        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      }
     }
+    
     return () => {
-      ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      if (ScreenCapture && ScreenCapture.allowScreenCaptureAsync) {
+        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      }
     };
   }, [enlargedAvatar]);
 
@@ -377,9 +408,22 @@ export default function CaptainHome() {
 
   const loadCaptainProfileFromFirebase = async () => {
     try {
-      const captainId = await AsyncStorage.getItem('currentCaptainId');
+      let captainId = await AsyncStorage.getItem('currentCaptainId');
+      
+      // 👈 لو ملقاش الـ ID مباشر، هيدور عليه جوه بيانات البروفايل المتسجلة
+      if (!captainId) {
+        const profileStr = await AsyncStorage.getItem('captain_profile');
+        if (profileStr) {
+          const profile = JSON.parse(profileStr);
+          captainId = profile.id || profile.uid;
+        }
+      }
+
       if (captainId) {
-        // 👈 تم نقل جلب التقييمات خارج الـ onSnapshot لتتم مرة واحدة فقط وتوفير القراءات
+        // 👈 حفظ الـ ID لو كان مفقود عشان الدخول الجاي
+        await AsyncStorage.setItem('currentCaptainId', captainId);
+
+        // تم نقل جلب التقييمات خارج الـ onSnapshot لتتم مرة واحدة فقط وتوفير القراءات
         const ratingQ = query(collection(db, 'ratings'), where('captainId', '==', captainId), where('type', '==', 'passenger_rating_captain'));
         const ratingSnap = await getDocs(ratingQ);
         let sum = 0;
@@ -504,18 +548,20 @@ export default function CaptainHome() {
       where('status', 'in', ['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'])
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-      if (docs.length > 0) {
-        setActiveRide(docs[0]); 
-        setUnreadChatCount(docs[0].unreadCountCaptain || 0);
-      } else {
-        setActiveRide((prev: any) => { 
-          if (prev) Alert.alert("تنبيه", "الرحلة الحالية غير موجودة أو قام الراكب بإلغائها."); 
-          return null; 
-        });
-      }
-    });
-    return () => unsubscribe();
+        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        if (docs.length > 0) {
+          setActiveRide(docs[0]); 
+          setUnreadChatCount(docs[0].unreadCountCaptain || 0);
+        } else {
+          setActiveRide((prev: any) => { 
+            if (prev && !isEndingRide.current) {
+              Alert.alert("تنبيه", "الرحلة الحالية غير موجودة أو قام الراكب بإلغائها."); 
+            }
+            isEndingRide.current = false; // 👈 إرجاع المفتاح لوضعه الطبيعي
+            return null; 
+          });
+        }
+      });
   }, [captainProfile.id]);
 
   useEffect(() => {
@@ -627,16 +673,17 @@ export default function CaptainHome() {
       [
         { text: 'تراجع', style: 'cancel' },
         { text: 'نعم، استلمت الكاش وأنهيت الرحلة', onPress: async () => { 
-            setRideToRate(activeRide); 
-            await updateDoc(doc(db, 'rides', activeRide.id), { status: 'completed' }); 
+            isEndingRide.current = true; // 👈 تفعيل مفتاح الأمان هنا
+            const currentRide = activeRide;
+            setRideToRate(currentRide); 
             setActiveRide(null); 
             setIsRatingModalVisible(true); 
+            await updateDoc(doc(db, 'rides', currentRide.id), { status: 'completed' }); 
           } 
         }
       ]
     );
   };
-
   const openGoogleMaps = (locationName: string) => { const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName)}`; Linking.openURL(url); };
 
   const submitRating = async () => {
@@ -684,14 +731,15 @@ export default function CaptainHome() {
           Alert.alert('تنبيه ⚠️', `تم تسجيل مخالفة إلغاء. لديك ${currentStrikes + 1} من أصل 3 مخالفات قبل إيقاف حسابك مؤقتاً.`);
         }
       }
-      await updateDoc(doc(db, 'rides', activeRide.id), { status: 'pending', captainId: null, offers: [] }); 
-      handleDismissRequest(activeRide); 
+      isEndingRide.current = true; // 👈 تفعيل مفتاح الأمان لمنع رسالة الإلغاء الوهمية
+      const currentRide = activeRide;
       setActiveRide(null); 
+      await updateDoc(doc(db, 'rides', currentRide.id), { status: 'pending', captainId: null, offers: [] }); 
+      handleDismissRequest(currentRide); 
     } catch(e) {
       Alert.alert("خطأ", "حدثت مشكلة أثناء الإلغاء");
     }
   };
-
   const handleCallClick = () => { if (activeRide) { setPhoneToCall(activeRide.phone || activeRide.passengerPhone); setIsCallModalVisible(true); } };
   const makeRegularCall = () => { setIsCallModalVisible(false); Linking.openURL(`tel:${phoneToCall}`); };
   const makeFreeCall = () => { setIsCallModalVisible(false); Alert.alert("مكالمة مجانية", "تتطلب ربط التطبيق بخدمة اتصالات خارجية"); };
@@ -827,7 +875,7 @@ export default function CaptainHome() {
           ) : displayRequests.length === 0 ? (
             <EmptySearchingState hasConfirmedDestination={isDestinationFilterActive && confirmedDestinationFilter !== ''} />
           ) : (
-            <FlatList data={displayRequests} keyExtractor={(item) => item.id} renderItem={({ item }) => <SwipeableRequestItem item={item} onSendOffer={sendOffer} onEditPrice={openPriceModal} onDismiss={handleDismissRequest} hasSentOffer={sentOffers.includes(item.id)} captainLocation={captainLocation} onImagePress={setEnlargedAvatar} onWithdrawOffer={withdrawOffer} />} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }} />
+            <FlatList data={displayRequests} keyExtractor={(item) => item.id} renderItem={({ item }) => <SwipeableRequestItem item={item} onSendOffer={sendOffer} onEditPrice={openPriceModal} onDismiss={handleDismissRequest} hasSentOffer={sentOffers.includes(item.id)} captainLocation={captainLocation} onImagePress={handleImagePress} onWithdrawOffer={withdrawOffer} />} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }} />
           )}
         </>
       ) : (
@@ -1014,7 +1062,7 @@ export default function CaptainHome() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>تقديم عرض سعر</Text>
-            <TextInput style={styles.modalInput} value={tempCaptainPrice} onChangeText={setTempCaptainPrice} keyboardType="numeric" />
+            <TextInput style={styles.modalInput} value={tempCaptainPrice} onChangeText={setTempCaptainPrice} keyboardType="numeric" placeholder="اكتب السعر هنا" placeholderTextColor="#94a3b8" />
             
             {/* 👈 زراير المميزات التنافسية */}
             <Text style={{ textAlign: 'right', fontWeight: 'bold', color: '#475569', marginBottom: 8, fontSize: 13 }}>أضف مميزات لرحلتك لجذب الراكب (اختياري):</Text>
@@ -1044,7 +1092,6 @@ export default function CaptainHome() {
           </View>
         </View>
       </Modal>
-
       <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.callModalContent}>

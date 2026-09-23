@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -19,19 +19,26 @@ export default function CaptainHistory() {
 
   const fetchHistory = async () => {
     try {
-      const captainId = await AsyncStorage.getItem('currentCaptainId');
-      if (!captainId) return;
+      let captainId = await AsyncStorage.getItem('currentCaptainId');
+      
+      if (!captainId) {
+        const profileStr = await AsyncStorage.getItem('captain_profile');
+        if (profileStr) {
+          const profile = JSON.parse(profileStr);
+          captainId = profile.id || profile.uid;
+        }
+      }
 
-      // 👈 تقييد القراءة لأحدث 50 رحلة فقط وتوفير استهلاك الفايربيز
-      const q = query(
-        collection(db, 'rides'),
-        where('captainId', '==', captainId),
-        orderBy('timestamp', 'desc'),
-        limit(50)
-      );
+      if (!captainId) {
+        setLoading(false);
+        return;
+      }
 
+      // جلب الرحلات بدون orderBy لتجنب خطأ الفايربيز
+      const q = query(collection(db, 'rides'), where('captainId', '==', captainId));
       const querySnapshot = await getDocs(q);
-      const rides: any[] = [];
+      
+      let rides: any[] = [];
       let completedCount = 0;
       let earningsSum = 0;
 
@@ -39,18 +46,23 @@ export default function CaptainHistory() {
         const data = doc.data();
         if (data.status === 'completed' || data.status === 'canceled') {
           rides.push({ id: doc.id, ...data });
-          
-          if (data.status === 'completed') {
-            completedCount++;
-            earningsSum += parseFloat(data.price) || 0;
-          }
         }
       });
 
-      setHistory(rides);
+      // ترتيب الرحلات يدوياً (الأحدث أولاً)
+      rides.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      
+      const finalRides = rides.slice(0, 50); // تقييد لـ 50 رحلة
+      finalRides.forEach(ride => {
+        if (ride.status === 'completed') {
+          completedCount++;
+          earningsSum += parseFloat(ride.price) || 0;
+        }
+      });
+
+      setHistory(finalRides);
       setTotalRides(completedCount);
       setTotalEarnings(earningsSum);
-
     } catch (error) {
       console.log('Error fetching history:', error);
     } finally {

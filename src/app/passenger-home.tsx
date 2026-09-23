@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons'; // 👈 استدعاء الأيقونات
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -115,8 +116,14 @@ export default function PassengerHome() {
   const [destinations, setDestinations] = useState<string[]>(['']);
   const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
   const [requestedTuktukType, setRequestedTuktukType] = useState('كيوت 3 راكب');
-  const [passengersCount, setPassengersCount] = useState('1'); 
-  const [paymentMethod, setPaymentMethod] = useState('كاش'); // 👈 حالة طريقة الدفع
+  const [passengersCount, setPassengersCount] = useState('1');
+  
+  // دالة فتح الخريطة لاختيار الوجهة
+  const openMapForDestination = () => {
+    Alert.alert('فتح الخريطة 🗺️', 'سيتم فتح شاشة الخريطة لاختيار الوجهة بدقة قريباً.');
+  };
+  
+  const [paymentMethod, setPaymentMethod] = useState('كاش');
   const [price, setPrice] = useState('');
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
@@ -178,6 +185,7 @@ export default function PassengerHome() {
   const [phoneToCall, setPhoneToCall] = useState('');
   const [isFetchingLocation, setIsFetchingLocation] = useState(false);
   const [isSendingLocation, setIsSendingLocation] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [emergencyPhone, setEmergencyPhone] = useState('');
   const [isEmergencyModalVisible, setIsEmergencyModalVisible] = useState(false);
   const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
@@ -274,7 +282,6 @@ export default function PassengerHome() {
 
   const checkRideStatus = async (passengerId: string, passengerName: string) => {
     try {
-      // 👈 تم إضافة (limit 10 و orderBy) لمنع قراءة كل أرشيف الراكب وتوفير الباقة
       let q = query(collection(db, 'rides'), where('passengerId', '==', passengerId), orderBy('timestamp', 'desc'), limit(10));
       let querySnapshot = await getDocs(q);
       let docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -436,7 +443,6 @@ export default function PassengerHome() {
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           locationSubscription = await Location.watchPositionAsync(
-            // 👈 تم تقليل معدل تحديث موقع الراكب لتخفيض الكتابات المستمرة بدون داعي قوي
             { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 50 },
             (loc) => {
               if (currentRideId) { 
@@ -574,9 +580,9 @@ export default function PassengerHome() {
 
              let calculatedPrice = 0;
              if (vType === 'car') {
-               calculatedPrice = Math.max(25, totalDistanceKm * 12);
+               calculatedPrice = Math.max(25, totalDistanceKm * 4.8)
              } else if (vType === 'scooter') {
-               calculatedPrice = Math.max(12, totalDistanceKm * 5);
+               calculatedPrice = Math.max(12, totalDistanceKm * 3.75);
              } else {
                let basePriceForOne = Math.max(15, totalDistanceKm * 7);
                const count = parseInt(passCountStr) || 1;
@@ -628,19 +634,6 @@ export default function PassengerHome() {
     }, 1500);
   };
 
-  const addDestinationField = () => {
-    if (destinations.length < 3) {
-      const newDests = [...destinations, ''];
-      setDestinations(newDests);
-    } else Alert.alert('تنبيه', 'الحد الأقصى 3 وجهات في الطلب الواحد');
-  };
-
-  const removeDestinationField = (index: number) => {
-    const newDests = destinations.filter((_, i) => i !== index);
-    setDestinations(newDests);
-    updatePriceCalculation(pickup, newDests);
-  };
-
   const openEditPriceModal = () => {
     const validDests = destinations.filter(d => d.trim().length > 0);
     if (!pickup || validDests.length === 0) {
@@ -673,6 +666,8 @@ export default function PassengerHome() {
   };
 
   const handleSearchCaptain = async () => {
+    if (isSubmitting) return;
+
     try {
       const passengerIdStr = passengerProfile.id || await AsyncStorage.getItem('currentPassengerId');
       if (passengerIdStr) {
@@ -698,6 +693,9 @@ export default function PassengerHome() {
       Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
       return;
     }
+
+    setIsSubmitting(true);
+
     setRideStatus('searching');
     setOffers([]);
     prevOffersCountRef.current = 0; 
@@ -726,7 +724,7 @@ export default function PassengerHome() {
         requestedVehicleType,
         requestedTuktukType: requestedVehicleType === 'tuktuk_alt' ? requestedTuktukType : null,
         passengersCount: requestedVehicleType === 'tuktuk_alt' ? passengersCount : null,
-        paymentMethod: paymentMethod, // 👈 إرسال طريقة الدفع مع الطلب
+        paymentMethod: paymentMethod,
         offers: [],
         status: 'pending',
         timestamp: new Date().getTime(),
@@ -766,9 +764,10 @@ export default function PassengerHome() {
     } catch (error) {
       setRideStatus('idle');
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الطلب');
+    } finally {
+      setIsSubmitting(false);
     }
   };
-
   const acceptCaptainOffer = async (offer: any) => {
     try {
       let rideId = currentRideId || JSON.parse(await AsyncStorage.getItem('active_ride') || '{}').id;
@@ -1025,22 +1024,28 @@ export default function PassengerHome() {
               {isFetchingLocation ? <ActivityIndicator color="#ffffff" size="small" /> : <Text style={styles.myLocationBtnText}>موقعي</Text>}
             </TouchableOpacity>
           </View>
-          <Text style={styles.label}>الوجهات المطلوبة</Text>
-          {destinations.map((dest, index) => (
-            <View key={index} style={styles.destRow}>
-              <TextInput style={styles.inputDest} placeholder={`الوجهة رقم ${index + 1}`} placeholderTextColor="#94a3b8" value={dest} onChangeText={(text) => handleDestinationChange(text, index)} />
-              {index > 0 && (
-                <TouchableOpacity style={styles.removeDestBtn} onPress={() => removeDestinationField(index)}>
-                  <Text style={styles.removeDestBtnText}>X</Text>
-                </TouchableOpacity>
-              )}
+
+          {/* 👈 الوجهة المطلوبة بالتصميم الجديد (Dark Mode) */}
+          <Text style={styles.label}>الوجهة المطلوبة</Text>
+          <View style={styles.modernDestContainer}>
+            {/* الجزء الأيمن: أيقونة البحث وكلمة "إلى" ومكان الكتابة */}
+            <View style={styles.modernDestRight}>
+              <Ionicons name="search" size={22} color="#9ca3af" />
+              <Text style={styles.modernDestToText}>إلى</Text>
+              <TextInput 
+                style={styles.modernDestInput} 
+                placeholder="ابحث عن وجهتك..." 
+                placeholderTextColor="#9ca3af" 
+                value={destinations[0]} 
+                onChangeText={(text) => handleDestinationChange(text, 0)} 
+              />
             </View>
-          ))}
-          {destinations.length < 3 && (
-            <TouchableOpacity style={styles.addDestBtn} onPress={addDestinationField}>
-              <Text style={styles.addDestBtnText}>+ إضافة وجهة أخرى</Text>
+
+            {/* الجزء الأيسر: أيقونة الخريطة */}
+            <TouchableOpacity style={styles.modernDestMapBtn} onPress={openMapForDestination}>
+              <Ionicons name="map" size={22} color="#60a5fa" />
             </TouchableOpacity>
-          )}
+          </View>
           
           <Text style={styles.label}>ملاحظات للكابتن (اختياري)</Text>
           <TextInput style={styles.notesInput} placeholder="مثال معايا أغراض خفيفة ..." placeholderTextColor="#94a3b8" value={notes} onChangeText={setNotes} multiline={true} />
@@ -1080,7 +1085,6 @@ export default function PassengerHome() {
             </View>
           )}
 
-          {/* 👈 أزرار اختيار طريقة الدفع */}
           <Text style={[styles.label, {marginTop: 5}]}>طريقة الدفع 💳</Text>
           <View style={styles.paymentMethodsRow}>
             {['كاش', 'محفظة', 'انستاباي'].map((method) => (
@@ -1094,8 +1098,16 @@ export default function PassengerHome() {
             ))}
           </View>
 
-          <TouchableOpacity style={styles.searchButton} onPress={handleSearchCaptain}>
-            <Text style={styles.searchButtonText}>البحث عن كابتن</Text>
+          <TouchableOpacity 
+            style={[styles.searchButton, isSubmitting && { opacity: 0.7 }]} 
+            onPress={handleSearchCaptain} 
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Text style={styles.searchButtonText}>البحث عن كابتن</Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       )}
@@ -1157,7 +1169,6 @@ export default function PassengerHome() {
           )}
           <View style={styles.tripRouteContainer}>
             <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
-              {/* 👈 الانطلاق: خط عملاق يتكيف مع المساحة */}
               <View style={styles.routeItemBox}>
                 <Text style={[styles.routeIconText, destinations.length === 1 && { fontSize: 18, marginTop: 4 }]}>🟢</Text>
                 <Text 
@@ -1170,7 +1181,6 @@ export default function PassengerHome() {
                 </Text>
               </View>
 
-              {/* 👈 الوجهات: تتكيف مع المساحة بناءً على عددها */}
               {destinations.map((d, i) => (
                 <View key={i} style={styles.routeItemBox}>
                   <Text style={[styles.routeIconText, destinations.length === 1 && { fontSize: 18, marginTop: 4 }]}>🔴</Text>
@@ -1188,7 +1198,6 @@ export default function PassengerHome() {
 
             <View style={styles.divider} />
 
-            {/* 👈 السعر النهائي: خط ضخم وعريض في المنتصف */}
             <View style={styles.priceBox}>
               <Text style={styles.priceLabel}>السعر النهائي للرحلة</Text>
               <Text 
@@ -1200,7 +1209,6 @@ export default function PassengerHome() {
               </Text>
             </View>
           </View>
-          {/* 👈 الزرار هيظهر فقط لو حالة الرحلة captain_arrived */}
           {rideStatus === 'captain_arrived' && (
             <TouchableOpacity style={styles.onTheWayBtn} onPress={notifyPassengerOnTheWay}>
               <Text style={styles.onTheWayBtnText}>أنا نازل في طريقي إليك</Text>
@@ -1302,7 +1310,7 @@ export default function PassengerHome() {
                   />
                 )}
                 {rating > 0 && (
-                  <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}>ب
+                  <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}>
                     <Text style={styles.submitRatingBtnText}>إرسال التقييم</Text>
                   </TouchableOpacity>
                 )}
@@ -1422,12 +1430,48 @@ const styles = StyleSheet.create({
   inputWithButton: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right', marginLeft: 8 },
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },
   myLocationBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  destRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  inputDest: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right' },
-  removeDestBtn: { backgroundColor: '#fee2e2', padding: 12, borderRadius: 12, marginLeft: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#fca5a5' },
-  removeDestBtnText: { fontSize: 12 },
-  addDestBtn: { backgroundColor: '#f1f5f9', paddingVertical: 10, borderRadius: 12, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#cbd5e1', borderStyle: 'dashed' },
-  addDestBtnText: { color: '#3b82f6', fontWeight: 'bold', fontSize: 14 },
+  
+  // 👈 إضافة ستايلات التصميم الجديد للوجهة هنا
+  modernDestContainer: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#2C2C2E',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 15,
+    justifyContent: 'space-between',
+    elevation: 3,
+  },
+  modernDestRight: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    flex: 1,
+  },
+  modernDestToText: {
+    color: '#e5e7eb',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginHorizontal: 8,
+  },
+  modernDestInput: {
+    flex: 1,
+    color: '#ffffff',
+    fontSize: 15,
+    textAlign: 'right',
+    paddingVertical: 5,
+    marginRight: 5,
+  },
+  modernDestMapBtn: {
+    backgroundColor: '#4b5563',
+    padding: 8,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
   notesInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 14, marginBottom: 15, color: '#0f172a', textAlign: 'right', minHeight: 45 },
   priceDisplayContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef3c7', borderWidth: 1.5, borderColor: '#d97706', borderRadius: 12, padding: 10, justifyContent: 'space-between' },
   priceTextDisplay: { fontSize: 18, fontWeight: 'bold', color: '#d97706', textAlign: 'right', flex: 1 },
