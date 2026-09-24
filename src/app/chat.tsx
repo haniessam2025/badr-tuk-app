@@ -1,13 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebase';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { db, storage } from '../firebase';
 
 export default function ChatScreen() {
   const router = useRouter();
-  
   const params = useLocalSearchParams();
   const senderType = params.senderType;
   const paramRideId = params.rideId || params.rideld; 
@@ -18,6 +19,8 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     if (paramRideId) {
@@ -46,6 +49,26 @@ export default function ChatScreen() {
       keyboardDidHideListener.remove();
     };
   }, [paramRideId]);
+
+  useEffect(() => {
+    if (!rideId) return;
+    const rideRef = doc(db, 'rides', rideId);
+    const unsubscribeRide = onSnapshot(rideRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const rideData = docSnap.data();
+        if (senderType === 'passenger' && rideData.unreadCountPassenger > 0) {
+          markMessagesAsRead(rideId);
+        } else if (senderType === 'captain' && rideData.unreadCountCaptain > 0) {
+          markMessagesAsRead(rideId);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeRide();
+      markMessagesAsRead(rideId); 
+    };
+  }, [rideId, senderType]);
 
   const loadActiveRide = async () => {
     try {
@@ -104,37 +127,11 @@ export default function ChatScreen() {
     }
   };
 
-  // 👈 دالة المراقبة لحل مشكلة الإشعار المعلق: تصفر العداد لو زاد أثناء ما الشاشة مفتوحة
-  useEffect(() => {
-    if (!rideId) return;
-    
-    const rideRef = doc(db, 'rides', rideId);
-    const unsubscribeRide = onSnapshot(rideRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const rideData = docSnap.data();
-        if (senderType === 'passenger' && rideData.unreadCountPassenger > 0) {
-          markMessagesAsRead(rideId);
-        } else if (senderType === 'captain' && rideData.unreadCountCaptain > 0) {
-          markMessagesAsRead(rideId);
-        }
-      }
-    });
-
-    // 👈 تصفير أخير للضمان عند غلق الشاشة
-    return () => {
-      unsubscribeRide();
-      markMessagesAsRead(rideId); 
-    };
-  }, [rideId, senderType]);
-
-
   const listenToMessages = (id: string) => {
     const messagesRef = collection(db, 'rides', id, 'messages');
-    // 👈 تقييد سحب الرسائل لأحدث 50 رسالة لتوفير الباقة (مع الترتيب العكسي لتظهر الرسائل الحديثة تحت)
     const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(50));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // 👈 استلام أحدث 50 رسالة مرتبين من الأحدث للأقدم، فنقلبهم عشان الشات يظهر طبيعي
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
       setMessages(msgs);
       setLoading(false);
@@ -145,60 +142,7 @@ export default function ChatScreen() {
         }
       }, 200);
     });
-
     return unsubscribe;
-  };
-
-  const sendMessage = async () => {
-    if (!inputText.trim()) return;
-    
-    if (!rideId) {
-      Alert.alert('خطأ', 'جاري تحميل بيانات الرحلة، جرب ثانية...');
-      return;
-    }
-
-    const messageText = inputText.trim();
-    setInputText(''); 
-
-    try {
-      const messagesRef = collection(db, 'rides', rideId, 'messages');
-      await addDoc(messagesRef, {
-        text: messageText,
-        sender: senderType,
-        timestamp: new Date().getTime(),
-      });
-
-      const rideRef = doc(db, 'rides', rideId);
-      const rideSnap = await getDoc(rideRef);
-      
-      if (rideSnap.exists()) {
-        const rideData = rideSnap.data();
-        let targetToken = '';
-        let newUnreadCount = 1;
-        let senderNameStr = senderType === 'passenger' ? 'الراكب' : 'الكابتن';
-
-        if (senderType === 'passenger') {
-          newUnreadCount = (rideData.unreadCountCaptain || 0) + 1;
-          await updateDoc(rideRef, { unreadCountCaptain: increment(1) });
-          targetToken = rideData.captainPushToken; 
-        } else {
-          newUnreadCount = (rideData.unreadCountPassenger || 0) + 1;
-          await updateDoc(rideRef, { unreadCountPassenger: increment(1) });
-          targetToken = rideData.passengerPushToken; 
-        }
-
-        if (targetToken) {
-          sendPushNotification(targetToken, senderNameStr, messageText, newUnreadCount);
-        }
-      }
-      
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الرسالة.');
-    }
   };
 
   const sendPushNotification = async (expoPushToken: string, title: string, body: string, badgeCount: number) => {
@@ -210,15 +154,10 @@ export default function ChatScreen() {
       badge: badgeCount, 
       data: { route: 'chat' },
     };
-
     try {
       await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Accept-encoding': 'gzip, deflate',
-          'Content-Type': 'application/json',
-        },
+        headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
         body: JSON.stringify(message),
       });
     } catch (error) {
@@ -231,68 +170,107 @@ export default function ChatScreen() {
       const myId = senderType === 'passenger' 
         ? await AsyncStorage.getItem('currentPassengerId') 
         : await AsyncStorage.getItem('currentCaptainId');
-        
       const myProfileStr = senderType === 'passenger' 
         ? await AsyncStorage.getItem('passenger_profile') 
         : await AsyncStorage.getItem('captain_profile');
-        
       const myName = myProfileStr ? JSON.parse(myProfileStr).name : (senderType === 'passenger' ? 'راكب' : 'كابتن');
 
       if (!rideId) {
         Alert.alert('خطأ', 'رقم الرحلة غير متوفر للمكالمة.');
         return;
       }
+      router.push({ pathname: '/voice-call', params: { rideId: rideId, userName: myName, userId: myId || 'user_123' } });
+    } catch (e) { console.log(e); }
+  };
 
-      router.push({
-        pathname: '/voice-call',
-        params: {
-          rideId: rideId,
-          userName: myName,
-          userId: myId || 'user_123'
-        }
-      });
-    } catch (e) {
-      console.log(e);
+  const uploadFileToStorage = async (uri: string, fileType: 'image') => {
+    try {
+      setIsUploading(true);
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const fileName = `chat_${new Date().getTime()}.jpg`;
+      const fileRef = ref(storage, `chats/${rideId}/${fileName}`);
+      await uploadBytes(fileRef, blob);
+      const downloadUrl = await getDownloadURL(fileRef);
+      setIsUploading(false);
+      return downloadUrl;
+    } catch (error) {
+      setIsUploading(false);
+      Alert.alert('خطأ', 'فشل رفع الملف.');
+      throw error;
     }
+  };
+
+  const pickAndSendImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled) {
+      const imageUrl = await uploadFileToStorage(result.assets[0].uri, 'image');
+      sendMessage('📷 صورة', 'image', imageUrl);
+    }
+  };
+
+  const sendMessage = async (text: string = inputText, msgType: 'text' | 'image' = 'text', fileUrl: string = '') => {
+    const messageText = text.trim();
+    if (!messageText && !fileUrl) return;
+    if (!rideId) {
+      Alert.alert('خطأ', 'جاري تحميل بيانات الرحلة، جرب ثانية...');
+      return;
+    }
+    setInputText(''); 
+    try {
+      const messagesRef = collection(db, 'rides', rideId, 'messages');
+      await addDoc(messagesRef, {
+        text: messageText, type: msgType, fileUrl: fileUrl, sender: senderType, timestamp: new Date().getTime(),
+      });
+      const rideRef = doc(db, 'rides', rideId);
+      const rideSnap = await getDoc(rideRef);
+      if (rideSnap.exists()) {
+        const rideData = rideSnap.data();
+        let targetToken = '';
+        let newUnreadCount = 1;
+        let senderNameStr = senderType === 'passenger' ? 'الراكب' : 'الكابتن';
+        if (senderType === 'passenger') {
+          newUnreadCount = (rideData.unreadCountCaptain || 0) + 1;
+          await updateDoc(rideRef, { unreadCountCaptain: increment(1) });
+          targetToken = rideData.captainPushToken; 
+        } else {
+          newUnreadCount = (rideData.unreadCountPassenger || 0) + 1;
+          await updateDoc(rideRef, { unreadCountPassenger: increment(1) });
+          targetToken = rideData.passengerPushToken; 
+        }
+        if (targetToken) { sendPushNotification(targetToken, senderNameStr, messageText, newUnreadCount); }
+      }
+      setTimeout(() => { flatListRef.current?.scrollToEnd({ animated: true }); }, 100);
+    } catch (error) { Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الرسالة.'); }
   };
 
   const renderMessage = ({ item }: { item: any }) => {
     const isMe = item.sender === senderType;
     return (
       <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.otherMessage]}>
-        <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
-          {item.text}
-        </Text>
+        {(!item.type || item.type === 'text') && (
+          <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>{item.text}</Text>
+        )}
+        {item.type === 'image' && item.fileUrl && (
+          <Image source={{ uri: item.fileUrl }} style={{ width: 200, height: 200, borderRadius: 8 }} resizeMode="cover" />
+        )}
       </View>
     );
   };
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2563eb" />
-      </View>
-    );
-  }
+  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#2563eb" /></View>;
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-    >
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} keyboardVerticalOffset={0}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>رجوع ⬅️</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {senderType === 'passenger' ? 'مراسلة الكابتن 🛺' : 'مراسلة الراكب 👤'}
-        </Text>
-        <TouchableOpacity style={styles.callHeaderBtn} onPress={makeFreeCall}>
-          <Text style={styles.callHeaderBtnText}>📞 اتصال مجاني</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}><Text style={styles.backButtonText}>رجوع ⬅️</Text></TouchableOpacity>
+        <Text style={styles.headerTitle}>{senderType === 'passenger' ? 'مراسلة الكابتن 🛺' : 'مراسلة الراكب 👤'}</Text>
+        <TouchableOpacity style={styles.callHeaderBtn} onPress={makeFreeCall}><Text style={styles.callHeaderBtnText}>📞 اتصال مجاني</Text></TouchableOpacity>
       </View>
-
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -300,17 +278,10 @@ export default function ChatScreen() {
         renderItem={renderMessage}
         contentContainerStyle={styles.chatList}
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => {
-          if (messages.length > 0) {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }
-        }}
       />
-
-      <View style={[
-        styles.inputContainer, 
-        { marginBottom: isKeyboardVisible ? (Platform.OS === 'ios' ? 10 : 5) : 45 }
-      ]}>
+      {isUploading && <View style={{ alignItems: 'center', marginBottom: 5 }}><Text style={{ color: '#64748b' }}>جاري إرسال الملف...</Text></View>}
+      <View style={[styles.inputContainer, { marginBottom: isKeyboardVisible ? (Platform.OS === 'ios' ? 10 : 5) : 45 }]}>
+        <TouchableOpacity style={styles.iconButton} onPress={pickAndSendImage} disabled={isUploading}><Text style={{ fontSize: 20 }}>🖼️</Text></TouchableOpacity>
         <TextInput
           style={styles.input}
           placeholder="اكتب رسالتك هنا..."
@@ -318,8 +289,9 @@ export default function ChatScreen() {
           value={inputText}
           onChangeText={setInputText}
           multiline
+          editable={!isUploading}
         />
-        <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
+        <TouchableOpacity style={styles.sendButton} onPress={() => sendMessage()} disabled={isUploading || (!inputText.trim())}>
           <Text style={styles.sendButtonText}>إرسال 🚀</Text>
         </TouchableOpacity>
       </View>
@@ -336,59 +308,16 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
   callHeaderBtn: { backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   callHeaderBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  
-  chatList: { 
-    padding: 15, 
-    paddingBottom: 20,
-    flexGrow: 1, 
-    justifyContent: 'flex-end' 
-  }, 
-  
+  chatList: { padding: 15, paddingBottom: 20, flexGrow: 1, justifyContent: 'flex-end' }, 
   messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 16, marginBottom: 10 },
   myMessage: { alignSelf: 'flex-start', backgroundColor: '#2563eb', borderBottomLeftRadius: 4 },
   otherMessage: { alignSelf: 'flex-end', backgroundColor: '#e2e8f0', borderBottomRightRadius: 4 },
-  
   messageText: { fontSize: 16, lineHeight: 22 },
   myMessageText: { color: '#ffffff', textAlign: 'left' },
   otherMessageText: { color: '#0f172a', textAlign: 'right' },
-  
-  inputContainer: { 
-    flexDirection: 'row-reverse', 
-    alignItems: 'flex-end', 
-    padding: 10, 
-    backgroundColor: '#ffffff', 
-    borderWidth: 1, 
-    borderColor: '#e2e8f0',
-    borderRadius: 25, 
-    marginHorizontal: 15,
-    elevation: 3, 
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-  },
-  input: { 
-    flex: 1, 
-    backgroundColor: '#f8fafc', 
-    borderWidth: 1, 
-    borderColor: '#cbd5e1', 
-    borderRadius: 20, 
-    paddingHorizontal: 15, 
-    paddingTop: 10, 
-    paddingBottom: 10, 
-    fontSize: 16, 
-    textAlign: 'right', 
-    maxHeight: 120, 
-    minHeight: 45,
-    marginLeft: 10 
-  },
-  sendButton: { 
-    backgroundColor: '#10b981', 
-    height: 45, 
-    paddingHorizontal: 20, 
-    borderRadius: 20, 
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
+  inputContainer: { flexDirection: 'row-reverse', alignItems: 'flex-end', padding: 10, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 25, marginHorizontal: 15, elevation: 3 },
+  input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 20, paddingHorizontal: 15, paddingTop: 10, paddingBottom: 10, fontSize: 16, textAlign: 'right', maxHeight: 120, minHeight: 45, marginLeft: 5, marginRight: 5 },
+  sendButton: { backgroundColor: '#10b981', height: 45, paddingHorizontal: 15, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
   sendButtonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
+  iconButton: { height: 45, width: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 20 }
 });

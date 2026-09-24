@@ -17,22 +17,33 @@ export default function PassengerRatings() {
   const fetchRatings = async () => {
     try {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
-      if (!passengerId) return;
+      if (!passengerId) {
+        setLoading(false);
+        return;
+      }
 
-      // سحب التقييمات الموجهة لهذا الراكب تحديداً من قبل الكباتن
+      // حساب وقت بداية "اليوم الحالي" (الساعة 12:00 صباحاً)
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const cutoffTimestamp = startOfToday.getTime();
+
+      // جلب التقييمات التي حصل عليها الراكب "اليوم فقط"
       const q = query(
         collection(db, 'ratings'),
         where('passengerId', '==', passengerId),
-        where('type', '==', 'captain_rating_passenger')
+        where('type', '==', 'captain_rating_passenger'), // 👈 ده النوع الخاص بتقييمات الكابتن للراكب
+        where('timestamp', '>=', cutoffTimestamp)
       );
+
       const snap = await getDocs(q);
-      const fetchedRatings = snap.docs.map(d => d.data());
-      
-      // الترتيب من الأحدث للأقدم
-      fetchedRatings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      const fetchedRatings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // ترتيب التقييمات (الأحدث أولاً)
+      fetchedRatings.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+
       setRatings(fetchedRatings);
     } catch (error) {
-      console.log('Error fetching ratings:', error);
+      console.log('Error fetching passenger ratings:', error);
     } finally {
       setLoading(false);
     }

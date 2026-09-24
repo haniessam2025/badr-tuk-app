@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -9,6 +9,7 @@ export default function PassengerHistory() {
   const router = useRouter();
   const [rides, setRides] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalRides, setTotalRides] = useState(0);
 
   useEffect(() => {
     fetchHistory();
@@ -17,20 +18,42 @@ export default function PassengerHistory() {
   const fetchHistory = async () => {
     try {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
-      if (!passengerId) return;
+      if (!passengerId) {
+        setLoading(false);
+        return;
+      }
 
-      // 👈 تقييد القراءة لأحدث 50 رحلة للراكب مع الترتيب المباشر من قاعدة البيانات
+      // حساب وقت بداية "اليوم الحالي"
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const cutoffTimestamp = startOfToday.getTime();
+
+      // جلب رحلات "اليوم فقط"
       const q = query(
         collection(db, 'rides'),
         where('passengerId', '==', passengerId),
-        orderBy('timestamp', 'desc'),
-        limit(50)
+        where('timestamp', '>=', cutoffTimestamp)
       );
       
       const snap = await getDocs(q);
-      const fetchedRides = snap.docs.map(d => d.data());
+      let dailyRides: any[] = [];
+      let dailyCompleted = 0;
+
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.status === 'completed' || data.status === 'canceled' || data.status === 'cancelled_by_passenger') {
+          dailyRides.push(data);
+        }
+        if (data.status === 'completed') {
+          dailyCompleted++;
+        }
+      });
+
+      // ترتيب الرحلات (الأحدث أولاً)
+      dailyRides.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       
-      setRides(fetchedRides);
+      setTotalRides(dailyCompleted);
+      setRides(dailyRides);
     } catch (error) {
       console.log('Error fetching history:', error);
     } finally {
@@ -74,6 +97,13 @@ export default function PassengerHistory() {
         <View style={{ width: 50 }} />
       </View>
 
+      {!loading && (
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>رحلات اليوم المكتملة</Text>
+          <Text style={styles.summaryValue}>{totalRides}</Text>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#d97706" />
@@ -103,6 +133,9 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#64748b', fontSize: 16, fontWeight: 'bold' },
+  summaryCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 15, marginHorizontal: 15, marginTop: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+  summaryLabel: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold', marginBottom: 5 },
+  summaryValue: { color: '#eab308', fontSize: 24, fontWeight: 'bold' },
   rideCard: { backgroundColor: '#ffffff', padding: 15, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#e2e8f0', elevation: 2 },
   rideHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 10, borderBottomWidth: 1, borderColor: '#f1f5f9', paddingBottom: 8 },
   dateText: { fontSize: 13, color: '#64748b', fontWeight: 'bold' },

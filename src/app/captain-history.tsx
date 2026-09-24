@@ -20,13 +20,11 @@ export default function CaptainHistory() {
   const fetchHistory = async () => {
     try {
       let captainId = await AsyncStorage.getItem('currentCaptainId');
+      let profileStr = await AsyncStorage.getItem('captain_profile');
+      let profile = profileStr ? JSON.parse(profileStr) : null;
       
-      if (!captainId) {
-        const profileStr = await AsyncStorage.getItem('captain_profile');
-        if (profileStr) {
-          const profile = JSON.parse(profileStr);
-          captainId = profile.id || profile.uid;
-        }
+      if (!captainId && profile) {
+        captainId = profile.id || profile.uid;
       }
 
       if (!captainId) {
@@ -34,42 +32,53 @@ export default function CaptainHistory() {
         return;
       }
 
-      // جلب الرحلات بدون orderBy لتجنب خطأ الفايربيز
-      const q = query(collection(db, 'rides'), where('captainId', '==', captainId));
+      // 1. حساب وقت بداية "اليوم الحالي" (الساعة 12:00 صباحاً من اليوم)
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const cutoffTimestamp = startOfToday.getTime();
+
+      // 2. جلب رحلات "اليوم فقط" من الفايربيز (توفير هائل للباقة)
+      const q = query(
+        collection(db, 'rides'),
+        where('captainId', '==', captainId),
+        where('timestamp', '>=', cutoffTimestamp)
+      );
+      
       const querySnapshot = await getDocs(q);
+      let dailyRides: any[] = [];
+      let dailyEarnings = 0;
+      let dailyCompletedRides = 0;
       
-      let rides: any[] = [];
-      let completedCount = 0;
-      let earningsSum = 0;
-
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        
+        // إضافة الرحلات المكتملة والملغية لقائمة العرض
         if (data.status === 'completed' || data.status === 'canceled') {
-          rides.push({ id: doc.id, ...data });
+          dailyRides.push({ id: docSnap.id, ...data });
+        }
+        
+        // حساب أرباح وعدد رحلات "اليوم فقط"
+        if (data.status === 'completed') {
+          dailyCompletedRides++;
+          dailyEarnings += parseFloat(data.price) || 0;
         }
       });
 
-      // ترتيب الرحلات يدوياً (الأحدث أولاً)
-      rides.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      
-      const finalRides = rides.slice(0, 50); // تقييد لـ 50 رحلة
-      finalRides.forEach(ride => {
-        if (ride.status === 'completed') {
-          completedCount++;
-          earningsSum += parseFloat(ride.price) || 0;
-        }
-      });
+      // 3. تحديث الأرقام لعرضها في أعلى الشاشة
+      setTotalEarnings(dailyEarnings);
+      setTotalRides(dailyCompletedRides);
 
-      setHistory(finalRides);
-      setTotalRides(completedCount);
-      setTotalEarnings(earningsSum);
-    } catch (error) {
+      // ترتيب الرحلات (الأحدث أولاً)
+      dailyRides.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+      setHistory(dailyRides);
+    } catch (error: any) {
       console.log('Error fetching history:', error);
+      alert("حدث خطأ أثناء جلب السجل: " + error.message);
     } finally {
       setLoading(false);
     }
-  };
-
+  };  
   const formatDate = (timestamp: number) => {
     if (!timestamp) return 'غير محدد';
     const date = new Date(timestamp);

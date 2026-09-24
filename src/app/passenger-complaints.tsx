@@ -165,12 +165,15 @@ export default function PassengerComplaints() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.sectionTitle}>سجل رسائلك السابقة</Text>
+      <Text style={styles.sectionTitle}>
+        سجل {activeTab === 'lost_item' ? 'المفقودات' : activeTab === 'suggestion' ? 'المقترحات' : 'الشكاوى'} السابقة
+      </Text>
       {fetching ? (
         <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 20 }} />
       ) : (
         <FlatList
-          data={tickets}
+          // 👈 تطبيق الفلتر ليعرض الرسائل المرتبطة بالزرار النشط فقط
+          data={tickets.filter(ticket => ticket.type === activeTab)}
           keyExtractor={(item) => item.id}
           renderItem={renderTicket}
           showsVerticalScrollIndicator={false}

@@ -208,6 +208,20 @@ export default function AdminDashboard() {
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الحظر.'); }
   };
 
+  const removeTemporaryBan = async () => {
+    try {
+      await updateDoc(doc(db, 'captains', selectedUser.id), {
+        bannedUntil: null,
+        cancelStrikes: 0
+      });
+      Alert.alert('تم ✅', 'تم فك الحظر المؤقت وتصفير عداد المخالفات للكابتن.');
+      setSelectedUser({ ...selectedUser, bannedUntil: null, cancelStrikes: 0 });
+      fetchDashboardData();
+    } catch (e) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء فك الحظر المؤقت.');
+    }
+  };
+
   const deleteUserAccount = async (userId: string, type: 'captain' | 'passenger') => {
     Alert.alert(
       'مسح بيانات الحساب ⚠️',
@@ -584,6 +598,13 @@ export default function AdminDashboard() {
 
               <View style={styles.dangerZoneContainer}>
                 <Text style={styles.dangerZoneNote}>خيارات الإدارة والتحكم:</Text>
+                
+                {selectedUserType === 'captain' && (
+                  <TouchableOpacity style={styles.tempBanBtn} onPress={removeTemporaryBan}>
+                    <Text style={styles.tempBanBtnText}>فك الحظر المؤقت وتصفير المخالفات 🔓</Text>
+                  </TouchableOpacity>
+                )}
+
                 <TouchableOpacity style={[styles.banBtnBig, selectedUser.status === 'banned' && { backgroundColor: '#10b981' }]} onPress={() => toggleBanUser(selectedUser, selectedUserType)}><Text style={styles.banBtnBigText}>{selectedUser.status === 'banned' ? 'إلغاء الحظر (السماح بالتسجيل)' : 'حظر الرقم نهائياً (القائمة السوداء) 🚫'}</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.deleteBtnBig} onPress={() => deleteUserAccount(selectedUser.id, selectedUserType)}><Text style={styles.deleteBtnBigText}>مسح بيانات الحساب 🗑️</Text></TouchableOpacity>
               </View>
@@ -772,6 +793,8 @@ const styles = StyleSheet.create({
 
   dangerZoneContainer: { gap: 12, marginBottom: 40 },
   dangerZoneNote: { color: '#94a3b8', fontSize: 13, textAlign: 'right', marginBottom: 5 },
+  tempBanBtn: { backgroundColor: '#2563eb', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
+  tempBanBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   banBtnBig: { backgroundColor: '#ea580c', padding: 15, borderRadius: 12, alignItems: 'center' },
   banBtnBigText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   deleteBtnBig: { backgroundColor: '#991b1b', padding: 15, borderRadius: 12, alignItems: 'center' },

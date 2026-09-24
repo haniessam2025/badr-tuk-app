@@ -17,29 +17,38 @@ export default function CaptainRatings() {
   const fetchRatings = async () => {
     try {
       const captainId = await AsyncStorage.getItem('currentCaptainId');
-      if (!captainId) return;
+      if (!captainId) {
+        setLoading(false);
+        return;
+      }
 
-      // سحب تقييمات الركاب لهذا الكابتن تحديداً
+      // حساب وقت بداية "اليوم الحالي" (الساعة 12:00 صباحاً)
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const cutoffTimestamp = startOfToday.getTime();
+
+      // جلب تقييمات الكابتن لليوم فقط
       const q = query(
         collection(db, 'ratings'),
         where('captainId', '==', captainId),
-        where('type', '==', 'passenger_rating_captain')
+        where('type', '==', 'passenger_rating_captain'),
+        where('timestamp', '>=', cutoffTimestamp)
       );
-      
+
       const snap = await getDocs(q);
-      const fetchedRatings = snap.docs.map(d => d.data());
-      
-      // الترتيب من الأحدث للأقدم بناءً على الوقت
-      fetchedRatings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      
+      const fetchedRatings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // ترتيب التقييمات (الأحدث أولاً)
+      fetchedRatings.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+
+      // تأكد من أن اسم الـ State هنا يطابق ما لديك (مثلاً setRatings)
       setRatings(fetchedRatings);
     } catch (error) {
-      console.log(error);
+      console.log('Error fetching ratings:', error);
     } finally {
       setLoading(false);
     }
   };
-
   const renderItem = ({ item }: { item: any }) => (
     <View style={styles.ratingCard}>
       <Text style={styles.stars}>{'⭐'.repeat(item.rating || 5)}</Text>

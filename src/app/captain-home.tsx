@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ScreenCapture from 'expo-screen-capture';
-import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
@@ -711,31 +711,12 @@ export default function CaptainHome() {
   const cancelRideByCaptain = async () => {
     if (!activeRide) return;
     try {
-      const captainRef = doc(db, 'captains', captainProfile.id);
-      const capSnap = await getDoc(captainRef);
-      if (capSnap.exists()) {
-        const capData = capSnap.data();
-        const currentStrikes = capData.cancelStrikes || 0;
-        if (currentStrikes >= 2) {
-          const banTime = Date.now() + (24 * 60 * 60 * 1000);
-          await updateDoc(captainRef, { 
-            cancelStrikes: 0, 
-            bannedUntil: banTime,
-            isOnline: false
-          });
-          setIsOnline(false);
-          Animated.timing(toggleAnim, { toValue: 0, duration: 250, useNativeDriver: false }).start();
-          Alert.alert('حظر مؤقت 🚫', 'تم إيقاف حسابك من استقبال الطلبات لمدة 24 ساعة بسبب تكرار إلغاء الرحلات بعد قبولها.');
-        } else {
-          await updateDoc(captainRef, { cancelStrikes: increment(1) });
-          Alert.alert('تنبيه ⚠️', `تم تسجيل مخالفة إلغاء. لديك ${currentStrikes + 1} من أصل 3 مخالفات قبل إيقاف حسابك مؤقتاً.`);
-        }
-      }
       isEndingRide.current = true; // 👈 تفعيل مفتاح الأمان لمنع رسالة الإلغاء الوهمية
       const currentRide = activeRide;
       setActiveRide(null); 
       await updateDoc(doc(db, 'rides', currentRide.id), { status: 'pending', captainId: null, offers: [] }); 
       handleDismissRequest(currentRide); 
+      // تم إلغاء نظام الحظر التلقائي بناءً على طلبك
     } catch(e) {
       Alert.alert("خطأ", "حدثت مشكلة أثناء الإلغاء");
     }
@@ -1034,8 +1015,7 @@ export default function CaptainHome() {
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-wallet'); }}><Text style={styles.sidebarLinkText}>المحفظة</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-history'); }}><Text style={styles.sidebarLinkText}>سجل الرحلات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-ratings'); }}><Text style={styles.sidebarLinkText}>التقييمات</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-docs'); }}><Text style={styles.sidebarLinkText}>المستندات الرسمية</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); Alert.alert("تنبيه", "سيتم تفعيل الإعدادات قريباً"); }}><Text style={styles.sidebarLinkText}>الإعدادات</Text></TouchableOpacity>
+                            <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); Alert.alert("تنبيه", "سيتم تفعيل الإعدادات قريباً"); }}><Text style={styles.sidebarLinkText}>الإعدادات</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/support'); }}><Text style={styles.sidebarLinkText}>الدعم الفني</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}><Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text></TouchableOpacity>
             </ScrollView>
