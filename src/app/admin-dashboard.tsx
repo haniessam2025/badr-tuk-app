@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 
@@ -11,6 +11,10 @@ export default function AdminDashboard() {
   const [activeSupportChat, setActiveSupportChat] = useState<any>(null);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [adminReplyText, setAdminReplyText] = useState('');
+  
+  // متغيرات مراقبة حالة الكتابة الذكية للحفاظ على الباقة
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCurrentlyTypingRef = useRef(false);
   
   const router = useRouter();
   
@@ -54,8 +58,7 @@ export default function AdminDashboard() {
     const q = query(collection(db, 'support_chats'), where('status', '==', 'open'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      tickets.sort((a, b) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));
-      setSupportTickets(tickets);
+tickets.sort((a: any, b: any) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));      setSupportTickets(tickets);
     });
     return () => unsubscribe();
   }, []);
@@ -75,16 +78,45 @@ export default function AdminDashboard() {
     try { await updateDoc(doc(db, 'support_chats', ticket.id), { unreadAdminCount: 0 }); } catch (e) {}
   };
 
+  // الدالة الذكية لمراقبة كتابة الإدارة وتفعيل النقط
+  const handleAdminTyping = async (text: string) => {
+    setAdminReplyText(text);
+
+    if (!activeSupportChat) return;
+
+    if (!isCurrentlyTypingRef.current) {
+      isCurrentlyTypingRef.current = true;
+      try {
+        await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { adminTyping: true });
+      } catch (error) {}
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    
+    typingTimeoutRef.current = setTimeout(async () => {
+      isCurrentlyTypingRef.current = false;
+      try {
+        await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { adminTyping: false });
+      } catch (error) {}
+    }, 2000);
+  };
+
   const sendAdminReply = async () => {
     if (!adminReplyText.trim() || !activeSupportChat) return;
     const text = adminReplyText.trim();
     setAdminReplyText('');
+
+    // مسح علامة الكتابة فوراً بمجرد الضغط على إرسال
+    isCurrentlyTypingRef.current = false;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
     try {
       await addDoc(collection(db, 'support_chats', activeSupportChat.id, 'messages'), { text, sender: 'admin', timestamp: serverTimestamp() });
       await updateDoc(doc(db, 'support_chats', activeSupportChat.id), {
         lastMessage: text,
         lastMessageTime: serverTimestamp(),
-        unreadUserCount: increment(1)
+        unreadUserCount: increment(1),
+        adminTyping: false // التأكيد على إخفاء النقط من الراكب/الكابتن
       });
     } catch (error) {}
   };
@@ -558,7 +590,7 @@ export default function AdminDashboard() {
         </View>
       )}
 
-      {/* 👈 زر صندوق الدعم الفني المباشر الجديد */}
+      {/* 👈 زر صندوق الدعم الفني المباشر */}
       <TouchableOpacity 
         style={styles.fullWidthSupportBtn} 
         onPress={() => setIsSupportModalVisible(true)}
@@ -641,7 +673,7 @@ export default function AdminDashboard() {
                   placeholder="اكتب ردك..."
                   placeholderTextColor="#64748b"
                   value={adminReplyText}
-                  onChangeText={setAdminReplyText}
+                  onChangeText={handleAdminTyping} // 👈 تم ربطها بالدالة الذكية
                   multiline
                 />
                 <TouchableOpacity onPress={sendAdminReply} style={{ backgroundColor: '#10b981', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
@@ -808,7 +840,6 @@ const styles = StyleSheet.create({
   fullWidthHistoryBtn: { backgroundColor: '#2563eb', paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20, elevation: 3 },
   fullWidthHistoryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
 
-  // 👈 تنسيقات زر الدعم الفني الجديد
   fullWidthSupportBtn: { position: 'relative', backgroundColor: '#8b5cf6', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 3 },
   fullWidthSupportBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
   supportBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 10, elevation: 4 },

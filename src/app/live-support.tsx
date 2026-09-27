@@ -1,23 +1,58 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
+
+// مكون الـ 3 نقط المتحركة (أنيميشن احترافي)
+const TypingIndicator = () => {
+  const opacity1 = useRef(new Animated.Value(0.3)).current;
+  const opacity2 = useRef(new Animated.Value(0.3)).current;
+  const opacity3 = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const animate = () => {
+      Animated.sequence([
+        Animated.timing(opacity1, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(opacity2, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(opacity3, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.parallel([
+          Animated.timing(opacity1, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+          Animated.timing(opacity2, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+          Animated.timing(opacity3, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+        ])
+      ]).start(() => animate());
+    };
+    animate();
+  }, []);
+
+  return (
+    <View style={[styles.msgWrapper, styles.msgLeft]}>
+      <View style={[styles.msgBubble, styles.adminBubble, { flexDirection: 'row', width: 65, justifyContent: 'space-evenly', paddingVertical: 12, paddingHorizontal: 15 }]}>
+        <Animated.Text style={{ opacity: opacity1, fontSize: 18, color: '#94a3b8', marginTop: -5 }}>●</Animated.Text>
+        <Animated.Text style={{ opacity: opacity2, fontSize: 18, color: '#94a3b8', marginTop: -5 }}>●</Animated.Text>
+        <Animated.Text style={{ opacity: opacity3, fontSize: 18, color: '#94a3b8', marginTop: -5 }}>●</Animated.Text>
+      </View>
+    </View>
+  );
+};
 
 export default function LiveSupportChat() {
   const router = useRouter();
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isAdminTyping, setIsAdminTyping] = useState(false);
   
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('مستخدم');
   const [userType, setUserType] = useState<'captain' | 'passenger'>('passenger');
   
   const flatListRef = useRef<FlatList>(null);
+  const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 1. تحديد هوية المستخدم (كابتن أو راكب)
+  // 1. تحديد هوية المستخدم
   useEffect(() => {
     const identifyUser = async () => {
       try {
@@ -39,11 +74,10 @@ export default function LiveSupportChat() {
     identifyUser();
   }, []);
 
-  // 2. الاستماع للرسايل بأقل استهلاك (أحدث 30 رسالة فقط)
+  // 2. الاستماع للرسايل
   useEffect(() => {
     if (!userId) return;
 
-    // توفير القراءات: قراءة 30 رسالة فقط مرتبة من الأحدث
     const q = query(
       collection(db, 'support_chats', userId, 'messages'),
       orderBy('timestamp', 'desc'),
@@ -55,28 +89,76 @@ export default function LiveSupportChat() {
       setMessages(msgs);
       setLoading(false);
       
-      // تصفير عداد الرسايل الغير مقروءة للمستخدم فوراً
       if (msgs.length > 0) {
         updateDoc(doc(db, 'support_chats', userId), { unreadUserCount: 0 }).catch(() => {});
       }
     });
 
-    // فصل الاتصال بالفايربيز بمجرد خروج المستخدم من الشاشة (توفير هائل للباقة)
     return () => unsubscribe();
   }, [userId]);
 
-  // 3. إرسال رسالة جديدة
+  // 3. مراقبة حالة المحادثة من الإدارة (الإغلاق ومراقبة كتابة الإدارة)
+  useEffect(() => {
+    if (!userId) return;
+
+    const chatDocRef = doc(db, 'support_chats', userId);
+    const unsubscribeStatus = onSnapshot(chatDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // إظهار النقط لو الإدارة بتكتب
+        if (data.adminTyping) setIsAdminTyping(true);
+        else setIsAdminTyping(false);
+
+        // الإغلاق الآلي
+        if (data.status === 'closed') {
+          Alert.alert('تنبيه ⚠️', 'سيتم إغلاق هذه المحادثة بعد 3 ثوان ...');
+          setTimeout(async () => {
+            try {
+              const msgsQuery = query(collection(db, 'support_chats', userId, 'messages'));
+              const msgsSnap = await getDocs(msgsQuery);
+              msgsSnap.forEach(async (msgDoc) => {
+                await deleteDoc(msgDoc.ref);
+              });
+              await deleteDoc(chatDocRef);
+            } catch (error) {}
+            router.back();
+          }, 3000);
+        }
+      }
+    });
+
+    return () => unsubscribeStatus();
+  }, [userId]);
+
+  // تحديث حالة الكتابة الخاصة بالمستخدم في الفايربيز
+  const handleTextChange = async (text: string) => {
+    setInputText(text);
+
+    if (!userId || messages.length === 0) return; 
+
+    try {
+      await updateDoc(doc(db, 'support_chats', userId), { userTyping: true });
+
+      if (typingTimeout.current) clearTimeout(typingTimeout.current);
+      
+      typingTimeout.current = setTimeout(async () => {
+        await updateDoc(doc(db, 'support_chats', userId), { userTyping: false });
+      }, 2000);
+    } catch (error) {}
+  };
+
+  // 4. إرسال رسالة جديدة
   const sendMessage = async () => {
     if (!inputText.trim() || !userId) return;
 
     const messageText = inputText.trim();
-    setInputText(''); // تفريغ الخانة فوراً لسرعة الاستجابة
+    setInputText('');
 
     try {
       const chatDocRef = doc(db, 'support_chats', userId);
       const chatDoc = await getDoc(chatDocRef);
 
-      // إذا كانت دي أول رسالة، ننشئ الملف التعريفي للدردشة
       if (!chatDoc.exists()) {
         await setDoc(chatDocRef, {
           userId,
@@ -86,19 +168,19 @@ export default function LiveSupportChat() {
           lastMessageTime: serverTimestamp(),
           unreadAdminCount: 1,
           unreadUserCount: 0,
-          status: 'open'
+          status: 'open',
+          userTyping: false
         });
       } else {
-        // تحديث الملف التعريفي بآخر رسالة لسهولة عرضها في لوحة الأدمن
         await updateDoc(chatDocRef, {
           lastMessage: messageText,
           lastMessageTime: serverTimestamp(),
           unreadAdminCount: (chatDoc.data()?.unreadAdminCount || 0) + 1,
-          status: 'open' // إعادة فتح التذكرة لو كانت مغلقة
+          status: 'open',
+          userTyping: false // إيقاف علامة الكتابة فور الإرسال
         });
       }
 
-      // إضافة الرسالة نفسها في المجموعة الفرعية
       await addDoc(collection(db, 'support_chats', userId, 'messages'), {
         text: messageText,
         sender: 'user',
@@ -122,11 +204,12 @@ export default function LiveSupportChat() {
   };
 
   return (
-<KeyboardAvoidingView 
+    <KeyboardAvoidingView 
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
       keyboardVerticalOffset={0}
-    >      <View style={styles.header}>
+    >
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>رجوع</Text>
         </TouchableOpacity>
@@ -138,10 +221,10 @@ export default function LiveSupportChat() {
         {loading ? (
           <ActivityIndicator size="large" color="#3b82f6" style={{ marginTop: 50 }} />
         ) : messages.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateIcon}>👋</Text>
-            <Text style={styles.emptyStateTitle}>أهلاً بك في الدعم الفني</Text>
-            <Text style={styles.emptyStateDesc}>اكتب مشكلتك أو استفسارك وسيقوم أحد ممثلي خدمة العملاء بالرد عليك في أقرب وقت.</Text>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <Text style={{ textAlign: 'center', color: '#64748b', fontSize: 16, lineHeight: 24, fontWeight: 'bold' }}>
+              برجاء ارسال مشكلتك وسيقوم أحد ممثلي خدمة العملاء بالتواصل مع حضرتك في أقرب وقت
+            </Text>
           </View>
         ) : (
           <FlatList
@@ -149,9 +232,10 @@ export default function LiveSupportChat() {
             data={messages}
             keyExtractor={item => item.id}
             renderItem={renderMessage}
-            inverted // لقلب القائمة عشان أحدث رسالة تظهر تحت زي واتساب
+            inverted
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingVertical: 15 }}
+            ListHeaderComponent={isAdminTyping ? <TypingIndicator /> : null} // هنا بتظهر النقط
           />
         )}
       </View>
@@ -162,7 +246,7 @@ export default function LiveSupportChat() {
           placeholder="اكتب رسالتك هنا..."
           placeholderTextColor="#94a3b8"
           value={inputText}
-          onChangeText={setInputText}
+          onChangeText={handleTextChange} 
           multiline
           textAlign="right"
         />
@@ -182,11 +266,6 @@ const styles = StyleSheet.create({
   backBtnText: { color: '#334155', fontWeight: 'bold' },
   chatArea: { flex: 1, paddingHorizontal: 15 },
   
-  emptyState: { alignItems: 'center', justifyContent: 'center', flex: 1, padding: 20 },
-  emptyStateIcon: { fontSize: 50, marginBottom: 15 },
-  emptyStateTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 8 },
-  emptyStateDesc: { fontSize: 14, color: '#64748b', textAlign: 'center', lineHeight: 22 },
-
   msgWrapper: { width: '100%', marginVertical: 5, flexDirection: 'row' },
   msgRight: { justifyContent: 'flex-start' },
   msgLeft: { justifyContent: 'flex-end' },
@@ -199,8 +278,7 @@ const styles = StyleSheet.create({
   userText: { color: '#ffffff', textAlign: 'right' },
   adminText: { color: '#1e293b', textAlign: 'right' },
 
-  // 👇 هنا ضاعفنا المسافة السفلية (خليناها 70 بدل 25) عشان يترفع 3 سطور لفوق 👇
-inputContainer: { flexDirection: 'row-reverse', alignItems: 'flex-end', padding: 10, paddingBottom: Platform.OS === 'ios' ? 20 : 15, backgroundColor: '#ffffff', borderTopWidth: 1, borderColor: '#e2e8f0' },  
+  inputContainer: { flexDirection: 'row-reverse', alignItems: 'flex-end', padding: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 35, backgroundColor: '#ffffff', borderTopWidth: 1, borderColor: '#e2e8f0' },  
   input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, paddingTop: 12, maxHeight: 100, minHeight: 45, fontSize: 15, color: '#1e293b' },
   sendBtn: { backgroundColor: '#3b82f6', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   sendBtnIcon: { color: '#ffffff', fontSize: 18, transform: [{ rotateY: '180deg' }] }

@@ -14,6 +14,7 @@ export default function CaptainProfile() {
   // حقول التعديل الأساسية
   const [editName, setEditName] = useState('');
   const [editAvatar, setEditAvatar] = useState('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
+  const [password, setPassword] = useState(''); // 👈 متغير كلمة السر الجديدة
   
   // حقول المركبة الديناميكية
   const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
@@ -153,6 +154,11 @@ export default function CaptainProfile() {
       return;
     }
 
+    if (password && password.length < 6) {
+      Alert.alert('تنبيه', 'كلمة السر الجديدة يجب ألا تقل عن 6 أحرف أو أرقام');
+      return;
+    }
+
     let vehicleStr = '';
     let detailsObj = {};
 
@@ -181,6 +187,15 @@ export default function CaptainProfile() {
 
     setIsSubmitting(true);
     try {
+      let isPasswordChanged = false;
+
+      // 1. تغيير الباسورد فوراً إذا تم إدخاله
+      if (password) {
+        await updateDoc(doc(db, 'captains', captainId), { password: password });
+        isPasswordChanged = true;
+      }
+
+      // 2. إرسال باقي البيانات للإدارة كطلب تعديل
       await addDoc(collection(db, 'update_requests'), {
         type: 'captain_profile_update',
         captainId: captainId,
@@ -202,13 +217,25 @@ export default function CaptainProfile() {
         timestamp: new Date().getTime()
       });
 
-      Alert.alert(
-        'تم إرسال الطلب',
-        'تم إرسال طلب التعديل للإدارة بنجاح. سيتم مراجعة الطلب وتحديث ملفك قريباً.',
-        [{ text: 'حسناً', onPress: () => router.back() }]
-      );
+      if (isPasswordChanged) {
+        Alert.alert('نجاح ✅', 'تم تغيير كلمة السر فوراً وإرسال باقي تعديلات الملف للإدارة. يرجى تسجيل الدخول مرة أخرى.', [
+          { 
+            text: 'حسناً', 
+            onPress: async () => {
+              await AsyncStorage.clear();
+              router.replace('/captain-login');
+            } 
+          }
+        ]);
+      } else {
+        Alert.alert(
+          'تم إرسال الطلب',
+          'تم إرسال طلب التعديل للإدارة بنجاح. سيتم مراجعة الطلب وتحديث ملفك قريباً.',
+          [{ text: 'حسناً', onPress: () => router.back() }]
+        );
+      }
     } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال طلب التعديل');
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الطلب');
     } finally {
       setIsSubmitting(false);
     }
@@ -291,7 +318,6 @@ export default function CaptainProfile() {
           <View style={{ width: 60 }} />
         </View>
 
-        {/* تم إضافة ستايل هنا لحل مشكلة السكرول وإعطائه عرض 100% */}
         <ScrollView 
           style={{ flex: 1, width: '100%' }}
           contentContainerStyle={styles.scrollContent} 
@@ -406,11 +432,24 @@ export default function CaptainProfile() {
             />
             <Text style={styles.hintText}>* يجب تأكيد ملكية الرقم الجديد بـ OTP لتغييره.</Text>
 
+            {/* 👈 خانة كلمة السر الجديدة  */}
+            <Text style={styles.label}>كلمة سر جديدة (اختياري)</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="اكتب كلمة سر جديدة لتغييرها..."
+              placeholderTextColor="#94a3b8"
+              secureTextEntry
+              textAlign="right"
+            />
+            <Text style={[styles.hintText, { color: '#10b981', marginBottom: 15 }]}>* سيتم تغيير كلمة السر فوراً دون انتظار موافقة الإدارة.</Text>
+
             <TouchableOpacity style={styles.submitBtn} onPress={submitUpdateRequest} disabled={isSubmitting}>
               {isSubmitting ? (
                 <ActivityIndicator color="#ffffff" />
               ) : (
-                <Text style={styles.submitBtnText}>إرسال طلب تعديل للإدارة</Text>
+                <Text style={styles.submitBtnText}>إرسال طلب تعديل / حفظ</Text>
               )}
             </TouchableOpacity>
             <Text style={styles.infoText}>أي تعديل في (الاسم، الصورة، أو بيانات المركبة) يتطلب مراجعة وموافقة الإدارة لضمان أمان الركاب.</Text>
@@ -482,7 +521,6 @@ const styles = StyleSheet.create({
   backBtn: { paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#ecfdf5', borderRadius: 8 },
   backBtnText: { color: '#059669', fontWeight: 'bold', fontSize: 14 },
   
-  // تم تعديل التنسيقات هنا لضمان امتداد السكرول بكامل الشاشة
   scrollContent: { flexGrow: 1, padding: 20 },
   
   avatarContainer: { alignSelf: 'center', position: 'relative', marginBottom: 20, marginTop: 10 },

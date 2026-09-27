@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -12,7 +12,6 @@ export default function PassengerLogin() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // التحقق مما إذا كان الراكب مسجل الدخول مسبقاً
   useEffect(() => {
     const checkExistingLogin = async () => {
       try {
@@ -37,11 +36,10 @@ export default function PassengerLogin() {
 
     setLoading(true);
     try {
-      // البحث عن الراكب في قاعدة البيانات باستخدام حقل "name"
       const q = query(
         collection(db, 'passengers'),
         where('name', '==', username.trim()),
-        where('password', '==', password.trim()) // تم تعديل علامة التساوي هنا
+        where('password', '==', password.trim())
       );
 
       const querySnapshot = await getDocs(q);
@@ -57,11 +55,18 @@ export default function PassengerLogin() {
           avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'
         };
 
-        // حفظ بيانات الدخول في ذاكرة الهاتف
+        // --- الجزء الأهم: إنشاء وتحديث جلسة الدخول لحماية الحساب من الفتح على جهازين ---
+        const newSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+        
         await AsyncStorage.setItem('currentPassengerId', passengerDoc.id);
         await AsyncStorage.setItem('passenger_profile', JSON.stringify(profileData));
+        await AsyncStorage.setItem('currentSessionId', newSessionId); 
         
-        // التوجيه للصفحة الرئيسية
+        await updateDoc(doc(db, 'passengers', passengerDoc.id), {
+          sessionId: newSessionId
+        });
+        // -------------------------------------------------------------------------
+
         router.replace('/passenger-home');
       } else {
         Alert.alert('خطأ', 'اسم المستخدم أو كلمة المرور غير صحيحة');

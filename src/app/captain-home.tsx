@@ -408,6 +408,9 @@ export default function CaptainHome() {
 
       if (captainId) {
         await AsyncStorage.setItem('currentCaptainId', captainId);
+        
+        // 👈 هات الرمز السري بتاع الجلسة المحفوظ في الموبايل ده
+        const localSessionId = await AsyncStorage.getItem('currentSessionId');
 
         const ratingQ = query(collection(db, 'ratings'), where('captainId', '==', captainId), where('type', '==', 'passenger_rating_captain'));
         const ratingSnap = await getDocs(ratingQ);
@@ -421,6 +424,15 @@ export default function CaptainHome() {
           if (docSnap.exists()) {
             const data = docSnap.data();
             
+            // 🔴 نظام الحماية الفوري (الطرد الإجباري) 🔴
+            if (data.sessionId && data.sessionId !== localSessionId) {
+              await AsyncStorage.clear(); // مسح الذاكرة فوراً
+              router.replace('/captain-login'); // الطرد لصفحة الدخول فوراً
+              Alert.alert('تنبيه أمني ⚠️', 'لقد تم تسجيل الدخول لحسابك من جهاز آخر. تم تسجيل خروجك من هنا لحماية حسابك.');
+              return; // وقف تحميل البيانات
+            }
+            // -------------------------------------------
+
             const finalAvatar = getSafeAvatar(data.profileImage || data.avatar || data.image);
             
             const updatedProfile = { 

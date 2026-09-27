@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -83,12 +83,21 @@ export default function CaptainLogin() {
           walletBalance: data.walletBalance || 0 
         };
 
-        // حفظ البيانات محلياً
+       // إنشاء رمز جلسة فريد (Session ID)
+        const newSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+
+        // حفظ بيانات الدخول في ذاكرة الهاتف
         await AsyncStorage.setItem('currentCaptainId', captainDoc.id);
         await AsyncStorage.setItem('captain_profile', JSON.stringify(profileData));
+        await AsyncStorage.setItem('currentSessionId', newSessionId); 
+        
+        // تحديث الجلسة في قاعدة البيانات لطرد أي جهاز آخر
+        await updateDoc(doc(db, 'captains', captainDoc.id), {
+          sessionId: newSessionId
+        });
 
-        router.replace('/captain-home');
-      } else {
+        // التوجيه للصفحة الرئيسية
+        router.replace('/captain-home');      } else {
         Alert.alert('خطأ', 'الاسم أو كلمة المرور غير صحيحة.');
       }
     } catch (error) {

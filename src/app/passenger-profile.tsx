@@ -11,53 +11,50 @@ export default function PassengerProfile() {
   const [passengerId, setPassengerId] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState(''); // 👈 متغير كلمة السر الجديدة
   const [avatar, setAvatar] = useState('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // متغيرات تغيير رقم الهاتف
+  // --- متغيرات تغيير رقم الهاتف ---
   const [isPhoneModalVisible, setIsPhoneModalVisible] = useState(false);
-  const [phoneStep, setPhoneStep] = useState(1); // 1: إدخال الرقم الجديد، 2: إدخال الـ OTP
+  const [phoneStep, setPhoneStep] = useState(1);
   const [newPhone, setNewPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [generatedOtp, setGeneratedOtp] = useState('');
   const [isProcessingPhone, setIsProcessingPhone] = useState(false);
 
   useEffect(() => {
+    const loadProfileData = async () => {
+      try {
+        const id = await AsyncStorage.getItem('currentPassengerId');
+        if (id) {
+          setPassengerId(id);
+          const savedProfile = await AsyncStorage.getItem('passenger_profile');
+          if (savedProfile) {
+            const parsed = JSON.parse(savedProfile);
+            setName(parsed.name || '');
+            setPhone(parsed.phone || '');
+            setAvatar(parsed.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
+          } else {
+            const docRef = doc(db, 'passengers', id);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              setName(data.name || '');
+              setPhone(data.phone || '');
+              setAvatar(data.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
+            }
+          }
+        }
+      } catch (error) {
+        Alert.alert('خطأ', 'حدثت مشكلة أثناء تحميل بيانات الملف الشخصي');
+      } finally {
+        setIsLoading(false);
+      }
+    };
     loadProfileData();
   }, []);
-
-  const loadProfileData = async () => {
-    try {
-      const id = await AsyncStorage.getItem('currentPassengerId');
-      if (!id) {
-        router.replace('/passenger-login');
-        return;
-      }
-      setPassengerId(id);
-
-      const savedProfile = await AsyncStorage.getItem('passenger_profile');
-      if (savedProfile) {
-        const parsed = JSON.parse(savedProfile);
-        setName(parsed.name || '');
-        setPhone(parsed.phone || '');
-        if (parsed.avatar && parsed.avatar.length > 50) setAvatar(parsed.avatar);
-      }
-
-      const docRef = doc(db, 'passengers', id);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setName(data.name || '');
-        setPhone(data.phone || '');
-        if (data.avatar || data.image) setAvatar(data.avatar || data.image);
-      }
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تحميل البيانات');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -80,23 +77,48 @@ export default function PassengerProfile() {
     }
   };
 
+  // 👈 دالة الحفظ الذكية (لو فيه باسورد هتحفظ وتطرد، لو مفيش هتحفظ عادي)
   const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('تنبيه', 'برجاء إدخال اسمك');
       return;
     }
 
+    if (password && password.length < 6) {
+      Alert.alert('تنبيه', 'كلمة السر الجديدة يجب ألا تقل عن 6 أحرف أو أرقام');
+      return;
+    }
+
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'passengers', passengerId), {
+      const updates: any = {
         name: name.trim(),
         avatar: avatar,
-      });
+      };
 
-      const newProfile = { name: name.trim(), phone, avatar };
-      await AsyncStorage.setItem('passenger_profile', JSON.stringify(newProfile));
+      let isPasswordChanged = false;
+      if (password) {
+        updates.password = password;
+        isPasswordChanged = true;
+      }
 
-      Alert.alert('نجاح', 'تم تحديث بياناتك بنجاح', [{ text: 'حسناً', onPress: () => router.back() }]);
+      await updateDoc(doc(db, 'passengers', passengerId), updates);
+
+      if (isPasswordChanged) {
+        Alert.alert('نجاح ✅', 'تم تحديث البيانات وتغيير كلمة السر. يرجى تسجيل الدخول مرة أخرى.', [
+          { 
+            text: 'حسناً', 
+            onPress: async () => {
+              await AsyncStorage.clear();
+              router.replace('/passenger-login');
+            } 
+          }
+        ]);
+      } else {
+        const newProfile = { name: name.trim(), phone, avatar };
+        await AsyncStorage.setItem('passenger_profile', JSON.stringify(newProfile));
+        Alert.alert('نجاح ✅', 'تم تحديث بياناتك بنجاح', [{ text: 'حسناً', onPress: () => router.back() }]);
+      }
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء حفظ البيانات');
     } finally {
@@ -104,7 +126,6 @@ export default function PassengerProfile() {
     }
   };
 
-  // --- دوال تغيير رقم الهاتف ---
   const openPhoneEditModal = async () => {
     const activeRide = await AsyncStorage.getItem('active_ride');
     if (activeRide) {
@@ -129,7 +150,6 @@ export default function PassengerProfile() {
 
     setIsProcessingPhone(true);
     try {
-      // 1. فحص هل الرقم مسجل لحساب آخر
       const q = query(collection(db, 'passengers'), where('phone', '==', newPhone));
       const querySnapshot = await getDocs(q);
       
@@ -139,27 +159,9 @@ export default function PassengerProfile() {
         return;
       }
 
-      // 2. توليد كود عشوائي من 4 أرقام
       const otp = Math.floor(1000 + Math.random() * 9000).toString();
       setGeneratedOtp(otp);
-
-      // 3. إرسال الـ OTP عبر واتساب (استبدل الرابط بـ API واتساب الخاص بك مثل UltraMsg)
-      const message = `كود التحقق الخاص بك في تطبيق براق هو: ${otp}`;
-      
-      /* 
-       ملاحظة: هذا السطر مجرد نموذج لإرسال الطلب للسيرفر الخارجي.
-       لتفعيله فعلياً، يجب استخدام خدمة مثل UltraMsg أو غيرها.
-       
-       await fetch('https://api.ultramsg.com/YOUR_INSTANCE/messages/chat', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-         body: `token=YOUR_TOKEN&to=${newPhone}&body=${encodeURIComponent(message)}`
-       });
-      */
-
-      // محاكاة للإرسال للتجربة
       console.log(`OTP Sent to ${newPhone}: ${otp}`); 
-
       setPhoneStep(2);
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الكود');
@@ -194,7 +196,7 @@ export default function PassengerProfile() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#d97706" />
+        <ActivityIndicator size="large" color="#4f46e5" />
       </View>
     );
   }
@@ -224,7 +226,7 @@ export default function PassengerProfile() {
             value={name}
             onChangeText={setName}
             placeholder="أدخل اسمك"
-            placeholderTextColor="#94a3b8"
+            placeholderTextColor="#9ca3af"
             textAlign="right"
           />
 
@@ -241,6 +243,18 @@ export default function PassengerProfile() {
             textAlign="right"
           />
 
+          {/* 👈 خانة كلمة السر الجديدة داخل التصميم كما طلبت */}
+          <Text style={styles.label}>كلمة سر جديدة (اختياري)</Text>
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="اكتب كلمة سر جديدة لتغييرها..."
+            placeholderTextColor="#9ca3af"
+            secureTextEntry
+            textAlign="right"
+          />
+
           <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>
             {isSaving ? (
               <ActivityIndicator color="#ffffff" />
@@ -251,7 +265,6 @@ export default function PassengerProfile() {
         </View>
       </ScrollView>
 
-      {/* نافذة تغيير رقم الهاتف */}
       <Modal visible={isPhoneModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -265,7 +278,7 @@ export default function PassengerProfile() {
                   onChangeText={setNewPhone}
                   keyboardType="phone-pad"
                   placeholder="أدخل الرقم الجديد"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor="#9ca3af"
                   textAlign="center"
                 />
                 <View style={styles.modalButtonsRow}>
@@ -288,7 +301,7 @@ export default function PassengerProfile() {
                   keyboardType="numeric"
                   maxLength={4}
                   placeholder="----"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor="#9ca3af"
                   textAlign="center"
                 />
                 <View style={styles.modalButtonsRow}>
@@ -309,33 +322,38 @@ export default function PassengerProfile() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' },
-  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 15, paddingTop: 50, borderBottomWidth: 1, borderColor: '#e2e8f0' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
-  backBtn: { paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#f1f5f9', borderRadius: 8 },
-  backBtnText: { color: '#475569', fontWeight: 'bold', fontSize: 14 },
+  container: { flex: 1, backgroundColor: '#f9fafb' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f9fafb' },
+  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 15, paddingTop: 50, borderBottomWidth: 1, borderColor: '#e5e7eb' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
+  backBtn: { paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#f3f4f6', borderRadius: 8 },
+  backBtnText: { color: '#4b5563', fontWeight: 'bold', fontSize: 14 },
   scrollContent: { flexGrow: 1, padding: 20, alignItems: 'center' },
+  
   avatarContainer: { position: 'relative', marginBottom: 30, marginTop: 20 },
-  avatar: { width: 120, height: 120, borderRadius: 60, borderWidth: 3, borderColor: '#3b82f6', backgroundColor: '#e2e8f0' },
-  editAvatarBtn: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#d97706', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#ffffff', elevation: 3 },
+  avatar: { width: 120, height: 120, borderRadius: 60, borderWidth: 3, borderColor: '#3b82f6', backgroundColor: '#e5e7eb' },
+  editAvatarBtn: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#d97706', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#ffffff', elevation: 4 },
   editAvatarIcon: { fontSize: 18, color: '#ffffff' },
-  formContainer: { width: '100%', backgroundColor: '#ffffff', padding: 20, borderRadius: 16, elevation: 2, borderWidth: 1, borderColor: '#f1f5f9' },
-  label: { fontSize: 14, fontWeight: 'bold', color: '#475569', marginBottom: 8, textAlign: 'right' },
+  
+  formContainer: { width: '100%', backgroundColor: '#ffffff', padding: 25, borderRadius: 20, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
+  label: { fontSize: 15, fontWeight: 'bold', color: '#374151', marginBottom: 8, textAlign: 'right' },
   phoneLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  editPhoneText: { color: '#3b82f6', fontSize: 13, fontWeight: 'bold' },
-  input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 14, fontSize: 16, color: '#0f172a', marginBottom: 20, fontWeight: 'bold' },
-  disabledInput: { backgroundColor: '#e2e8f0', color: '#64748b' },
-  saveBtn: { backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 12, alignItems: 'center', elevation: 3, marginTop: 10 },
-  saveBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  editPhoneText: { color: '#3b82f6', fontSize: 14, fontWeight: 'bold' },
+  
+  input: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, padding: 15, fontSize: 16, color: '#111827', marginBottom: 20, fontWeight: '600' },
+  disabledInput: { backgroundColor: '#e5e7eb', color: '#6b7280', borderColor: '#e5e7eb' },
+  
+  saveBtn: { backgroundColor: '#2563eb', paddingVertical: 16, borderRadius: 14, alignItems: 'center', elevation: 4, marginTop: 10, shadowColor: '#2563eb', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6 },
+  saveBtnText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
+  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 25, borderRadius: 20, elevation: 5 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginBottom: 10, textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
-  modalInput: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 15, fontSize: 18, fontWeight: 'bold', color: '#0f172a', marginBottom: 20, letterSpacing: 1 },
-  modalButtonsRow: { flexDirection: 'row-reverse', gap: 10 },
-  modalPrimaryBtn: { flex: 2, backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  modalBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
-  modalCancelBtn: { flex: 1, backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  modalCancelText: { color: '#ef4444', fontWeight: 'bold', fontSize: 15 }
+  modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 25, borderRadius: 24, elevation: 5 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#111827', marginBottom: 10, textAlign: 'center' },
+  modalSubtitle: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 20, lineHeight: 22 },
+  modalInput: { backgroundColor: '#f9fafb', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 14, padding: 15, fontSize: 18, fontWeight: 'bold', color: '#111827', marginBottom: 20, letterSpacing: 1 },
+  modalButtonsRow: { flexDirection: 'row-reverse', gap: 12 },
+  modalPrimaryBtn: { flex: 2, backgroundColor: '#2563eb', paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
+  modalBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
+  modalCancelBtn: { flex: 1, backgroundColor: '#fee2e2', paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
+  modalCancelText: { color: '#dc2626', fontWeight: 'bold', fontSize: 16 }
 });

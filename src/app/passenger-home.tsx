@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons'; // 👈 استدعاء الأيقونات
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -10,7 +10,6 @@ import { db } from '../firebase';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-// 👈 مكون الكارت الذكي للراكب بشريط التحميل المتزامن
 const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffer: (offer: any) => void }) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
@@ -18,7 +17,7 @@ const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffe
     const now = new Date().getTime();
     const offerTime = offer.offerTimestamp || now;
     const elapsed = now - offerTime;
-    const remaining = Math.max(30000 - elapsed, 0); // 30 ثانية مع خصم الوقت اللي فات
+    const remaining = Math.max(30000 - elapsed, 0);
 
     progressAnim.setValue((remaining / 30000) * 100);
     Animated.timing(progressAnim, {
@@ -66,7 +65,6 @@ const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffe
         <Text style={styles.offerVehicleIcon}>{vIcon}</Text>
       </View>
       
-      {/* 👈 عرض المميزات للراكب لو الكابتن اختارها */}
       {offer.perks && offer.perks.length > 0 && (
         <View style={styles.offerPerksContainer}>
           {offer.perks.map((perk: string, idx: number) => (
@@ -77,7 +75,6 @@ const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffe
         </View>
       )}
       
-      {/* 👈 شريط التحميل للراكب */}
       <View style={{ width: '100%', height: 4, backgroundColor: '#e2e8f0' }}>
         <Animated.View style={{ height: '100%', backgroundColor: '#3b82f6', width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />
       </View>
@@ -118,7 +115,6 @@ export default function PassengerHome() {
   const [requestedTuktukType, setRequestedTuktukType] = useState('كيوت 3 راكب');
   const [passengersCount, setPassengersCount] = useState('1');
   
-  // دالة فتح الخريطة لاختيار الوجهة
   const openMapForDestination = () => {
     Alert.alert('فتح الخريطة 🗺️', 'سيتم فتح شاشة الخريطة لاختيار الوجهة بدقة قريباً.');
   };
@@ -151,7 +147,37 @@ export default function PassengerHome() {
     } catch (error) {
       console.log('Error vibrating:', error);
     }
+    
   };
+
+  useEffect(() => {
+    let unsubscribe: any;
+    const monitorSession = async () => {
+      const userId = await AsyncStorage.getItem('currentPassengerId');
+      const localSessionId = await AsyncStorage.getItem('currentSessionId');
+      
+      if (!userId || !localSessionId) return;
+
+      unsubscribe = onSnapshot(doc(db, 'passengers', userId), async (docSnap) => {
+        if (docSnap.exists()) {
+          const dbSessionId = docSnap.data().sessionId;
+          if (dbSessionId && dbSessionId !== localSessionId) {
+            Alert.alert('تنبيه ⚠️', 'لقد تم فتح الحساب من جهاز آخر، سيتم تسجيل الخروج الآن.', [
+              { 
+                text: 'حسناً', 
+                onPress: async () => {
+                  await AsyncStorage.clear(); 
+                  router.replace('/passenger-login');
+                } 
+              }
+            ]);
+          }
+        }
+      });
+    };
+    monitorSession();
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, []);
 
   useEffect(() => {
     Animated.sequence([
@@ -723,6 +749,7 @@ export default function PassengerHome() {
         notes: notes.trim(),
         requestedVehicleType,
         requestedTuktukType: requestedVehicleType === 'tuktuk_alt' ? requestedTuktukType : null,
+        
         passengersCount: requestedVehicleType === 'tuktuk_alt' ? passengersCount : null,
         paymentMethod: paymentMethod,
         offers: [],
@@ -1025,10 +1052,8 @@ export default function PassengerHome() {
             </TouchableOpacity>
           </View>
 
-          {/* 👈 الوجهة المطلوبة بالتصميم الجديد (Dark Mode) */}
           <Text style={styles.label}>الوجهة المطلوبة</Text>
           <View style={styles.modernDestContainer}>
-            {/* الجزء الأيمن: أيقونة البحث وكلمة "إلى" ومكان الكتابة */}
             <View style={styles.modernDestRight}>
               <Ionicons name="search" size={22} color="#9ca3af" />
               <Text style={styles.modernDestToText}>إلى</Text>
@@ -1041,7 +1066,6 @@ export default function PassengerHome() {
               />
             </View>
 
-            {/* الجزء الأيسر: أيقونة الخريطة */}
             <TouchableOpacity style={styles.modernDestMapBtn} onPress={openMapForDestination}>
               <Ionicons name="map" size={22} color="#60a5fa" />
             </TouchableOpacity>
@@ -1383,6 +1407,23 @@ export default function PassengerHome() {
                 <Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text>
               </TouchableOpacity>
             </ScrollView>
+            <TouchableOpacity 
+  style={{ 
+    backgroundColor: '#10b981', 
+    paddingVertical: 14, 
+    paddingHorizontal: 20,
+    borderRadius: 12, 
+    marginBottom: 15,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2
+  }} 
+  onPress={() => router.push('/live-support')}
+>
+  <Text style={{ fontSize: 16, color: '#ffffff', fontWeight: 'bold', marginRight: 10 }}>محادثة الدعم الفني (مباشر)</Text>
+  <Text style={{ fontSize: 18 }}>💬</Text>
+</TouchableOpacity>
             <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}>
               <Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text>
             </TouchableOpacity>
@@ -1431,7 +1472,6 @@ const styles = StyleSheet.create({
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },
   myLocationBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
   
-  // 👈 إضافة ستايلات التصميم الجديد للوجهة هنا
   modernDestContainer: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
