@@ -135,7 +135,7 @@ export default function CaptainEditVehicle() {
       }
 
       await updateDoc(doc(db, 'captains', captainId), updateData);
-      Alert.alert('تم ✅', 'تم تحديث بيانات بساطك بنجاح.', [{ text: 'حسناً', onPress: () => router.back() }]);
+      Alert.alert('تم ✅', 'تم تحديث بيانات براقك بنجاح.', [{ text: 'حسناً', onPress: () => router.back() }]);
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الحفظ.'); } finally { setIsSaving(false); }
   };
 
@@ -146,7 +146,7 @@ export default function CaptainEditVehicle() {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backBtnText}>رجوع ⬅️</Text></TouchableOpacity>
-          <Text style={styles.headerTitle}>تعديل بساطك 🪄</Text>
+          <Text style={styles.headerTitle}>تعديل براقك 🪄</Text>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" removeClippedSubviews={Platform.OS === 'android'}>

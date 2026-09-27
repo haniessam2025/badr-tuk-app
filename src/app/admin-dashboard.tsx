@@ -1,10 +1,17 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 
 export default function AdminDashboard() {
+  // --- متغيرات الدعم الفني المباشر ---
+  const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
+  const [supportTickets, setSupportTickets] = useState<any[]>([]);
+  const [activeSupportChat, setActiveSupportChat] = useState<any>(null);
+  const [supportMessages, setSupportMessages] = useState<any[]>([]);
+  const [adminReplyText, setAdminReplyText] = useState('');
+  
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'vehicles'>('pending');
@@ -13,7 +20,7 @@ export default function AdminDashboard() {
   const [passengers, setPassengers] = useState<any[]>([]);
   const [updateRequests, setUpdateRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // 👈 حالة التحديث الموفرة للباقة
+  const [refreshing, setRefreshing] = useState(false);
 
   const [searchCaptain, setSearchCaptain] = useState('');
   const [searchPassenger, setSearchPassenger] = useState('');
@@ -40,35 +47,80 @@ export default function AdminDashboard() {
 
   const [complaintsCount, setComplaintsCount] = useState(0);
 
-  // 👈 دالة جلب البيانات الموفرة للباقة (مرة واحدة بدلاً من المراقبة المستمرة)
+  // --- دوال الدعم الفني المباشر (Firebase) ---
+  
+  // جلب التذاكر المفتوحة فقط
+  useEffect(() => {
+    const q = query(collection(db, 'support_chats'), where('status', '==', 'open'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      tickets.sort((a, b) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));
+      setSupportTickets(tickets);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // جلب رسايل المحادثة اللي الأدمن بيفتحها
+  useEffect(() => {
+    if (!activeSupportChat) return;
+    const q = query(collection(db, 'support_chats', activeSupportChat.id, 'messages'), orderBy('timestamp', 'desc'), limit(30));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSupportMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [activeSupportChat]);
+
+  const openSupportChat = async (ticket: any) => {
+    setActiveSupportChat(ticket);
+    try { await updateDoc(doc(db, 'support_chats', ticket.id), { unreadAdminCount: 0 }); } catch (e) {}
+  };
+
+  const sendAdminReply = async () => {
+    if (!adminReplyText.trim() || !activeSupportChat) return;
+    const text = adminReplyText.trim();
+    setAdminReplyText('');
+    try {
+      await addDoc(collection(db, 'support_chats', activeSupportChat.id, 'messages'), { text, sender: 'admin', timestamp: serverTimestamp() });
+      await updateDoc(doc(db, 'support_chats', activeSupportChat.id), {
+        lastMessage: text,
+        lastMessageTime: serverTimestamp(),
+        unreadUserCount: increment(1)
+      });
+    } catch (error) {}
+  };
+
+  const closeSupportTicket = async () => {
+    if (!activeSupportChat) return;
+    try {
+      await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { status: 'closed' });
+      setActiveSupportChat(null);
+    } catch (error) {}
+  };
+
+  // --- باقي دوال لوحة التحكم ---
+
   const fetchDashboardData = async () => {
     try {
-      // 1. جلب الكباتن
       const capSnap = await getDocs(query(collection(db, 'captains')));
       setCaptains(capSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 2. جلب الركاب
       const passSnap = await getDocs(query(collection(db, 'passengers')));
       setPassengers(passSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 3. جلب طلبات التعديل المعلقة فقط (لتوفير القراءات)
       const updSnap = await getDocs(query(collection(db, 'update_requests'), where('status', '==', 'pending')));
       const pendingUpdates = updSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setUpdateRequests(pendingUpdates);
 
-      // 4. جلب الشكاوى والمفقودات للعداد (أحدث 100 فقط لتوفير القراءات)
       const compSnap = await getDocs(query(collection(db, 'support_tickets'), orderBy('timestamp', 'desc'), limit(100)));
       let unreadCount = 0;
       compSnap.docs.forEach(doc => {
         const data = doc.data();
-        // التوافق مع نظام القراءة الجديد والقديم
         if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
           unreadCount++;
         }
       });
       setComplaintsCount(unreadCount);
-
     } catch (error) {
       console.log('Error fetching dashboard data:', error);
     } finally {
@@ -77,7 +129,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 👈 استخدام useFocusEffect لتحديث البيانات تلقائياً عند العودة من أي شاشة أخرى (زي شاشة الشكاوى) عشان العداد يختفي
   useFocusEffect(
     useCallback(() => {
       fetchDashboardData();
@@ -132,7 +183,7 @@ export default function AdminDashboard() {
     const collectionName = type === 'captain' ? 'captains' : 'passengers';
     try { 
       await updateDoc(doc(db, collectionName, id), { status: 'active' }); 
-      fetchDashboardData(); // تحديث محلي سريع
+      fetchDashboardData(); 
       Alert.alert('تم ✅', 'تم تفعيل الحساب بنجاح.'); 
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء التفعيل.'); }
   };
@@ -507,7 +558,21 @@ export default function AdminDashboard() {
         </View>
       )}
 
-      {/* 👈 تحديث زرار الشكاوى بالمسمى الجديد وظبط العداد */}
+      {/* 👈 زر صندوق الدعم الفني المباشر الجديد */}
+      <TouchableOpacity 
+        style={styles.fullWidthSupportBtn} 
+        onPress={() => setIsSupportModalVisible(true)}
+      >
+        <Text style={styles.fullWidthSupportBtnText}>🎧 صندوق الدعم الفني المباشر</Text>
+        {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0) > 0 && (
+          <View style={styles.supportBadge}>
+            <Text style={styles.supportBadgeText}>
+              {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0)}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.fullWidthComplaintsBtn} onPress={() => router.push('/admin-complaints')}>
         <Text style={styles.fullWidthComplaintsBtnText}>الشكاوى والمقترحات والمفقودات 📬</Text>
         {complaintsCount > 0 && (
@@ -516,6 +581,77 @@ export default function AdminDashboard() {
           </View>
         )}
       </TouchableOpacity>
+
+      {/* مودال صندوق الدعم الفني (الشات المباشر) */}
+      <Modal visible={isSupportModalVisible} animationType="slide" onRequestClose={() => setIsSupportModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: '#0f172a' }}>
+          
+          <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#1e293b', paddingTop: 50, borderBottomWidth: 1, borderColor: '#334155' }}>
+            <Text style={{ color: '#eab308', fontSize: 18, fontWeight: 'bold' }}>
+              {activeSupportChat ? `محادثة: ${activeSupportChat.userName}` : 'صندوق الدعم الفني'}
+            </Text>
+            <TouchableOpacity onPress={() => activeSupportChat ? setActiveSupportChat(null) : setIsSupportModalVisible(false)} style={{ backgroundColor: '#334155', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+              <Text style={{ color: '#ef4444', fontWeight: 'bold' }}>{activeSupportChat ? 'رجوع' : 'إغلاق ✖'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {!activeSupportChat ? (
+            <FlatList
+              data={supportTickets}
+              keyExtractor={item => item.id}
+              contentContainerStyle={{ padding: 15 }}
+              ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: '#94a3b8', fontSize: 16 }}>لا توجد محادثات مفتوحة حالياً ✅</Text>}
+              renderItem={({ item }) => (
+                <TouchableOpacity onPress={() => openSupportChat(item)} style={{ backgroundColor: '#1e293b', padding: 15, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#334155', flexDirection: 'row-reverse', alignItems: 'center' }}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}>
+                      <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#f8fafc' }}>{item.userName} ({item.userType === 'captain' ? 'كابتن' : 'راكب'})</Text>
+                      {(item.unreadAdminCount || 0) > 0 && (
+                        <View style={{ backgroundColor: '#ef4444', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, justifyContent: 'center' }}>
+                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>جديد</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={{ color: '#94a3b8', marginTop: 4, textAlign: 'right' }} numberOfLines={1}>{item.lastMessage}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          ) : (
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+              <TouchableOpacity onPress={closeSupportTicket} style={{ backgroundColor: '#fee2e2', padding: 12, alignItems: 'center', margin: 10, borderRadius: 10 }}>
+                <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 15 }}>إنهاء المحادثة وإغلاق التذكرة 🔒</Text>
+              </TouchableOpacity>
+              
+              <FlatList
+                inverted
+                data={supportMessages}
+                keyExtractor={item => item.id}
+                contentContainerStyle={{ padding: 15 }}
+                renderItem={({ item }) => (
+                  <View style={{ alignSelf: item.sender === 'admin' ? 'flex-end' : 'flex-start', backgroundColor: item.sender === 'admin' ? '#3b82f6' : '#334155', padding: 12, borderRadius: 12, marginBottom: 10, maxWidth: '80%' }}>
+                    <Text style={{ color: '#fff', fontSize: 15 }}>{item.text}</Text>
+                  </View>
+                )}
+              />
+
+              <View style={{ flexDirection: 'row-reverse', padding: 10, backgroundColor: '#1e293b', borderTopWidth: 1, borderColor: '#334155' }}>
+                <TextInput
+                  style={{ flex: 1, backgroundColor: '#0f172a', color: '#fff', borderRadius: 20, paddingHorizontal: 15, minHeight: 45, textAlign: 'right', borderWidth: 1, borderColor: '#334155' }}
+                  placeholder="اكتب ردك..."
+                  placeholderTextColor="#64748b"
+                  value={adminReplyText}
+                  onChangeText={setAdminReplyText}
+                  multiline
+                />
+                <TouchableOpacity onPress={sendAdminReply} style={{ backgroundColor: '#10b981', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                  <Text style={{ color: '#fff', transform: [{ rotateY: '180deg' }], fontSize: 18 }}>➤</Text>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          )}
+        </View>
+      </Modal>
 
       {/* مودال الملف الشخصي */}
       <Modal visible={profileModalVisible} transparent={true} animationType="slide">
@@ -672,24 +808,16 @@ const styles = StyleSheet.create({
   fullWidthHistoryBtn: { backgroundColor: '#2563eb', paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20, elevation: 3 },
   fullWidthHistoryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
 
+  // 👈 تنسيقات زر الدعم الفني الجديد
+  fullWidthSupportBtn: { position: 'relative', backgroundColor: '#8b5cf6', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 3 },
+  fullWidthSupportBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
+  supportBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 10, elevation: 4 },
+  supportBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
+
   fullWidthComplaintsBtn: { position: 'relative', backgroundColor: '#be123c', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 15, elevation: 3 },
   fullWidthComplaintsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
   
-  complaintBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#ef4444',
-    minWidth: 26,
-    height: 26,
-    borderRadius: 13,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#0f172a',
-    zIndex: 10,
-    elevation: 4
-  },
+  complaintBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 10, elevation: 4 },
   complaintBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
 
   tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },

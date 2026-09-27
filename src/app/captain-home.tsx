@@ -1,10 +1,11 @@
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ScreenCapture from 'expo-screen-capture';
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { db } from '../firebase';
 
@@ -32,20 +33,21 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 
 const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSentOffer, captainLocation, onImagePress, onWithdrawOffer }: { item: any, onSendOffer: (item: any, price: string) => void, onEditPrice: (item: any) => void, onDismiss: (item: any) => void, hasSentOffer: boolean, captainLocation: any, onImagePress: (url: string) => void, onWithdrawOffer: (id: string) => void }) => {
   const translateX = useRef(new Animated.Value(0)).current;
+  const progressAnim = useRef(new Animated.Value(100)).current; 
   const [activePrice, setActivePrice] = useState(item.price);
-  const progressAnim = useRef(new Animated.Value(100)).current; // 👈 شريط التحميل
+  const [isExpanded, setIsExpanded] = useState(false);
+  
   const basePrice = parseInt(item.price) || 0;
-  const passRating = item.passengerRating || 5;
-
+  console.log(`بيانات الوجهة لـ ${item.name}:`, item.liveCoords);
   useEffect(() => { setActivePrice(item.price); }, [item.price]);
 
-  // 👈 منطق شريط التحميل (30 ثانية)
   useEffect(() => {
     if (hasSentOffer) {
+      setIsExpanded(true);
       progressAnim.setValue(100);
       Animated.timing(progressAnim, {
         toValue: 0,
-        duration: 30000, // 30 ثانية بالظبط
+        duration: 30000, 
         useNativeDriver: false,
       }).start(({ finished }) => {
         if (finished) onWithdrawOffer(item.id);
@@ -56,13 +58,30 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
     }
   }, [hasSentOffer]);
 
-  const distanceMeters = (item.pickupCoords && captainLocation)
+  // 1. المسافة بين الكابتن والراكب (تحت الصورة)
+  const capToPickMeters = (item.pickupCoords && captainLocation)
     ? calculateDistance(captainLocation.latitude, captainLocation.longitude, item.pickupCoords.latitude, item.pickupCoords.longitude)
     : null;
 
-  const distanceDisplay = distanceMeters !== null
-    ? (distanceMeters < 1000 ? `${Math.round(distanceMeters)} متر 📍` : `${(distanceMeters / 1000).toFixed(1)} كم 📍`)
-    : null;
+  const capToPickDisplay = capToPickMeters !== null
+    ? (capToPickMeters < 1000 ? `${Math.round(capToPickMeters)} م` : `${(capToPickMeters / 1000).toFixed(1)} كم`)
+    : 'جارِ الحساب';
+
+// 2. المسافة الكلية للرحلة (من الركوب للوجهة)
+  let tripDistanceDisplay = item.distance || item.tripDistance; 
+  
+  // بنحسب المسافة بين pickupCoords (الركوب) و liveCoords (الوصول)
+  if (!tripDistanceDisplay && item.pickupCoords && item.liveCoords) {
+    const tripMeters = calculateDistance(
+      item.pickupCoords.latitude, 
+      item.pickupCoords.longitude, 
+      item.liveCoords.latitude, 
+      item.liveCoords.longitude
+    );
+    tripDistanceDisplay = tripMeters < 1000 ? `${Math.round(tripMeters)} م` : `${(tripMeters / 1000).toFixed(1)} كم`;
+  } else if (!tripDistanceDisplay) {
+    tripDistanceDisplay = '---'; 
+  }
 
   const panResponder = useRef(
     PanResponder.create({
@@ -80,113 +99,98 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.hiddenBackground}><Text style={styles.hiddenText}>إخفاء الطلب</Text></View>
-      <Animated.View style={[styles.requestCard, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
-        <View style={styles.topSplitContainer}>
-          <View style={styles.passengerRightSide}>
-            <TouchableOpacity onPress={() => onImagePress(getSafeAvatar(item.avatar))}>
-              <Image source={{ uri: getSafeAvatar(item.avatar) }} style={styles.passengerAvatar} />
-            </TouchableOpacity>
-            <Text style={styles.passengerName} numberOfLines={1}>{item.name}</Text>
-            <View style={{ flexDirection: 'row-reverse', marginTop: 2, justifyContent: 'center' }}>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <Text key={star} style={{ fontSize: 11, color: star <= Math.round(passRating) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
-              ))}
-            </View>
-            {distanceDisplay && (
-              <View style={styles.distanceBadgeCard}>
-                <Text style={styles.distanceBadgeTextCard}>{distanceDisplay}</Text>
-              </View>
-            )}
-          </View>
-          <View style={[styles.routeLeftSide, destinationsList.length === 1 && { justifyContent: 'space-evenly' }]}>
-            {item.requestedVehicleType === 'tuktuk_alt' && item.passengersCount && (
-              <View style={styles.passengerCountBadge}>
-                <Text style={styles.passengerCountText}>👥 عدد الركاب: {item.passengersCount}</Text>
-              </View>
-            )}
-            
-            {/* 👈 الانطلاق: خط عملاق يتكيف مع المساحة */}
-            <View style={styles.routeItemBox}>
-              <Text style={[styles.routeIconText, destinationsList.length === 1 && { fontSize: 18, marginTop: 5 }]}>🟢</Text>
-              <Text 
-                style={[styles.routeMainText, destinationsList.length === 1 && { fontSize: 24, lineHeight: 34 }]} 
-                numberOfLines={destinationsList.length > 1 ? 2 : 3}
-                adjustsFontSizeToFit={true}
-                minimumFontScale={0.7}
-              >
-                {item.pickupLocation}
-              </Text>
-            </View>
-            
-            {/* 👈 الوجهات: خط عملاق للوجهة الواحدة، ويصغر لو أكتر من وجهة */}
-            {destinationsList.map((d: string, i: number) => (
-              <View key={i} style={styles.routeItemBox}>
-                <Text style={[styles.routeIconText, destinationsList.length === 1 && { fontSize: 18, marginTop: 5 }]}>🔴</Text>
-                <Text 
-                  style={[styles.routeDestText, destinationsList.length === 1 && { fontSize: 22, lineHeight: 32 }]} 
-                  numberOfLines={destinationsList.length > 1 ? 1 : 3}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.7}
-                >
-                  {destinationsList.length > 1 ? `وجهة ${i + 1}: ${d}` : d}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
+      <Animated.View style={[styles.newRequestCard, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
         
-        {item.notes && item.notes.trim() !== '' ? (<View style={styles.notesContainer}><Text style={styles.notesText}>الملاحظات: {item.notes}</Text></View>) : null}
-        
-        {/* 👈 عرض السعر وبجانبه بادج طريقة الدفع البارز */}
-        <View style={styles.priceAndPaymentRow}>
-          <Text style={[styles.largePriceTag, {marginBottom: 0}]}>{activePrice} جنيه</Text>
-          <View style={[styles.paymentBadgeAlert, item.paymentMethod === 'انستاباي' ? {backgroundColor: '#4f46e5', borderColor: '#3730a3'} : item.paymentMethod === 'محفظة' ? {backgroundColor: '#ea580c', borderColor: '#c2410c'} : {backgroundColor: '#10b981', borderColor: '#059669'}]}>
-            <Text style={styles.paymentBadgeTextAlert}>💳 دفع: {item.paymentMethod || 'كاش'}</Text>
-          </View>
-        </View>
-
-        {!hasSentOffer && basePrice > 0 && (
-          <View style={styles.compactSuggestionsRow}>
-            {[1.2, 1.4, 1.6].map((multiplier, index) => {
-              const suggestedPrice = Math.round(basePrice * multiplier);
-              const isSelected = activePrice === suggestedPrice.toString();
-              return (
-                <TouchableOpacity key={index} style={[styles.compactSuggestionBtn, isSelected && styles.suggestionBtnActive]} onPress={() => setActivePrice(suggestedPrice.toString())}>
-                  <Text style={[styles.suggestionText, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-        {hasSentOffer ? (
-          <View style={[styles.waitingOfferContainer, { padding: 10 }]}>
-            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <Text style={styles.waitingOfferText}>جاري انتظار الراكب...</Text>
-              <TouchableOpacity onPress={() => onWithdrawOffer(item.id)} style={{ backgroundColor: '#ef4444', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>سحب العرض ✖</Text>
+        <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} activeOpacity={0.8}>
+          <View style={styles.newCardRow}>
+            
+            <View style={styles.newUserCol}>
+              <TouchableOpacity onPress={() => onImagePress(getSafeAvatar(item.avatar))}>
+                <Image source={{ uri: getSafeAvatar(item.avatar) }} style={styles.newAvatar} />
               </TouchableOpacity>
+              <Text style={styles.newUserName} numberOfLines={1}>{item.name}</Text>
+              
+              <View style={styles.newDistanceBadge}>
+                <Text style={styles.newDistanceBadgeText}>📍 {capToPickDisplay}</Text>
+              </View>
             </View>
-            {/* 👈 شريط التحميل الرفيع للكابتن */}
-            <View style={{ width: '100%', height: 4, backgroundColor: '#fde047', borderRadius: 2, overflow: 'hidden' }}>
-              <Animated.View style={{ height: '100%', backgroundColor: '#d97706', width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />
+
+            <View style={styles.newAddressCol}>
+              <Text style={styles.newPickupText} numberOfLines={2}>{item.pickupLocation}</Text>
+              <Text style={styles.newDropoffText} numberOfLines={2}>{destinationsList.join(' - ')}</Text>
+            </View>
+
+            <View style={styles.newPriceCol}>
+              <Text style={styles.newTripDistanceText}>{tripDistanceDisplay} ~</Text>
+              <Text style={styles.newPriceText}>{activePrice} EGP</Text>
+            </View>
+
+            <View style={styles.newActionDotsCol}>
+              <Text style={styles.newArrowIcon}>{isExpanded ? '▴' : '▾'}</Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.requestActionsRow}>
-            <TouchableOpacity style={styles.editPriceBtn} onPress={() => onEditPrice(item)}>
-              <Text style={styles.editPriceBtnText}>تعديل السعر</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.acceptBtn} onPress={() => onSendOffer(item, activePrice)}>
-              <Text style={styles.acceptBtnText}>قبول</Text>
-            </TouchableOpacity>
+        </TouchableOpacity>
+
+        {isExpanded && (
+          <View style={styles.expandedSection}>
+            <View style={styles.newBadgesRow}>
+               <View style={[styles.newSmallBadge, {backgroundColor: item.paymentMethod === 'انستاباي' ? '#e0e7ff' : item.paymentMethod === 'محفظة' ? '#ffedd5' : '#dcfce7'}]}>
+                 <Text style={[styles.newSmallBadgeText, {color: item.paymentMethod === 'انستاباي' ? '#3730a3' : item.paymentMethod === 'محفظة' ? '#9a3412' : '#166534'}]}>
+                   💳 {item.paymentMethod || 'كاش'}
+                 </Text>
+               </View>
+               {item.passengersCount && (
+                 <View style={[styles.newSmallBadge, {backgroundColor: '#fef3c7', marginRight: 5}]}>
+                   <Text style={[styles.newSmallBadgeText, {color: '#92400e'}]}>👥 {item.passengersCount}</Text>
+                 </View>
+               )}
+            </View>
+
+            {item.notes && item.notes.trim() !== '' ? (<View style={styles.newNotesContainer}><Text style={styles.newNotesText}>ملاحظة: {item.notes}</Text></View>) : null}
+
+            {!hasSentOffer && basePrice > 0 && (
+              <View style={styles.newSuggestionsRow}>
+                {[1.2, 1.4, 1.6].map((multiplier, index) => {
+                  const suggestedPrice = Math.round(basePrice * multiplier);
+                  const isSelected = activePrice === suggestedPrice.toString();
+                  return (
+                    <TouchableOpacity key={index} style={[styles.newSuggestBtn, isSelected && styles.newSuggestBtnActive]} onPress={() => setActivePrice(suggestedPrice.toString())}>
+                      <Text style={[styles.newSuggestText, isSelected && styles.newSuggestTextActive]}>{suggestedPrice}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            {hasSentOffer ? (
+              <View style={styles.newWaitingContainer}>
+                <View style={styles.newWaitingHeader}>
+                  <Text style={styles.newWaitingText}>في انتظار الراكب...</Text>
+                  <TouchableOpacity onPress={() => onWithdrawOffer(item.id)} style={styles.newWithdrawBtn}>
+                    <Text style={styles.newWithdrawBtnText}>إلغاء ✖</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.newProgressBarBg}>
+                  <Animated.View style={[styles.newProgressBarFill, { width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }]} />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.newActionsRow}>
+                <TouchableOpacity style={styles.newEditBtn} onPress={() => onEditPrice(item)}>
+                  <Text style={styles.newEditBtnText}>تعديل السعر</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.newAcceptBtn} onPress={() => onSendOffer(item, activePrice)}>
+                  <Text style={styles.newAcceptBtnText}>قبول الرحلة</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
       </Animated.View>
     </View>
   );
 };
-
-const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestination: boolean }) => {
+  const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestination: boolean }) => {
   const lightningAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(Animated.sequence([
@@ -209,6 +213,17 @@ const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestinat
 
 export default function CaptainHome() {
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    
+    // هنا المفروض كود تحديث الطلبات من قاعدة البيانات
+    // حالياً هنعمل محاكاة للريفرش لمدة ثانية عشان ترتب القايمة تاني
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 1000);
+  }, []);
   const [isOnline, setIsOnline] = useState(false);
   const toggleAnim = useRef(new Animated.Value(0)).current;
   const [allRequests, setAllRequests] = useState<any[]>([]);
@@ -230,7 +245,7 @@ export default function CaptainHome() {
   const prevMsgIdRef = useRef<string | null>(null);
   const toastTimer = useRef<any>(null);
   const latestMsgTimer = useRef<any>(null);
-  const isEndingRide = useRef(false); // 👈 مفتاح أمان لمنع رسالة الإلغاء الوهمية
+  const isEndingRide = useRef(false);
   const chatPulseAnim = useRef(new Animated.Value(0)).current;
   const [adminMessage, setAdminMessage] = useState<any>(null);
   const [isAdminMsgVisible, setIsAdminMsgVisible] = useState(false);
@@ -246,48 +261,20 @@ export default function CaptainHome() {
   
   const [enlargedAvatar, setEnlargedAvatar] = useState<string | null>(null);
 
-  // دالة فتح الصورة ومنع السكرين شوت
-  const handleImagePress = async (url: string) => {
+  // دالة فتح الصورة (بدون مكتبة الاسكرين شوت للعمل على Expo Go)
+  // دالة فتح الصورة
+  const handleImagePress = (url: string) => {
     setEnlargedAvatar(url);
-    try {
-      if (ScreenCapture && ScreenCapture.preventScreenCaptureAsync) {
-        await ScreenCapture.preventScreenCaptureAsync();
-      }
-    } catch (error) {
-      console.log("Screen capture prevent error:", error);
-    }
   };
 
-  // دالة إغلاق الصورة والسماح بالسكرين شوت مرة تانية
-  const closeEnlargedImage = async () => {
-    setEnlargedAvatar(null);
-    try {
-      if (ScreenCapture && ScreenCapture.allowScreenCaptureAsync) {
-        await ScreenCapture.allowScreenCaptureAsync();
-      }
-    } catch (error) {
-      console.log("Screen capture allow error:", error);
-    }
-  };
-
+  // حماية السكرين شوت
   useEffect(() => {
     if (enlargedAvatar) {
-      if (ScreenCapture && ScreenCapture.preventScreenCaptureAsync) {
-        ScreenCapture.preventScreenCaptureAsync().catch(() => {});
-      }
+      ScreenCapture.preventScreenCaptureAsync();
     } else {
-      if (ScreenCapture && ScreenCapture.allowScreenCaptureAsync) {
-        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
-      }
+      ScreenCapture.allowScreenCaptureAsync();
     }
-    
-    return () => {
-      if (ScreenCapture && ScreenCapture.allowScreenCaptureAsync) {
-        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
-      }
-    };
-  }, [enlargedAvatar]);
-
+  }, [enlargedAvatar]); 
   const [captainProfile, setCaptainProfile] = useState({ id: '', name: '...', phone: '', vehicle: 'توكتوك', vehicleCategory: 'tuktuk_alt', tuktukAltType: '', avatar: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', walletBalance: 0, averageRating: 5, ratingCount: 0 });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const sidebarAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
@@ -318,6 +305,7 @@ export default function CaptainHome() {
       setPlacesSuggestions([]);
     }
   };
+  
 
   const handleSelectPlace = (placeName: string) => {
     setDestinationFilterText(placeName);
@@ -410,7 +398,6 @@ export default function CaptainHome() {
     try {
       let captainId = await AsyncStorage.getItem('currentCaptainId');
       
-      // 👈 لو ملقاش الـ ID مباشر، هيدور عليه جوه بيانات البروفايل المتسجلة
       if (!captainId) {
         const profileStr = await AsyncStorage.getItem('captain_profile');
         if (profileStr) {
@@ -420,10 +407,8 @@ export default function CaptainHome() {
       }
 
       if (captainId) {
-        // 👈 حفظ الـ ID لو كان مفقود عشان الدخول الجاي
         await AsyncStorage.setItem('currentCaptainId', captainId);
 
-        // تم نقل جلب التقييمات خارج الـ onSnapshot لتتم مرة واحدة فقط وتوفير القراءات
         const ratingQ = query(collection(db, 'ratings'), where('captainId', '==', captainId), where('type', '==', 'passenger_rating_captain'));
         const ratingSnap = await getDocs(ratingQ);
         let sum = 0;
@@ -505,7 +490,6 @@ export default function CaptainHome() {
 
   useEffect(() => {
     if (!isOnline) { setAllRequests([]); return; }
-    // 👈 تحديد القراءة لأحدث 30 طلب معلق فقط بدلاً من قراءة الكوليكشن بالكامل
     const q = query(collection(db, 'rides'), where('status', '==', 'pending'), limit(30));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const pendingRequests: any[] = [];
@@ -541,7 +525,6 @@ export default function CaptainHome() {
 
   useEffect(() => {
     if (!captainProfile.id) return;
-    // 👈 تقييد القراءة للحالات النشطة فقط بدلاً من جميع رحلات الكابتن السابقة (توفير عملاق للقراءات)
     const q = query(
       collection(db, 'rides'), 
       where('captainId', '==', captainProfile.id),
@@ -557,7 +540,7 @@ export default function CaptainHome() {
             if (prev && !isEndingRide.current) {
               Alert.alert("تنبيه", "الرحلة الحالية غير موجودة أو قام الراكب بإلغائها."); 
             }
-            isEndingRide.current = false; // 👈 إرجاع المفتاح لوضعه الطبيعي
+            isEndingRide.current = false; 
             return null; 
           });
         }
@@ -616,7 +599,6 @@ export default function CaptainHome() {
 
   const chatBackgroundColor = chatPulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#8b5cf6', '#000000'] });
 
-  // 👈 إضافة selectedPerks للإرسال
   const sendOffer = async (ride: any, offerPrice: string, selectedPerks: string[] = []) => {
     try {
       const safeAvatar = getSafeAvatar(captainProfile.avatar);
@@ -648,10 +630,8 @@ export default function CaptainHome() {
     }
   }, [activeRide]);
 
-  // 👈 تصفير المميزات عند فتح المودال
   const openPriceModal = (ride: any) => { setSelectedRideForPrice(ride); setTempCaptainPrice(ride.price ? ride.price.toString() : ''); setOfferPerks([]); setIsPriceModalVisible(true); };
 
-  // 👈 تمرير المميزات عند التأكيد
   const confirmCustomPrice = () => {
     const originalPrice = parseInt(selectedRideForPrice?.price || '0');
     const newPrice = parseInt(tempCaptainPrice);
@@ -673,7 +653,7 @@ export default function CaptainHome() {
       [
         { text: 'تراجع', style: 'cancel' },
         { text: 'نعم، استلمت الكاش وأنهيت الرحلة', onPress: async () => { 
-            isEndingRide.current = true; // 👈 تفعيل مفتاح الأمان هنا
+            isEndingRide.current = true;
             const currentRide = activeRide;
             setRideToRate(currentRide); 
             setActiveRide(null); 
@@ -711,12 +691,11 @@ export default function CaptainHome() {
   const cancelRideByCaptain = async () => {
     if (!activeRide) return;
     try {
-      isEndingRide.current = true; // 👈 تفعيل مفتاح الأمان لمنع رسالة الإلغاء الوهمية
+      isEndingRide.current = true;
       const currentRide = activeRide;
       setActiveRide(null); 
       await updateDoc(doc(db, 'rides', currentRide.id), { status: 'pending', captainId: null, offers: [] }); 
       handleDismissRequest(currentRide); 
-      // تم إلغاء نظام الحظر التلقائي بناءً على طلبك
     } catch(e) {
       Alert.alert("خطأ", "حدثت مشكلة أثناء الإلغاء");
     }
@@ -745,16 +724,24 @@ export default function CaptainHome() {
     if (!dismissedInfo) return true;
     return req.price !== dismissedInfo.price || req.pickupLocation !== dismissedInfo.pickupLocation || req.destinationLocation !== dismissedInfo.destinationLocation;
   }).sort((a, b) => {
-    // 👈 ترتيب المشاوير حسب الأقرب لموقع الكابتن الحالي
     if (captainLocation && a.pickupCoords && b.pickupCoords) {
       const distA = calculateDistance(captainLocation.latitude, captainLocation.longitude, a.pickupCoords.latitude, a.pickupCoords.longitude);
       const distB = calculateDistance(captainLocation.latitude, captainLocation.longitude, b.pickupCoords.latitude, b.pickupCoords.longitude);
-      return distA - distB; // الأقرب يظهر في الأعلى
+      return distA - distB; 
     }
-    // لو الموقع غير متاح لسبب ما، يتم الترتيب حسب الأحدث كبديل احتياطي
     return b.timestamp - a.timestamp;
   });
-
+// تصفية الطلبات: استبعاد أي راكب يبعد أكثر من 15 كيلومتر
+  const visibleRequests = displayRequests.filter((req) => {
+    if (!req.pickupCoords || !captainLocation) return false;
+    const distMeters = calculateDistance(
+      captainLocation.latitude, 
+      captainLocation.longitude, 
+      req.pickupCoords.latitude, 
+      req.pickupCoords.longitude
+    );
+    return distMeters <= 15000; // 15000 متر يعني 15 كيلو
+  });
   return (
     <View style={styles.container}>
       {toastVisible && (
@@ -853,13 +840,32 @@ export default function CaptainHome() {
               <Text style={styles.emptyText}>أنت الآن غير متصل</Text>
               <Text style={{ fontSize: 13, color: '#94a3b8', marginTop: 5 }}>فعل زر الاتصال بالأعلى لاستقبال الطلبات</Text>
             </View>
-          ) : displayRequests.length === 0 ? (
-            <EmptySearchingState hasConfirmedDestination={isDestinationFilterActive && confirmedDestinationFilter !== ''} />
-          ) : (
-            <FlatList data={displayRequests} keyExtractor={(item) => item.id} renderItem={({ item }) => <SwipeableRequestItem item={item} onSendOffer={sendOffer} onEditPrice={openPriceModal} onDismiss={handleDismissRequest} hasSentOffer={sentOffers.includes(item.id)} captainLocation={captainLocation} onImagePress={handleImagePress} onWithdrawOffer={withdrawOffer} />} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }} />
-          )}
-        </>
-      ) : (
+         ) : displayRequests.length === 0 ? (
+          <EmptySearchingState hasConfirmedDestination={isDestinationFilterActive && confirmedDestinationFilter !== ''} />
+        ) : (
+          <FlatList 
+            data={visibleRequests} 
+            keyExtractor={(item) => item.id}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#10b981']} />
+            }
+            renderItem={({ item }) => (
+              <SwipeableRequestItem 
+                item={item} 
+                onSendOffer={sendOffer} 
+                onEditPrice={openPriceModal} 
+                onDismiss={handleDismissRequest} 
+                hasSentOffer={sentOffers.includes(item.id)} 
+                captainLocation={captainLocation} 
+                onImagePress={handleImagePress} 
+                onWithdrawOffer={withdrawOffer} 
+              />
+            )} 
+            showsVerticalScrollIndicator={false} 
+            contentContainerStyle={{ paddingBottom: 20 }} 
+          />
+        )}
+      </>      ) : (
         <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
           <View style={[styles.activeRideContainer, (activeRide.status === 'passenger_on_the_way' || activeRide.status === 'in_progress') && styles.activeRidePulseContainer]}>
             {latestMessage ? (
@@ -1019,6 +1025,15 @@ export default function CaptainHome() {
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/support'); }}><Text style={styles.sidebarLinkText}>الدعم الفني</Text></TouchableOpacity>
               <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}><Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text></TouchableOpacity>
             </ScrollView>
+            {/* 👇 زر الدعم الفني المباشر الجديد 👇 */}
+<TouchableOpacity 
+  style={{ backgroundColor: '#10b981', padding: 15, marginHorizontal: 20, borderRadius: 12, alignItems: 'center', marginBottom: 5, elevation: 2 }} 
+  onPress={() => { closeSidebar(); router.push('/live-support'); }}
+>
+  <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>💬 محادثة الدعم الفني (مباشر)</Text>
+</TouchableOpacity>
+
+{/* زرار تسجيل الخروج اللي موجود عندك أصلاً */}
             <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}><Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text></TouchableOpacity>
           </Animated.View>
         </View>
@@ -1349,5 +1364,61 @@ const styles = StyleSheet.create({
   sidebarLink: { paddingVertical: 18, borderBottomWidth: 1, borderColor: '#f1f5f9' },
   sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
   sidebarLogoutBtn: { backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#fca5a5' },
-  sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' }
-});
+  sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
+  // --- تنسيقات كارت الرحلة الجديد (على طريقة التطبيقات الاحترافية) ---
+  // --- تنسيقات كارت الرحلة الجديد ---
+  // --- تنسيقات كارت الرحلة الجديد (المضغوط Compact) ---
+  // --- تنسيقات كارت الرحلة الجديد (قابل للطي - Accordion) ---
+  newRequestCard: { backgroundColor: '#ffffff', borderRadius: 12, padding: 10, borderWidth: 1, borderColor: '#e2e8f0', elevation: 1 },
+  newCardRow: { flexDirection: 'row-reverse', alignItems: 'center' },
+  
+  newUserCol: { width: 65, alignItems: 'center', marginLeft: 10 },
+  newAvatar: { width: 45, height: 45, borderRadius: 22.5, backgroundColor: '#cbd5e1', marginBottom: 4 },
+  newUserName: { fontSize: 11, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 2 },
+  newRatingRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center' },
+  newRatingText: { fontSize: 10, color: '#64748b', fontWeight: 'bold', marginRight: 2 },
+  newStarIcon: { fontSize: 10, color: '#f59e0b' },
+  newTimeText: { fontSize: 10, color: '#94a3b8', marginTop: 2 },
+  
+  newAddressCol: { flex: 1, justifyContent: 'center' },
+  newPickupText: { fontSize: 15, fontWeight: 'bold', color: '#0f172a', textAlign: 'right', marginBottom: 6 }, // الخط كبر هنا
+  newDropoffText: { fontSize: 14, color: '#475569', textAlign: 'right', marginBottom: 2 }, // والخط كبر هنا
+  
+  newPriceCol: { width: 85, alignItems: 'center', justifyContent: 'center', marginRight: 5 },
+newTripDistanceText: { fontSize: 13, color: '#64748b', fontWeight: 'bold', marginBottom: 4 },  newPriceText: { fontSize: 20, fontWeight: '900', color: '#10b981' },
+  
+  newActionDotsCol: { width: 15, alignItems: 'center', justifyContent: 'center' },
+  newArrowIcon: { fontSize: 22, color: '#94a3b8', fontWeight: 'bold' }, // سهم بدل النقط
+  
+  // -- التنسيقات الداخلية (عند الفتح) --
+  expandedSection: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#f1f5f9' },
+  
+  newBadgesRow: { flexDirection: 'row-reverse', alignSelf: 'flex-end', marginBottom: 10 },
+  newSmallBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6 },
+  newSmallBadgeText: { fontSize: 11, fontWeight: 'bold' },
+  
+  newNotesContainer: { backgroundColor: '#fef3c7', padding: 8, borderRadius: 8, marginBottom: 10 },
+  newNotesText: { fontSize: 12, color: '#d97706', fontWeight: 'bold', textAlign: 'right' },
+  
+  newSuggestionsRow: { flexDirection: 'row-reverse', justifyContent: 'center', gap: 8, marginBottom: 12 },
+  newSuggestBtn: { backgroundColor: '#f8fafc', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', minWidth: 60, alignItems: 'center' },
+  newSuggestBtnActive: { backgroundColor: '#eab308', borderColor: '#ca8a04' },
+  newSuggestText: { fontSize: 14, fontWeight: 'bold', color: '#475569' },
+  newSuggestTextActive: { color: '#ffffff' },
+  
+  newActionsRow: { flexDirection: 'row-reverse', gap: 10 },
+  newEditBtn: { flex: 1, backgroundColor: '#f1f5f9', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  newEditBtnText: { color: '#475569', fontSize: 14, fontWeight: 'bold' },
+  newAcceptBtn: { flex: 1, backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  newAcceptBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
+  
+  newWaitingContainer: { backgroundColor: '#fef3c7', padding: 12, borderRadius: 10 },
+  newWaitingHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  newWaitingText: { color: '#d97706', fontWeight: 'bold', fontSize: 13 },
+  newWithdrawBtn: { backgroundColor: '#ef4444', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 },
+  newWithdrawBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 11 },
+  newProgressBarBg: { width: '100%', height: 4, backgroundColor: '#fde047', borderRadius: 2, overflow: 'hidden' },
+  newDistanceBadge: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#f8fafc', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginTop: 4, borderWidth: 1, borderColor: '#e2e8f0' },
+  newDistanceBadgeText: { fontSize: 10, color: '#475569', fontWeight: 'bold' },
+  newProgressBarFill: { height: '100%', backgroundColor: '#d97706' }});
+  
