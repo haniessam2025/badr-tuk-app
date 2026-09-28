@@ -394,6 +394,18 @@ export default function CaptainHome() {
     return () => { if (locationSubscription) locationSubscription.remove(); };
   }, [isOnline]);
 
+  // 🔴 مرجع لتنظيف المراقبة القديمة ومنع تكرار الطرد (Memory Leak Fix) 🔴
+  const profileUnsubscribeRef = useRef<any>(null);
+
+  // تنظيف المراقبة لما الكابتن يخرج من الصفحة عشان المراقب القديم ميفضلش شغال في الخلفية
+  useEffect(() => {
+    return () => {
+      if (profileUnsubscribeRef.current) {
+        profileUnsubscribeRef.current();
+      }
+    };
+  }, []);
+
   const loadCaptainProfileFromFirebase = async () => {
     try {
       let captainId = await AsyncStorage.getItem('currentCaptainId');
@@ -409,7 +421,6 @@ export default function CaptainHome() {
       if (captainId) {
         await AsyncStorage.setItem('currentCaptainId', captainId);
         
-        // 👈 هات الرمز السري بتاع الجلسة المحفوظ في الموبايل ده
         const localSessionId = await AsyncStorage.getItem('currentSessionId');
 
         const ratingQ = query(collection(db, 'ratings'), where('captainId', '==', captainId), where('type', '==', 'passenger_rating_captain'));
@@ -420,18 +431,25 @@ export default function CaptainHome() {
         const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : 5;
 
         const docRef = doc(db, 'captains', captainId);
-        onSnapshot(docRef, async (docSnap) => {
+        
+        // 🔴 إيقاف أي مراقب قديم قبل تشغيل واحد جديد 🔴
+        if (profileUnsubscribeRef.current) {
+          profileUnsubscribeRef.current();
+        }
+
+        profileUnsubscribeRef.current = onSnapshot(docRef, async (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             
-            // 🔴 نظام الحماية الفوري (الطرد الإجباري) 🔴
             if (data.sessionId && data.sessionId !== localSessionId) {
-              await AsyncStorage.clear(); // مسح الذاكرة فوراً
-              router.replace('/captain-login'); // الطرد لصفحة الدخول فوراً
+              // 🔴 إيقاف المراقبة فوراً للموبايل المطرود عشان ميطردش الجديد 🔴
+              if (profileUnsubscribeRef.current) profileUnsubscribeRef.current();
+              
+              await AsyncStorage.clear();
+              router.replace('/captain-login');
               Alert.alert('تنبيه أمني ⚠️', 'لقد تم تسجيل الدخول لحسابك من جهاز آخر. تم تسجيل خروجك من هنا لحماية حسابك.');
-              return; // وقف تحميل البيانات
+              return;
             }
-            // -------------------------------------------
 
             const finalAvatar = getSafeAvatar(data.profileImage || data.avatar || data.image);
             

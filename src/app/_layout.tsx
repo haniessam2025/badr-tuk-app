@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { LogBox } from 'react-native';
+import { AppProvider } from './AppContext'; // 👈 استدعاء العقل المركزي
 
 // هنوقف استدعاء الفايربيز مؤقتاً بالكومنت ده لحد ما نختبر الشاشات
 // import '../firebase';
@@ -9,7 +10,8 @@ LogBox.ignoreAllLogs(true);
 
 export default function RootLayout() {
   return (
-    // السطر ده لوحده كفيل يقرأ كل الشاشات اللي في الفولدر أوتوماتيك من غير ما ترصهم!
-    <Stack screenOptions={{ headerShown: false }} />
+    <AppProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </AppProvider>
   );
 }

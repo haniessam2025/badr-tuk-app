@@ -7,10 +7,11 @@ import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot,
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { db } from '../firebase';
+import { useApp } from './AppContext';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffer: (offer: any) => void }) => {
+const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, onAcceptOffer: (offer: any) => void, isDarkMode: boolean }) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
   useEffect(() => {
@@ -38,12 +39,12 @@ const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffe
   };
 
   return (
-    <View style={styles.offerCardPro}>
-      <View style={styles.offerTopRow}>
+    <View style={[styles.offerCardPro, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+      <View style={[styles.offerTopRow, isDarkMode && { borderBottomColor: '#334155' }]}>
         <View style={styles.offerCaptainSide}>
-          <Image source={{ uri: getValidAvatar(offer.captainAvatar) }} style={styles.offerAvatarPro} />
+          <Image source={{ uri: getValidAvatar(offer.captainAvatar) }} style={[styles.offerAvatarPro, isDarkMode && { borderColor: '#475569' }]} />
           <View style={styles.offerInfoCol}>
-            <Text style={styles.offerNamePro} numberOfLines={1}>{offer.captainName}</Text>
+            <Text style={[styles.offerNamePro, isDarkMode && { color: '#ffffff' }]} numberOfLines={1}>{offer.captainName}</Text>
             <View style={{ flexDirection: 'row-reverse', marginTop: 2 }}>
               {[1, 2, 3, 4, 5].map((star) => (
                 <Text key={star} style={{ fontSize: 13, color: star <= Math.round(offer.captainRating || 5) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
@@ -51,31 +52,31 @@ const PassengerOfferCard = ({ offer, onAcceptOffer }: { offer: any, onAcceptOffe
             </View>
           </View>
         </View>
-        <View style={styles.offerActionSide}>
+        <View style={[styles.offerActionSide, isDarkMode && { borderRightColor: '#334155' }]}>
           <Text style={styles.offerPricePro}>{offer.price} ج</Text>
           <TouchableOpacity style={styles.acceptOfferBtnPro} onPress={() => onAcceptOffer(offer)}>
             <Text style={styles.acceptOfferBtnTextPro}>قبول العرض</Text>
           </TouchableOpacity>
         </View>
       </View>
-      <View style={styles.offerBottomRow}>
-        <Text style={styles.offerFullVehicleText} numberOfLines={2}>
+      <View style={[styles.offerBottomRow, isDarkMode && { backgroundColor: '#0f172a', borderTopColor: '#334155' }]}>
+        <Text style={[styles.offerFullVehicleText, isDarkMode && { color: '#93c5fd' }]} numberOfLines={2}>
           {offer.captainVehicle} {offer.captainPlateNumber && offer.captainPlateNumber !== 'لم يسجل لوحة' ? ` | لوحة: ${offer.captainPlateNumber}` : ''}
         </Text>
         <Text style={styles.offerVehicleIcon}>{vIcon}</Text>
       </View>
       
       {offer.perks && offer.perks.length > 0 && (
-        <View style={styles.offerPerksContainer}>
+        <View style={[styles.offerPerksContainer, isDarkMode && { backgroundColor: '#0f172a' }]}>
           {offer.perks.map((perk: string, idx: number) => (
-            <View key={idx} style={styles.offerPerkBadge}>
-              <Text style={styles.offerPerkText}>{perk}</Text>
+            <View key={idx} style={[styles.offerPerkBadge, isDarkMode && { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' }]}>
+              <Text style={[styles.offerPerkText, isDarkMode && { color: '#bfdbfe' }]}>{perk}</Text>
             </View>
           ))}
         </View>
       )}
       
-      <View style={{ width: '100%', height: 4, backgroundColor: '#e2e8f0' }}>
+      <View style={{ width: '100%', height: 4, backgroundColor: isDarkMode ? '#334155' : '#e2e8f0' }}>
         <Animated.View style={{ height: '100%', backgroundColor: '#3b82f6', width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />
       </View>
     </View>
@@ -107,6 +108,7 @@ const sendPushNotification = async (expoPushToken: string, passengerName: string
 
 export default function PassengerHome() {
   const router = useRouter();
+  const { isDarkMode } = useApp(); // سحب الدارك مود
   const pathname = usePathname();
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number, longitude: number } | null>(null);
@@ -147,7 +149,6 @@ export default function PassengerHome() {
     } catch (error) {
       console.log('Error vibrating:', error);
     }
-    
   };
 
   useEffect(() => {
@@ -967,33 +968,40 @@ export default function PassengerHome() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={[styles.container, isDarkMode && { backgroundColor: '#0f172a' }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {toastVisible && (
         <Animated.View style={[styles.toastContainer, { opacity: toastOpacity, transform: [{ translateY: toastTranslateY }] }]}>
           <Text style={styles.toastText}>رسالة جديدة من الكابتن</Text>
         </Animated.View>
       )}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.userInfo} onPress={() => router.push('/passenger-profile')}>
-          <Image source={{ uri: passengerProfile.avatar }} style={styles.profileAvatar} />
-          <View>
-            <Text style={styles.headerPassengerName} numberOfLines={1}>{passengerProfile.name ? passengerProfile.name.split(' ')[0] : 'مستخدم'}</Text>
-            <View style={{ flexDirection: 'row-reverse', marginTop: 2, marginRight: 8 }}>
+<View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }, { flexDirection: 'row-reverse' }]}>        <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={openSidebar}>
+          <Text style={[styles.headerMenuText, isDarkMode && { color: '#e2e8f0' }]}>≡</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.userInfoCentered} onPress={() => router.push('/passenger-profile')}>
+          <Image source={{ uri: passengerProfile.avatar }} style={[styles.profileAvatar, isDarkMode && { borderColor: '#475569', borderWidth: 1 }]} />
+          <View style={styles.profileTextContainer}>
+            <Text style={[styles.headerPassengerName, isDarkMode && { color: '#e2e8f0' }]} numberOfLines={1}>
+              {passengerProfile.name ? passengerProfile.name.split(' ')[0] : 'مستخدم'}
+            </Text>
+            <View style={{ flexDirection: 'row-reverse', marginTop: 2, justifyContent: 'flex-start' }}>
               {[1, 2, 3, 4, 5].map((star) => (
-                <Text key={star} style={{ fontSize: 14, color: star <= Math.round(passengerProfile.averageRating) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
+                <Text key={star} style={{ fontSize: 13, color: star <= Math.round(passengerProfile.averageRating) ? '#f59e0b' : '#cbd5e1' }}>★</Text>
               ))}
             </View>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.headerMenuBtn} onPress={openSidebar}>
-          <Text style={styles.headerMenuText}>≡</Text>
+
+        <TouchableOpacity style={[styles.headerSettingsBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={() => router.push('/settings' as any)}>
+          <Ionicons name="settings-sharp" size={24} color={isDarkMode ? "#e2e8f0" : "#64748b"} />
         </TouchableOpacity>
-      </View>
+      </View>      
+      
       {rideStatus === 'idle' && (
-        <ScrollView style={styles.card} contentContainerStyle={{ paddingBottom: 90 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" overScrollMode="never">
+        <ScrollView style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]} contentContainerStyle={{ paddingBottom: 90 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" overScrollMode="never">
           
           <View style={styles.requestHeaderRow}>
-            <Text style={styles.cardTitle}>اطلب مشوارك الآن</Text>
+            <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>اطلب مشوارك الآن</Text>
             <Animated.Image 
               source={headerImageSource} 
               style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} 
@@ -1001,66 +1009,66 @@ export default function PassengerHome() {
             />
           </View>
 
-          <Text style={styles.label}>اختر نوع براقك</Text>
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>اختر نوع براقك</Text>
           <View style={styles.vehicleTypeTabs}>
-            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
-              <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>سيارة</Text>
+            <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedVehicleType === 'car' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
+              <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedVehicleType === 'car' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>سيارة</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('tuktuk_alt'); updatePriceCalculation(pickup, destinations, 'tuktuk_alt'); }}>
-              <Text style={[styles.vTypeText, requestedVehicleType === 'tuktuk_alt' && styles.vTypeTextActive]}>بديل توكتوك</Text>
+            <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedVehicleType === 'tuktuk_alt' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedVehicleType('tuktuk_alt'); updatePriceCalculation(pickup, destinations, 'tuktuk_alt'); }}>
+              <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedVehicleType === 'tuktuk_alt' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>بديل توكتوك</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'scooter' && styles.vTypeBtnActive]} onPress={() => { setRequestedVehicleType('scooter'); updatePriceCalculation(pickup, destinations, 'scooter'); }}>
-              <Text style={[styles.vTypeText, requestedVehicleType === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
+            <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedVehicleType === 'scooter' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedVehicleType('scooter'); updatePriceCalculation(pickup, destinations, 'scooter'); }}>
+              <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedVehicleType === 'scooter' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>سكوتر</Text>
             </TouchableOpacity>
           </View>
 
           {requestedVehicleType === 'tuktuk_alt' && (
             <View style={styles.passengerCountContainer}>
-              <Text style={styles.label}>اختر نوع بديل التوكتوك 🛺</Text>
+              <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>اختر نوع بديل التوكتوك 🛺</Text>
               <View style={{ flexDirection: 'row-reverse', gap: 10, marginBottom: 15 }}>
-                <TouchableOpacity style={[styles.vTypeBtn, requestedTuktukType === 'كيوت 3 راكب' && styles.vTypeBtnActive]} onPress={() => { setRequestedTuktukType('كيوت 3 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
-                  <Text style={[styles.vTypeText, requestedTuktukType === 'كيوت 3 راكب' && styles.vTypeTextActive]}>كيوت 3 راكب</Text>
+                <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedTuktukType === 'كيوت 3 راكب' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedTuktukType('كيوت 3 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
+                  <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedTuktukType === 'كيوت 3 راكب' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>كيوت 3 راكب</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.vTypeBtn, requestedTuktukType === 'جالاكسي 7 راكب' && styles.vTypeBtnActive]} onPress={() => { setRequestedTuktukType('جالاكسي 7 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
-                  <Text style={[styles.vTypeText, requestedTuktukType === 'جالاكسي 7 راكب' && styles.vTypeTextActive]}>جالاكسي 7 راكب</Text>
+                <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedTuktukType === 'جالاكسي 7 راكب' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedTuktukType('جالاكسي 7 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
+                  <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedTuktukType === 'جالاكسي 7 راكب' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>جالاكسي 7 راكب</Text>
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>حدد عدد الركاب 👥</Text>
+              <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>حدد عدد الركاب 👥</Text>
               <View style={{ flexDirection: 'row-reverse', justifyContent: 'center', flexWrap: 'wrap', paddingVertical: 5, gap: 8 }}>
                 {(requestedTuktukType === 'كيوت 3 راكب' ? ['1', '2', '3'] : ['1', '2', '3', '4', '5', '6', '7']).map((num) => (
                   <TouchableOpacity 
                     key={num} 
-                    style={[styles.countBtn, passengersCount === num && styles.countBtnActive, { marginBottom: 8 }]} 
+                    style={[styles.countBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, passengersCount === num && styles.countBtnActive, { marginBottom: 8 }]} 
                     onPress={() => {
                       setPassengersCount(num);
                       updatePriceCalculation(pickup, destinations, requestedVehicleType, num);
                     }}
                   >
-                    <Text style={[styles.countBtnText, passengersCount === num && styles.countBtnTextActive]}>{num}</Text>
+                    <Text style={[styles.countBtnText, isDarkMode && { color: '#cbd5e1' }, passengersCount === num && styles.countBtnTextActive]}>{num}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
           )}
 
-          <Text style={styles.label}>موقع الانطلاق الحالي</Text>
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
           <View style={styles.rowInputContainer}>
-            <TextInput style={styles.inputWithButton} placeholder="اكتب مكان الانطلاق" placeholderTextColor="#94a3b8" value={pickup} onChangeText={handlePickupChange} />
+            <TextInput style={[styles.inputWithButton, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="اكتب مكان الانطلاق" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={pickup} onChangeText={handlePickupChange} />
             <TouchableOpacity style={styles.myLocationBtn} onPress={handleGetCurrentLocation} disabled={isFetchingLocation}>
               {isFetchingLocation ? <ActivityIndicator color="#ffffff" size="small" /> : <Text style={styles.myLocationBtnText}>موقعي</Text>}
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>الوجهة المطلوبة</Text>
-          <View style={styles.modernDestContainer}>
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الوجهة المطلوبة</Text>
+          <View style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }]}>
             <View style={styles.modernDestRight}>
               <Ionicons name="search" size={22} color="#9ca3af" />
-              <Text style={styles.modernDestToText}>إلى</Text>
+              <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>إلى</Text>
               <TextInput 
-                style={styles.modernDestInput} 
+                style={[styles.modernDestInput, isDarkMode && { color: '#ffffff' }]} 
                 placeholder="ابحث عن وجهتك..." 
-                placeholderTextColor="#9ca3af" 
+                placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'} 
                 value={destinations[0]} 
                 onChangeText={(text) => handleDestinationChange(text, 0)} 
               />
@@ -1071,13 +1079,13 @@ export default function PassengerHome() {
             </TouchableOpacity>
           </View>
           
-          <Text style={styles.label}>ملاحظات للكابتن (اختياري)</Text>
-          <TextInput style={styles.notesInput} placeholder="مثال معايا أغراض خفيفة ..." placeholderTextColor="#94a3b8" value={notes} onChangeText={setNotes} multiline={true} />
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>ملاحظات للكابتن (اختياري)</Text>
+          <TextInput style={[styles.notesInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="مثال معايا أغراض خفيفة ..." placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={notes} onChangeText={setNotes} multiline={true} />
 
-          <Text style={[styles.label, {marginTop: 10}]}>أجرة الرحلة المقترحة</Text>
-          <View style={[styles.priceDisplayContainer, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
+          <Text style={[styles.label, {marginTop: 10}, isDarkMode && { color: '#cbd5e1' }]}>أجرة الرحلة المقترحة</Text>
+          <View style={[styles.priceDisplayContainer, isDarkMode && { backgroundColor: '#422006', borderColor: '#d97706' }, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
             {isCalculatingPrice ? (
-              <Text style={[styles.priceTextDisplay, {color: '#94a3b8', fontSize: 15}]}>جاري حساب المسافة...</Text>
+              <Text style={[styles.priceTextDisplay, {color: isDarkMode ? '#94a3b8' : '#94a3b8', fontSize: 15}]}>جاري حساب المسافة...</Text>
             ) : (
               <View style={{flex: 1, alignItems: 'flex-end'}}>
                 <Text style={styles.priceTextDisplay}>{price ? `${price} جنيه` : '---'}</Text>
@@ -1100,24 +1108,24 @@ export default function PassengerHome() {
                 const isSelected = price === suggestedPrice.toString();
                 const percentage = Math.round((multiplier - 1) * 100);
                 return (
-                  <TouchableOpacity key={index} style={[styles.suggestionBtn, isSelected && styles.suggestionBtnActive]} onPress={() => setPrice(suggestedPrice.toString())}>
-                    <Text style={[styles.suggestionText, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
-                    <Text style={[styles.suggestionSubText, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
+                  <TouchableOpacity key={index} style={[styles.suggestionBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, isSelected && styles.suggestionBtnActive]} onPress={() => setPrice(suggestedPrice.toString())}>
+                    <Text style={[styles.suggestionText, isDarkMode && { color: '#cbd5e1' }, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
+                    <Text style={[styles.suggestionSubText, isDarkMode && { color: '#94a3b8' }, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
           )}
 
-          <Text style={[styles.label, {marginTop: 5}]}>طريقة الدفع 💳</Text>
+          <Text style={[styles.label, {marginTop: 5}, isDarkMode && { color: '#cbd5e1' }]}>طريقة الدفع 💳</Text>
           <View style={styles.paymentMethodsRow}>
             {['كاش', 'محفظة', 'انستاباي'].map((method) => (
               <TouchableOpacity
                 key={method}
-                style={[styles.paymentBtn, paymentMethod === method && styles.paymentBtnActive]}
+                style={[styles.paymentBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, paymentMethod === method && styles.paymentBtnActive]}
                 onPress={() => setPaymentMethod(method)}
               >
-                <Text style={[styles.paymentBtnText, paymentMethod === method && styles.paymentBtnTextActive]}>{method}</Text>
+                <Text style={[styles.paymentBtnText, isDarkMode && { color: '#cbd5e1' }, paymentMethod === method && styles.paymentBtnTextActive]}>{method}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -1136,12 +1144,12 @@ export default function PassengerHome() {
         </ScrollView>
       )}
       {rideStatus === 'searching' && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>جاري استقبال العروض ...</Text>
+        <View style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+          <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
           {offers.length === 0 ? (<Text style={styles.subText}>يرجى الانتظار قليلاً لتلقي عروض الكباتن...</Text>) : null}
           <ScrollView style={styles.offersContainer} showsVerticalScrollIndicator={false}>
             {offers.map((offer, index) => (
-              <PassengerOfferCard key={index} offer={offer} onAcceptOffer={acceptCaptainOffer} />
+              <PassengerOfferCard key={index} offer={offer} onAcceptOffer={acceptCaptainOffer} isDarkMode={isDarkMode} />
             ))}
           </ScrollView>
           <TouchableOpacity style={styles.cancelBtnOnly} onPress={() => Alert.alert('إلغاء الطلب', 'هل أنت متأكد من إلغاء البحث؟', [{ text: 'تراجع', style: 'cancel' }, { text: 'نعم، إلغاء', onPress: handleCancelRide }])}>
@@ -1150,7 +1158,7 @@ export default function PassengerHome() {
         </View>
       )}
       {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'in_progress') && (
-        <Animated.View style={[styles.cardActive, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }]}>
+        <Animated.View style={[styles.cardActive, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#d97706' }, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }]}>
           {rideStatus === 'captain_arrived' ? (
             <>
               <Text style={styles.superArrivalTitle}>براقك وصل !</Text>
@@ -1162,7 +1170,7 @@ export default function PassengerHome() {
             </Text>
           )}
           {latestMessage ? (
-            <View style={{ backgroundColor: '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2 }}>
+            <View style={{ backgroundColor: isDarkMode ? '#334155' : '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2 }}>
               <Text style={{ fontSize: 22, marginLeft: 10 }}>💬</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'right', marginBottom: 2 }}>أحدث رسالة من الكابتن :</Text>
@@ -1170,18 +1178,18 @@ export default function PassengerHome() {
               </View>
             </View>
           ) : null}
-          <View style={styles.captainCard}>
+          <View style={[styles.captainCard, isDarkMode && { backgroundColor: '#334155' }]}>
             <Image source={{ uri: getValidAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
             <View style={styles.captainDetails}>
-              <Text style={styles.captainText} numberOfLines={1}>الكابتن: {captainInfo.name}</Text>
-              <Text style={styles.captainText} numberOfLines={2}>المركبة: {captainInfo.vehicle}</Text>
+              <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={1}>الكابتن: {captainInfo.name}</Text>
+              <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={2}>المركبة: {captainInfo.vehicle}</Text>
               {captainInfo.plateNumber && captainInfo.plateNumber !== 'لم يسجل لوحة' ? (
-                <Text style={styles.captainText} numberOfLines={1}>لوحة: {captainInfo.plateNumber}</Text>
+                <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={1}>لوحة: {captainInfo.plateNumber}</Text>
               ) : null}
             </View>
           </View>
           {rideStatus === 'waiting_for_scan' && (
-            <View style={styles.authContainer}>
+            <View style={[styles.authContainer, isDarkMode && { backgroundColor: '#0f172a' }]}>
               <TouchableOpacity style={styles.scanBtn} onPress={openScanner}>
                 <Text style={styles.scanBtnText}>امسح كود الكابتن لبدء الرحلة</Text>
               </TouchableOpacity>
@@ -1191,12 +1199,12 @@ export default function PassengerHome() {
               </View>
             </View>
           )}
-          <View style={styles.tripRouteContainer}>
+          <View style={[styles.tripRouteContainer, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]}>
             <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
               <View style={styles.routeItemBox}>
                 <Text style={[styles.routeIconText, destinations.length === 1 && { fontSize: 18, marginTop: 4 }]}>🟢</Text>
                 <Text 
-                  style={[styles.routeMainText, destinations.length === 1 && { fontSize: 22, lineHeight: 32 }]} 
+                  style={[styles.routeMainText, isDarkMode && { color: '#ffffff' }, destinations.length === 1 && { fontSize: 22, lineHeight: 32 }]} 
                   numberOfLines={destinations.length > 1 ? 2 : 3}
                   adjustsFontSizeToFit={true}
                   minimumFontScale={0.7}
@@ -1209,7 +1217,7 @@ export default function PassengerHome() {
                 <View key={i} style={styles.routeItemBox}>
                   <Text style={[styles.routeIconText, destinations.length === 1 && { fontSize: 18, marginTop: 4 }]}>🔴</Text>
                   <Text 
-                    style={[styles.routeDestText, destinations.length === 1 && { fontSize: 20, lineHeight: 30 }]} 
+                    style={[styles.routeDestText, isDarkMode && { color: '#cbd5e1' }, destinations.length === 1 && { fontSize: 20, lineHeight: 30 }]} 
                     numberOfLines={destinations.length > 1 ? 1 : 3}
                     adjustsFontSizeToFit={true}
                     minimumFontScale={0.7}
@@ -1220,12 +1228,12 @@ export default function PassengerHome() {
               ))}
             </ScrollView>
 
-            <View style={styles.divider} />
+            <View style={[styles.divider, isDarkMode && { backgroundColor: '#475569' }]} />
 
-            <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>السعر النهائي للرحلة</Text>
+            <View style={[styles.priceBox, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#059669' }]}>
+              <Text style={[styles.priceLabel, isDarkMode && { color: '#a7f3d0' }]}>السعر النهائي للرحلة</Text>
               <Text 
-                style={styles.hugePriceTag} 
+                style={[styles.hugePriceTag, isDarkMode && { color: '#34d399' }]} 
                 numberOfLines={1} 
                 adjustsFontSizeToFit={true}
               >
@@ -1264,10 +1272,10 @@ export default function PassengerHome() {
       )}
       <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>إعداد رقم الطوارئ</Text>
-            <Text style={styles.modalSubtitle}>يرجى إدخال رقم هاتف شخص تثق به يمتلك واتساب. لمشاركة مسار رحلتك معه بنقرة واحدة لاحقا.</Text>
-            <TextInput style={styles.modalInput} value={tempEmergencyPhone} onChangeText={setTempEmergencyPhone} keyboardType="phone-pad" placeholder="مثال: ٠١٠١٢٣٤٥٦٧٨" placeholderTextColor="#94a3b8" />
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>إعداد رقم الطوارئ</Text>
+            <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }]}>يرجى إدخال رقم هاتف شخص تثق به يمتلك واتساب. لمشاركة مسار رحلتك معه بنقرة واحدة لاحقا.</Text>
+            <TextInput style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', color: '#ffffff', borderColor: '#475569' }]} value={tempEmergencyPhone} onChangeText={setTempEmergencyPhone} keyboardType="phone-pad" placeholder="مثال: ٠١٠١٢٣٤٥٦٧٨" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} />
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity style={styles.modalSaveBtn} onPress={saveEmergencyPhone}>
                 <Text style={styles.modalSaveBtnText}>{actionAfterSave ? 'حفظ الرقم الجديد وإرسال الآن' : 'حفظ'}</Text>
@@ -1292,11 +1300,11 @@ export default function PassengerHome() {
       </Modal>
       <Modal visible={isRatingModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
-          <View style={styles.ratingModalContent}>
+          <View style={[styles.ratingModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
             {!ratingSubmitted ? (
               <>
-                <Text style={styles.modalTitle}>كيف كانت الرحلة؟</Text>
-                <Text style={styles.modalSubtitle}>تقييمك للكابتن يساعدنا في تحسين الخدمة</Text>
+                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>كيف كانت الرحلة؟</Text>
+                <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }]}>تقييمك للكابتن يساعدنا في تحسين الخدمة</Text>
                 <View style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity key={star} onPress={() => setRating(star)}>
@@ -1313,10 +1321,10 @@ export default function PassengerHome() {
                         return (
                           <TouchableOpacity 
                             key={tag} 
-                            style={[styles.tagBtn, isSelected && styles.tagBtnActive]} 
+                            style={[styles.tagBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, isSelected && styles.tagBtnActive]} 
                             onPress={() => setSelectedTags(prev => isSelected ? prev.filter(t => t !== tag) : [...prev, tag])}
                           >
-                            <Text style={[styles.tagText, isSelected && styles.tagTextActive]}>{tag}</Text>
+                            <Text style={[styles.tagText, isDarkMode && { color: '#cbd5e1' }, isSelected && styles.tagTextActive]}>{tag}</Text>
                           </TouchableOpacity>
                         );
                       })}
@@ -1325,9 +1333,9 @@ export default function PassengerHome() {
                 )}
                 {rating > 0 && (
                   <TextInput 
-                    style={styles.reasonInput} 
+                    style={[styles.reasonInput, isDarkMode && { backgroundColor: '#334155', color: '#ffffff', borderColor: '#475569' }]} 
                     placeholder={rating === 5 ? "تعليق إضافي (اختياري)..." : "ما هو سبب تقييمك؟ (إلزامي)"} 
-                    placeholderTextColor="#94a3b8" 
+                    placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} 
                     value={ratingReason} 
                     onChangeText={setRatingReason} 
                     multiline={true} 
@@ -1342,7 +1350,7 @@ export default function PassengerHome() {
             ) : (
               <View style={styles.successRatingContainer}>
                 <Text style={styles.successRatingIcon}>✅</Text>
-                <Text style={styles.successRatingText}>نشكرك على تقييمك لمساعدتنا في تطوير الخدمة</Text>
+                <Text style={[styles.successRatingText, isDarkMode && { color: '#ffffff' }]}>نشكرك على تقييمك لمساعدتنا في تطوير الخدمة</Text>
               </View>
             )}
           </View>
@@ -1350,10 +1358,10 @@ export default function PassengerHome() {
       </Modal>
       <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>تعديل سعر الرحلة</Text>
-            <Text style={styles.modalSubtitle}>الحد الأدنى {Math.floor(calculatedBasePrice * 0.80)} جنيه</Text>
-            <TextInput style={styles.modalInput} value={tempPrice} onChangeText={setTempPrice} keyboardType="numeric" placeholder="اكتب السعر الجديد" placeholderTextColor="#94a3b8" />
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تعديل سعر الرحلة</Text>
+            <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }]}>الحد الأدنى {Math.floor(calculatedBasePrice * 0.80)} جنيه</Text>
+            <TextInput style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', color: '#ffffff', borderColor: '#475569' }]} value={tempPrice} onChangeText={setTempPrice} keyboardType="numeric" placeholder="اكتب السعر الجديد" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} />
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity style={styles.modalSaveBtn} onPress={saveNewPrice}>
                 <Text style={styles.modalSaveBtnText}>حفظ</Text>
@@ -1367,10 +1375,10 @@ export default function PassengerHome() {
       </Modal>
       <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
-          <View style={styles.callModalContent}>
-            <Text style={styles.modalTitle}>اختر طريقة الاتصال</Text>
-            <TouchableOpacity style={styles.regularCallBtn} onPress={makeRegularCall}>
-              <Text style={styles.regularCallBtnText}>مكالمة عادية شبكة المحمول</Text>
+          <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال</Text>
+            <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
+              <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#ffffff' }]}>مكالمة عادية شبكة المحمول</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
               <Text style={styles.freeCallBtnText}>مكالمة مجانية داخل التطبيق</Text>
@@ -1384,27 +1392,27 @@ export default function PassengerHome() {
       <Modal visible={isSidebarOpen} transparent={true} animationType="none" onRequestClose={closeSidebar}>
         <View style={styles.sidebarOverlay}>
           <TouchableOpacity style={styles.sidebarCloseArea} onPress={closeSidebar} activeOpacity={1} />
-          <Animated.View style={[styles.sidebarPanel, { transform: [{ translateX: sidebarAnim }] }]}>
-            <View style={styles.sidebarHeader}>
+          <Animated.View style={[styles.sidebarPanel, { transform: [{ translateX: sidebarAnim }] }, isDarkMode && { backgroundColor: '#0f172a' }]}>
+            <View style={[styles.sidebarHeader, isDarkMode && { backgroundColor: '#1e293b' }]}>
               <Image source={{ uri: passengerProfile.avatar }} style={styles.sidebarAvatar} />
               <Text style={styles.sidebarName}>{passengerProfile.name}</Text>
               <Text style={styles.sidebarPhone}>{passengerProfile.phone}</Text>
             </View>
             <ScrollView style={styles.sidebarLinks}>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/passenger-history'); }}>
-                <Text style={styles.sidebarLinkText}>سجل الرحلات</Text>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-history'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/passenger-ratings'); }}>
-                <Text style={styles.sidebarLinkText}>تقييماتي</Text>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-ratings'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>تقييماتي</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); openEmergencyEdit(); }}>
-                <Text style={styles.sidebarLinkText}>رقم الطوارئ والأمان</Text>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); openEmergencyEdit(); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>رقم الطوارئ والأمان</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/support'); }}>
-                <Text style={styles.sidebarLinkText}>الدعم الفني</Text>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.sidebarLink} onPress={() => { closeSidebar(); router.push('/passenger-complaints'); }}>
-                <Text style={styles.sidebarLinkText}>المقترحات والشكاوى</Text>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-complaints'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى</Text>
               </TouchableOpacity>
             </ScrollView>
             <TouchableOpacity 
@@ -1414,6 +1422,7 @@ export default function PassengerHome() {
     paddingHorizontal: 20,
     borderRadius: 12, 
     marginBottom: 15,
+    marginHorizontal: 15,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1435,6 +1444,9 @@ export default function PassengerHome() {
 }
 
 const styles = StyleSheet.create({
+  userInfoCentered: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1, justifyContent: 'center' },
+  profileTextContainer: { alignItems: 'center', marginRight: 10 },
+  headerSettingsBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' },
   container: { flex: 1, backgroundColor: '#f1f5f9', padding: 15, paddingTop: 40 },
   header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 12, borderRadius: 16, marginBottom: 20, elevation: 2 },
   userInfo: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1 },
