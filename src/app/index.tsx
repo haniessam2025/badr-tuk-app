@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, Image, StyleSheet, Text, View } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -9,10 +9,15 @@ export default function WelcomeScreen() {
   
   // قيم الأنيميشن
   const meteorX = useRef(new Animated.Value(width + 100)).current; // حركة نيزك السرعة من اليمين
-  const fadeAnim = useRef(new Animated.Value(0)).current; // ظهور الشعار
-  const scaleAnim = useRef(new Animated.Value(0.5)).current; // تكبير الشعار
-  const flashOpacity = useRef(new Animated.Value(0)).current; // ومضة البرق
-  const floatAnim = useRef(new Animated.Value(0)).current; // حركة الطفو
+  const fadeAnim = useRef(new Animated.Value(0)).current; // ظهور الشعار الكبير
+  const scaleAnim = useRef(new Animated.Value(0.4)).current; // تكبير الشعار
+  const flashOpacity = useRef(new Animated.Value(0)).current; // ومضة البرق فوق اللوجو
+  
+  // قيم أنيميشن منفصلة لجملة "أسرع من البرق" عشان تظهر بعدها
+  const subtitleFade = useRef(new Animated.Value(0)).current;
+  const subtitleSlide = useRef(new Animated.Value(20)).current;
+
+  const floatAnim = useRef(new Animated.Value(0)).current; // حركة الطفو المستمرة
 
   useEffect(() => {
     // 1. نيزك السرعة يقطع الشاشة من اليمين للشمال بسرعة فائقة
@@ -22,44 +27,52 @@ export default function WelcomeScreen() {
       useNativeDriver: true,
     }).start();
 
-    // 2. ظهور الشعار بعد انطلاق النيزك بلحظة
+    // 2. ظهور الشعار الكبير وضبط الومضة بعد انطلاق النيزك
     setTimeout(() => {
       Animated.parallel([
         Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
         Animated.spring(scaleAnim, { toValue: 1, friction: 5, tension: 40, useNativeDriver: true })
       ]).start(() => {
         
-        // 3. تأثير ومضة البرق (بتنور وتطفي بسرعة مرتين)
+        // 3. تأثير ومضة البرق (⚡ تنور وتطفي مرتين)
         Animated.sequence([
-          Animated.timing(flashOpacity, { toValue: 1, duration: 60, useNativeDriver: true }),
-          Animated.timing(flashOpacity, { toValue: 0, duration: 60, useNativeDriver: true }),
-          Animated.timing(flashOpacity, { toValue: 1, duration: 60, useNativeDriver: true }),
-          Animated.timing(flashOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+          Animated.timing(flashOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
+          Animated.timing(flashOpacity, { toValue: 0, duration: 80, useNativeDriver: true }),
+          Animated.timing(flashOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
+          Animated.timing(flashOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
         ]).start(() => {
           
-          // 4. استمرار حركة الطفو (البُراق جاهز للانطلاق)
-          Animated.loop(
-            Animated.sequence([
-              Animated.timing(floatAnim, { toValue: -12, duration: 800, useNativeDriver: true }),
-              Animated.timing(floatAnim, { toValue: 0, duration: 800, useNativeDriver: true })
-            ])
-          ).start();
+          // 4. ظهور جملة "أسرع من البرق" بانسياقية بعد اللوجو والومضة
+          Animated.parallel([
+            Animated.timing(subtitleFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+            Animated.timing(subtitleSlide, { toValue: 0, duration: 500, useNativeDriver: true }),
+          ]).start(() => {
+            
+            // 5. استمرار حركة الطفو (البُراق جاهز للانطلاق)
+            Animated.loop(
+              Animated.sequence([
+                Animated.timing(floatAnim, { toValue: -10, duration: 800, useNativeDriver: true }),
+                Animated.timing(floatAnim, { toValue: 0, duration: 800, useNativeDriver: true })
+              ])
+            ).start();
+
+          });
         });
       });
     }, 200);
 
-    // 5. الانتقال لشاشة الاختيار
+    // 6. الانتقال لشاشة الاختيار بعد انتهاء العرض (3 ثوانٍ)
     const timer = setTimeout(() => {
       router.replace('/role');
-    }, 3000);
+    }, 3200);
 
     return () => clearTimeout(timer);
-  }, [meteorX, fadeAnim, scaleAnim, flashOpacity, floatAnim]);
+  }, [meteorX, fadeAnim, scaleAnim, flashOpacity, subtitleFade, subtitleSlide, floatAnim]);
 
   // دمج التكبير مع الطفو
   const pulseScale = floatAnim.interpolate({
-    inputRange: [-12, 0],
-    outputRange: [1.03, 1]
+    inputRange: [-10, 0],
+    outputRange: [1.02, 1]
   });
 
   return (
@@ -69,7 +82,7 @@ export default function WelcomeScreen() {
         <Text style={styles.meteorEmoji}>☄️💨</Text>
       </Animated.View>
 
-      {/* الشعار المركزي */}
+      {/* الشعار المركزي الضخم */}
       <Animated.View style={[
         styles.logoContainer,
         {
@@ -82,19 +95,30 @@ export default function WelcomeScreen() {
         }
       ]}>
         
-        <Text style={styles.lightningIcon}>⚡</Text>
-        
-        <View style={styles.textWrapper}>
-          {/* الكلمة الأساسية */}
-          <Text style={styles.title}>بُراق</Text>
+        <View style={styles.imageWrapper}>
+          {/* صورة اللوجو بحجم كبير جداً يملأ الشاشة */}
+          <Image 
+            source={require('../../assets/images/splash.png')} 
+            style={styles.logoImage} 
+            resizeMode="contain"
+          />
           
-          {/* الكلمة المضيئة (ومضة البرق اللي بتضرب فوق الكلمة الأساسية) */}
-          <Animated.Text style={[styles.titleFlash, { opacity: flashOpacity }]}>
-            بُراق
-          </Animated.Text>
+          {/* أيقونة البرق (⚡) الوامضة فوق اللوجو */}
+          <Animated.View style={[styles.flashLightningContainer, { opacity: flashOpacity }]}>
+            <Text style={styles.flashLightningIcon}>⚡</Text>
+          </Animated.View>
         </View>
 
-        <Text style={styles.subtitle}>أسرع من البرق</Text>
+        {/* جملة أسرع من البرق (تظهر بتأثير انزلاق وتلاشي بعد اللوجو) */}
+        <Animated.Text style={[
+          styles.subtitle, 
+          { 
+            opacity: subtitleFade, 
+            transform: [{ translateY: subtitleSlide }] 
+          }
+        ]}>
+          أسرع من البرق
+        </Animated.Text>
 
       </Animated.View>
     </View>
@@ -104,10 +128,10 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: '#0f172a', 
+    backgroundColor: '#ffffff', // خلفية بيضاء ناصعة
     justifyContent: 'center', 
     alignItems: 'center', 
-    padding: 24,
+    padding: 20,
     overflow: 'hidden',
   },
   meteorContainer: {
@@ -122,44 +146,38 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     justifyContent: 'center',
     zIndex: 1,
+    width: '100%',
   },
-  lightningIcon: {
-    fontSize: 70,
-    marginBottom: 5,
-    textShadowColor: 'rgba(251, 191, 36, 0.8)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
-  },
-  textWrapper: {
+  imageWrapper: {
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  title: { 
-    fontSize: 65, 
-    fontWeight: '900', 
-    color: '#ffffff', 
-    textAlign: 'center', 
+    width: width * 0.90, // حجم ضخم يملأ عرض الشاشة تقريباً
+    height: width * 0.90, // أبعاد مربعة متناسقة
     marginBottom: 5,
-    letterSpacing: 1,
   },
-  titleFlash: {
+  logoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  flashLightningContainer: {
     position: 'absolute',
-    fontSize: 65, 
-    fontWeight: '900', 
-    color: '#fef08a', // أصفر ساطع جداً
-    textAlign: 'center', 
-    marginBottom: 5,
-    letterSpacing: 1,
-    textShadowColor: '#fef08a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    top: '28%', 
+  },
+  flashLightningIcon: {
+    fontSize: 90, // حجم أكبر وأوضح لرمز البرق الوامض
+    textShadowColor: 'rgba(234, 179, 8, 0.9)', // توهج أصفر ساطع
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 30, // توهج عالي جداً وقت البرق
+    textShadowRadius: 30,
   },
   subtitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fbbf24', 
-    letterSpacing: 1,
-    marginTop: 5,
+    fontSize: 26, // خط أكبر وأوضح
+    fontWeight: '900',
+    color: '#0f172a', // لون داكن قوي يناسب الخلفية البيضاء
+    letterSpacing: 2,
+    marginTop: 10,
+    textAlign: 'center',
   }
 });
