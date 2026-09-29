@@ -5,36 +5,32 @@ import { addDoc, collection, doc, getDoc, getDocs, query, updateDoc, where } fro
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
+import { useApp } from './AppContext'; // 👈 استدعاء العقل المركزي
 
 export default function CaptainProfile() {
   const router = useRouter();
+  const { isDarkMode } = useApp(); // 👈 سحب حالة الدارك مود
+
   const [captainId, setCaptainId] = useState('');
   const [originalData, setOriginalData] = useState<any>(null);
   
-  // حقول التعديل الأساسية
   const [editName, setEditName] = useState('');
   const [editAvatar, setEditAvatar] = useState('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
-  const [password, setPassword] = useState(''); // 👈 متغير كلمة السر الجديدة
   
-  // حقول المركبة الديناميكية
   const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
   
-  // بيانات السيارة
   const [carBrand, setCarBrand] = useState('');
   const [carModelName, setCarModelName] = useState('');
   const [carYear, setCarYear] = useState('');
   const [carColor, setCarColor] = useState('');
   const [carPlate, setCarPlate] = useState('');
   
-  // بيانات بديل التوكتوك
   const [tuktukImage, setTuktukImage] = useState('');
   const [tuktukNumber, setTuktukNumber] = useState('');
   
-  // بيانات السكوتر
   const [scooterImage, setScooterImage] = useState('');
   const [scooterPlate, setScooterPlate] = useState('');
 
-  // حقول للعرض فقط
   const [phone, setPhone] = useState('');
   const [walletBalance, setWalletBalance] = useState(0);
   const [rating, setRating] = useState(5);
@@ -42,7 +38,6 @@ export default function CaptainProfile() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // متغيرات تغيير رقم الهاتف (OTP)
   const [isPhoneModalVisible, setIsPhoneModalVisible] = useState(false);
   const [phoneStep, setPhoneStep] = useState(1);
   const [newPhone, setNewPhone] = useState('');
@@ -154,11 +149,6 @@ export default function CaptainProfile() {
       return;
     }
 
-    if (password && password.length < 6) {
-      Alert.alert('تنبيه', 'كلمة السر الجديدة يجب ألا تقل عن 6 أحرف أو أرقام');
-      return;
-    }
-
     let vehicleStr = '';
     let detailsObj = {};
 
@@ -187,15 +177,6 @@ export default function CaptainProfile() {
 
     setIsSubmitting(true);
     try {
-      let isPasswordChanged = false;
-
-      // 1. تغيير الباسورد فوراً إذا تم إدخاله
-      if (password) {
-        await updateDoc(doc(db, 'captains', captainId), { password: password });
-        isPasswordChanged = true;
-      }
-
-      // 2. إرسال باقي البيانات للإدارة كطلب تعديل
       await addDoc(collection(db, 'update_requests'), {
         type: 'captain_profile_update',
         captainId: captainId,
@@ -217,23 +198,11 @@ export default function CaptainProfile() {
         timestamp: new Date().getTime()
       });
 
-      if (isPasswordChanged) {
-        Alert.alert('نجاح ✅', 'تم تغيير كلمة السر فوراً وإرسال باقي تعديلات الملف للإدارة. يرجى تسجيل الدخول مرة أخرى.', [
-          { 
-            text: 'حسناً', 
-            onPress: async () => {
-              await AsyncStorage.clear();
-              router.replace('/captain-login');
-            } 
-          }
-        ]);
-      } else {
-        Alert.alert(
-          'تم إرسال الطلب',
-          'تم إرسال طلب التعديل للإدارة بنجاح. سيتم مراجعة الطلب وتحديث ملفك قريباً.',
-          [{ text: 'حسناً', onPress: () => router.back() }]
-        );
-      }
+      Alert.alert(
+        'تم إرسال الطلب',
+        'تم إرسال طلب التعديل للإدارة بنجاح. سيتم مراجعة الطلب وتحديث ملفك قريباً.',
+        [{ text: 'حسناً', onPress: () => router.back() }]
+      );
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الطلب');
     } finally {
@@ -301,20 +270,20 @@ export default function CaptainProfile() {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, isDarkMode && { backgroundColor: '#0f172a' }]}>
         <ActivityIndicator size="large" color="#10b981" />
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
+    <View style={[{ flex: 1, backgroundColor: '#f0fdf4' }, isDarkMode && { backgroundColor: '#0f172a' }]}>
       <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Text style={styles.backBtnText}>➔ رجوع</Text>
+        <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+          <TouchableOpacity style={[styles.backBtn, isDarkMode && { backgroundColor: '#334155' }]} onPress={() => router.back()}>
+            <Text style={[styles.backBtnText, isDarkMode && { color: '#e2e8f0' }]}>➔ رجوع</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ملف الكابتن</Text>
+          <Text style={[styles.headerTitle, isDarkMode && { color: '#ffffff' }]}>ملف الكابتن</Text>
           <View style={{ width: 60 }} />
         </View>
 
@@ -325,45 +294,45 @@ export default function CaptainProfile() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.avatarContainer}>
-            <Image source={{ uri: editAvatar }} style={styles.avatar} />
+            <Image source={{ uri: editAvatar }} style={[styles.avatar, isDarkMode && { borderColor: '#065f46', backgroundColor: '#334155' }]} />
             <TouchableOpacity style={styles.editAvatarBtn} onPress={() => showImagePickerOptions(setEditAvatar)}>
               <Text style={styles.editAvatarIcon}>📷</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.statsContainer}>
+          <View style={[styles.statsContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>المحفظة</Text>
+              <Text style={[styles.statLabel, isDarkMode && { color: '#cbd5e1' }]}>المحفظة</Text>
               <Text style={styles.statValue}>{walletBalance.toFixed(2)} ج</Text>
             </View>
-            <View style={styles.statDivider} />
+            <View style={[styles.statDivider, isDarkMode && { backgroundColor: '#475569' }]} />
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>التقييم العام</Text>
+              <Text style={[styles.statLabel, isDarkMode && { color: '#cbd5e1' }]}>التقييم العام</Text>
               <Text style={[styles.statValue, { color: '#f59e0b' }]}>★ {rating}</Text>
             </View>
           </View>
 
-          <View style={styles.formContainer}>
-            <Text style={styles.label}>الاسم الرباعي</Text>
+          <View style={[styles.formContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+            <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الاسم الرباعي</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]}
               value={editName}
               onChangeText={setEditName}
               placeholder="الاسم الرباعي"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'}
               textAlign="right"
             />
 
-            <Text style={styles.label}>نوع المركبة</Text>
+            <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>نوع المركبة</Text>
             <View style={styles.vehicleTypeTabs}>
-              <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'car' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('car')}>
-                <Text style={[styles.vTypeText, vehicleCategory === 'car' && styles.vTypeTextActive]}>سيارة</Text>
+              <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, vehicleCategory === 'car' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('car')}>
+                <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, vehicleCategory === 'car' && styles.vTypeTextActive]}>سيارة</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('tuktuk_alt')}>
-                <Text style={[styles.vTypeText, vehicleCategory === 'tuktuk_alt' && styles.vTypeTextActive]}>بديل توكتوك</Text>
+              <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, vehicleCategory === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('tuktuk_alt')}>
+                <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, vehicleCategory === 'tuktuk_alt' && styles.vTypeTextActive]}>بديل توكتوك</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.vTypeBtn, vehicleCategory === 'scooter' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('scooter')}>
-                <Text style={[styles.vTypeText, vehicleCategory === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
+              <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, vehicleCategory === 'scooter' && styles.vTypeBtnActive]} onPress={() => setVehicleCategory('scooter')}>
+                <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, vehicleCategory === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
               </TouchableOpacity>
             </View>
 
@@ -371,50 +340,50 @@ export default function CaptainProfile() {
               <View style={styles.dynamicFieldsContainer}>
                 <View style={styles.rowInputs}>
                   <View style={styles.halfInput}>
-                    <Text style={styles.label}>الطراز (مثال: فيرنا)</Text>
-                    <TextInput style={styles.input} value={carModelName} onChangeText={setCarModelName} placeholder="فيرنا" placeholderTextColor="#94a3b8" textAlign="right" />
+                    <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الطراز (مثال: فيرنا)</Text>
+                    <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={carModelName} onChangeText={setCarModelName} placeholder="فيرنا" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" />
                   </View>
                   <View style={styles.halfInput}>
-                    <Text style={styles.label}>الماركة (مثال: هيونداي)</Text>
-                    <TextInput style={styles.input} value={carBrand} onChangeText={setCarBrand} placeholder="هيونداي" placeholderTextColor="#94a3b8" textAlign="right" />
+                    <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الماركة (مثال: هيونداي)</Text>
+                    <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={carBrand} onChangeText={setCarBrand} placeholder="هيونداي" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" />
                   </View>
                 </View>
                 <View style={styles.rowInputs}>
                   <View style={styles.halfInput}>
-                    <Text style={styles.label}>اللون</Text>
-                    <TextInput style={styles.input} value={carColor} onChangeText={setCarColor} placeholder="فضي" placeholderTextColor="#94a3b8" textAlign="right" />
+                    <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>اللون</Text>
+                    <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={carColor} onChangeText={setCarColor} placeholder="فضي" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" />
                   </View>
                   <View style={styles.halfInput}>
-                    <Text style={styles.label}>سنة الصنع</Text>
-                    <TextInput style={styles.input} value={carYear} onChangeText={setCarYear} placeholder="2022" placeholderTextColor="#94a3b8" textAlign="right" keyboardType="numeric" />
+                    <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>سنة الصنع</Text>
+                    <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={carYear} onChangeText={setCarYear} placeholder="2022" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" keyboardType="numeric" />
                   </View>
                 </View>
                 <View style={{ width: '100%' }}>
-                  <Text style={styles.label}>رقم اللوحة</Text>
-                  <TextInput style={styles.input} value={carPlate} onChangeText={setCarPlate} placeholder="أ ب ج 123" placeholderTextColor="#94a3b8" textAlign="right" />
+                  <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>رقم اللوحة</Text>
+                  <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={carPlate} onChangeText={setCarPlate} placeholder="أ ب ج 123" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" />
                 </View>
               </View>
             )}
 
             {vehicleCategory === 'tuktuk_alt' && (
               <View style={styles.dynamicFieldsContainer}>
-                <Text style={styles.label}>صورة المركبة (إلزامي)</Text>
-                <TouchableOpacity style={styles.imageUploadBtn} onPress={() => showImagePickerOptions(setTuktukImage)}>
+                <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>صورة المركبة (إلزامي)</Text>
+                <TouchableOpacity style={[styles.imageUploadBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={() => showImagePickerOptions(setTuktukImage)}>
                   {tuktukImage ? <Image source={{ uri: tuktukImage }} style={styles.uploadedImg} /> : <Text style={styles.uploadText}>+ اضغط للالتقاط أو المعرض</Text>}
                 </TouchableOpacity>
-                <Text style={styles.label}>رقم المركبة (إن وجد)</Text>
-                <TextInput style={styles.input} value={tuktukNumber} onChangeText={setTuktukNumber} placeholder="مثال: 12345" placeholderTextColor="#94a3b8" textAlign="right" />
+                <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>رقم المركبة (إن وجد)</Text>
+                <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={tuktukNumber} onChangeText={setTuktukNumber} placeholder="مثال: 12345" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" />
               </View>
             )}
 
             {vehicleCategory === 'scooter' && (
               <View style={styles.dynamicFieldsContainer}>
-                <Text style={styles.label}>صورة السكوتر (إلزامي)</Text>
-                <TouchableOpacity style={styles.imageUploadBtn} onPress={() => showImagePickerOptions(setScooterImage)}>
+                <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>صورة السكوتر (إلزامي)</Text>
+                <TouchableOpacity style={[styles.imageUploadBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={() => showImagePickerOptions(setScooterImage)}>
                   {scooterImage ? <Image source={{ uri: scooterImage }} style={styles.uploadedImg} /> : <Text style={styles.uploadText}>+ اضغط للالتقاط أو المعرض</Text>}
                 </TouchableOpacity>
-                <Text style={styles.label}>رقم اللوحة (إلزامي)</Text>
-                <TextInput style={styles.input} value={scooterPlate} onChangeText={setScooterPlate} placeholder="مثال: س ع 123" placeholderTextColor="#94a3b8" textAlign="right" />
+                <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>رقم اللوحة (إلزامي)</Text>
+                <TextInput style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} value={scooterPlate} onChangeText={setScooterPlate} placeholder="مثال: س ع 123" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} textAlign="right" />
               </View>
             )}
 
@@ -422,28 +391,15 @@ export default function CaptainProfile() {
               <TouchableOpacity onPress={openPhoneEditModal}>
                 <Text style={styles.editPhoneText}>تعديل الرقم</Text>
               </TouchableOpacity>
-              <Text style={styles.label}>رقم الهاتف الأساسي</Text>
+              <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>رقم الهاتف الأساسي</Text>
             </View>
             <TextInput
-              style={[styles.input, styles.disabledInput]}
+              style={[styles.input, styles.disabledInput, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#94a3b8' }]}
               value={phone}
               editable={false}
               textAlign="right"
             />
             <Text style={styles.hintText}>* يجب تأكيد ملكية الرقم الجديد بـ OTP لتغييره.</Text>
-
-            {/* 👈 خانة كلمة السر الجديدة  */}
-            <Text style={styles.label}>كلمة سر جديدة (اختياري)</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="اكتب كلمة سر جديدة لتغييرها..."
-              placeholderTextColor="#94a3b8"
-              secureTextEntry
-              textAlign="right"
-            />
-            <Text style={[styles.hintText, { color: '#10b981', marginBottom: 15 }]}>* سيتم تغيير كلمة السر فوراً دون انتظار موافقة الإدارة.</Text>
 
             <TouchableOpacity style={styles.submitBtn} onPress={submitUpdateRequest} disabled={isSubmitting}>
               {isSubmitting ? (
@@ -459,18 +415,18 @@ export default function CaptainProfile() {
 
       <Modal visible={isPhoneModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
             {phoneStep === 1 ? (
               <>
-                <Text style={styles.modalTitle}>تغيير رقم الهاتف</Text>
-                <Text style={styles.modalSubtitle}>سيتم إرسال كود تحقق (OTP) إلى الرقم الجديد عبر واتساب.</Text>
+                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تغيير رقم الهاتف</Text>
+                <Text style={[styles.modalSubtitle, isDarkMode && { color: '#94a3b8' }]}>سيتم إرسال كود تحقق (OTP) إلى الرقم الجديد عبر واتساب.</Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]}
                   value={newPhone}
                   onChangeText={setNewPhone}
                   keyboardType="phone-pad"
                   placeholder="أدخل الرقم الجديد"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'}
                   textAlign="center"
                 />
                 <View style={styles.modalButtonsRow}>
@@ -484,16 +440,16 @@ export default function CaptainProfile() {
               </>
             ) : (
               <>
-                <Text style={styles.modalTitle}>تأكيد الرقم</Text>
-                <Text style={styles.modalSubtitle}>أدخل الكود المكون من 4 أرقام المرسل إلى واتساب</Text>
+                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تأكيد الرقم</Text>
+                <Text style={[styles.modalSubtitle, isDarkMode && { color: '#94a3b8' }]}>أدخل الكود المكون من 4 أرقام المرسل إلى واتساب</Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]}
                   value={otpCode}
                   onChangeText={setOtpCode}
                   keyboardType="numeric"
                   maxLength={4}
                   placeholder="----"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'}
                   textAlign="center"
                 />
                 <View style={styles.modalButtonsRow}>

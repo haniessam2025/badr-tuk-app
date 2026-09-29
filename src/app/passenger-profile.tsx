@@ -5,13 +5,15 @@ import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'fireb
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
+import { useApp } from './AppContext'; // 👈 استدعاء العقل المركزي للمظهر الداكن
 
 export default function PassengerProfile() {
   const router = useRouter();
+  const { isDarkMode } = useApp(); // 👈 سحب حالة المظهر الداكن
+  
   const [passengerId, setPassengerId] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState(''); // 👈 متغير كلمة السر الجديدة
   const [avatar, setAvatar] = useState('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -77,48 +79,25 @@ export default function PassengerProfile() {
     }
   };
 
-  // 👈 دالة الحفظ الذكية (لو فيه باسورد هتحفظ وتطرد، لو مفيش هتحفظ عادي)
   const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('تنبيه', 'برجاء إدخال اسمك');
       return;
     }
 
-    if (password && password.length < 6) {
-      Alert.alert('تنبيه', 'كلمة السر الجديدة يجب ألا تقل عن 6 أحرف أو أرقام');
-      return;
-    }
-
     setIsSaving(true);
     try {
-      const updates: any = {
+      const updates = {
         name: name.trim(),
         avatar: avatar,
       };
 
-      let isPasswordChanged = false;
-      if (password) {
-        updates.password = password;
-        isPasswordChanged = true;
-      }
-
       await updateDoc(doc(db, 'passengers', passengerId), updates);
-
-      if (isPasswordChanged) {
-        Alert.alert('نجاح ✅', 'تم تحديث البيانات وتغيير كلمة السر. يرجى تسجيل الدخول مرة أخرى.', [
-          { 
-            text: 'حسناً', 
-            onPress: async () => {
-              await AsyncStorage.clear();
-              router.replace('/passenger-login');
-            } 
-          }
-        ]);
-      } else {
-        const newProfile = { name: name.trim(), phone, avatar };
-        await AsyncStorage.setItem('passenger_profile', JSON.stringify(newProfile));
-        Alert.alert('نجاح ✅', 'تم تحديث بياناتك بنجاح', [{ text: 'حسناً', onPress: () => router.back() }]);
-      }
+      
+      const newProfile = { name: name.trim(), phone, avatar };
+      await AsyncStorage.setItem('passenger_profile', JSON.stringify(newProfile));
+      Alert.alert('نجاح ✅', 'تم تحديث بياناتك بنجاح', [{ text: 'حسناً', onPress: () => router.back() }]);
+      
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء حفظ البيانات');
     } finally {
@@ -195,38 +174,38 @@ export default function PassengerProfile() {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4f46e5" />
+      <View style={[styles.loadingContainer, isDarkMode && { backgroundColor: '#0f172a' }]}>
+        <ActivityIndicator size="large" color="#3b82f6" />
       </View>
     );
   }
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>➔ رجوع</Text>
+    <KeyboardAvoidingView style={[styles.container, isDarkMode && { backgroundColor: '#0f172a' }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+        <TouchableOpacity style={[styles.backBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={() => router.back()}>
+          <Text style={[styles.backBtnText, isDarkMode && { color: '#e2e8f0' }]}>➔ رجوع</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>الملف الشخصي</Text>
+        <Text style={[styles.headerTitle, isDarkMode && { color: '#ffffff' }]}>الملف الشخصي</Text>
         <View style={{ width: 60 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.avatarContainer}>
-          <Image source={{ uri: avatar }} style={styles.avatar} />
-          <TouchableOpacity style={styles.editAvatarBtn} onPress={pickImage}>
+          <Image source={{ uri: avatar }} style={[styles.avatar, isDarkMode && { borderColor: '#1e40af', backgroundColor: '#334155' }]} />
+          <TouchableOpacity style={[styles.editAvatarBtn, isDarkMode && { borderColor: '#1e293b' }]} onPress={pickImage}>
             <Text style={styles.editAvatarIcon}>📷</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.formContainer}>
-          <Text style={styles.label}>الاسم</Text>
+        <View style={[styles.formContainer, isDarkMode && { backgroundColor: '#1e293b', shadowOpacity: 0.3 }]}>
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الاسم</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]}
             value={name}
             onChangeText={setName}
             placeholder="أدخل اسمك"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'}
             textAlign="right"
           />
 
@@ -234,24 +213,12 @@ export default function PassengerProfile() {
             <TouchableOpacity onPress={openPhoneEditModal}>
               <Text style={styles.editPhoneText}>تعديل الرقم</Text>
             </TouchableOpacity>
-            <Text style={styles.label}>رقم الهاتف</Text>
+            <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>رقم الهاتف</Text>
           </View>
           <TextInput
-            style={[styles.input, styles.disabledInput]}
+            style={[styles.input, styles.disabledInput, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#94a3b8' }]}
             value={phone}
             editable={false}
-            textAlign="right"
-          />
-
-          {/* 👈 خانة كلمة السر الجديدة داخل التصميم كما طلبت */}
-          <Text style={styles.label}>كلمة سر جديدة (اختياري)</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="اكتب كلمة سر جديدة لتغييرها..."
-            placeholderTextColor="#9ca3af"
-            secureTextEntry
             textAlign="right"
           />
 
@@ -267,18 +234,18 @@ export default function PassengerProfile() {
 
       <Modal visible={isPhoneModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
             {phoneStep === 1 ? (
               <>
-                <Text style={styles.modalTitle}>تغيير رقم الهاتف</Text>
-                <Text style={styles.modalSubtitle}>سيتم إرسال كود تحقق (OTP) إلى الرقم الجديد عبر واتساب.</Text>
+                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تغيير رقم الهاتف</Text>
+                <Text style={[styles.modalSubtitle, isDarkMode && { color: '#94a3b8' }]}>سيتم إرسال كود تحقق (OTP) إلى الرقم الجديد عبر واتساب.</Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]}
                   value={newPhone}
                   onChangeText={setNewPhone}
                   keyboardType="phone-pad"
                   placeholder="أدخل الرقم الجديد"
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'}
                   textAlign="center"
                 />
                 <View style={styles.modalButtonsRow}>
@@ -292,16 +259,16 @@ export default function PassengerProfile() {
               </>
             ) : (
               <>
-                <Text style={styles.modalTitle}>تأكيد الرقم</Text>
-                <Text style={styles.modalSubtitle}>أدخل الكود المكون من 4 أرقام المرسل إلى واتساب</Text>
+                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تأكيد الرقم</Text>
+                <Text style={[styles.modalSubtitle, isDarkMode && { color: '#94a3b8' }]}>أدخل الكود المكون من 4 أرقام المرسل إلى واتساب</Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]}
                   value={otpCode}
                   onChangeText={setOtpCode}
                   keyboardType="numeric"
                   maxLength={4}
                   placeholder="----"
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'}
                   textAlign="center"
                 />
                 <View style={styles.modalButtonsRow}>
