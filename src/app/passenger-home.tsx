@@ -9,10 +9,9 @@ import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoiding
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
-const [routeFlexibility, setRouteFlexibility] = useState<'fast' | 'flexible'>('fast');
-const [confirmedDestCoords, setConfirmedDestCoords] = useState<any>(null);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
+// 👈 تم استرجاع رأس دالة كارت العرض اللي كانت محذوفة
 const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, onAcceptOffer: (offer: any) => void, isDarkMode: boolean }) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
@@ -39,22 +38,7 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, 
     if (imgStr.startsWith('http') || imgStr.startsWith('data:image') || imgStr.startsWith('file:/')) return imgStr;
     return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
   };
-const confirmDestinationWithCoords = async () => {
-    setConfirmedDestinationFilter(destinationFilterText);
-    Alert.alert("جاري المعالجة...", "جاري تحديد نقطة الوجهة لضمان دقة مسافة الطلبات.");
-    try {
-      // استخدام Expo Location لتحويل النص لإحداثيات (بديل مجاني وسريع للـ Geocoding)
-      const geo = await Location.geocodeAsync(destinationFilterText + ' مصر');
-      if (geo.length > 0) {
-        setConfirmedDestCoords({ latitude: geo[0].latitude, longitude: geo[0].longitude });
-        Alert.alert("تم التفعيل بنجاح 📍", `تطبيقك الآن مبرمج لاستقبال المشاوير المتجهة لـ "${destinationFilterText}".\n\nنطاق البحث: ${routeFlexibility === 'fast' ? 'لا يبعد عن وجهتك أكثر من 10 كم.' : 'لا يبعد عن وجهتك أكثر من 17 كم.'}`);
-      } else {
-        Alert.alert("تنبيه", "تم حفظ الوجهة كنص، ولكن لم نتمكن من تحديد نقطة الإحداثيات بدقة من الخريطة.");
-      }
-    } catch (error) {
-      Alert.alert("خطأ", "حدثت مشكلة في الاتصال بالخريطة.");
-    }
-  };
+
   return (
     <View style={[styles.offerCardPro, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
       <View style={[styles.offerTopRow, isDarkMode && { borderBottomColor: '#334155' }]}>
@@ -171,9 +155,6 @@ export default function PassengerHome() {
     }
   };
 
-  // ---------------------------------------------------------
-  // 🚀 مراقب الإشعارات والرسائل المباشرة من الإدارة (المفقودات وغيرها)
-  // ---------------------------------------------------------
   useEffect(() => {
     let unsubscribeNotif: any;
     
@@ -201,7 +182,6 @@ export default function PassengerHome() {
                 text: 'حسناً', 
                 onPress: async () => {
                   try {
-                    // تعليم الإشعار كمقروء عشان ميظهرش تاني
                     await updateDoc(doc(db, 'notifications', notifId), { read: true });
                   } catch (e) {}
                 }
@@ -215,7 +195,6 @@ export default function PassengerHome() {
     listenToNotifications();
     return () => { if (unsubscribeNotif) unsubscribeNotif(); };
   }, []);
-  // ---------------------------------------------------------
 
   useEffect(() => {
     let unsubscribe: any;
@@ -650,14 +629,22 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
      else if (vType === 'scooter') {
         base = 12 + ((validDests.length - 1) * 5);
      }
-     else {
-        let basePriceForOne = 17 + ((validDests.length - 1) * 7);
-        const count = parseInt(passCountStr) || 1;
-        const extraPassengers = count - 1;
-        const passengerMultiplier = 1 + (extraPassengers * 0.40);
-        base = basePriceForOne * passengerMultiplier;
-     }
-
+    else {
+               const count = parseInt(passCountStr) || 1;
+               const extraPassengers = count - 1;
+               
+               if (requestedTuktukType === 'كيوت 3 راكب') {
+                 // خطة الطوارئ للكيوت 3 راكب: السعر المبدئي مبني على 6.5ج وزيادة 25%
+                 let basePriceForOne = 15 + ((validDests.length - 1) * 6.5);
+                 const passengerMultiplier = 1 + (extraPassengers * 0.25);
+                 base = basePriceForOne * passengerMultiplier;
+               } else {
+                 // خطة الطوارئ للجالاكسي 7 راكب (بدون تغيير)
+                 let basePriceForOne = 17 + ((validDests.length - 1) * 7);
+                 const passengerMultiplier = 1 + (extraPassengers * 0.40);
+                 base = basePriceForOne * passengerMultiplier;
+               }
+             }
      let finalBase = Math.ceil(base);
      setCalculatedBasePrice(finalBase); 
      setBasePriceForSuggestions(finalBase);
@@ -692,7 +679,9 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
           const data = await response.json();
 
           if (data.code === 'Ok') {
-             const totalDistanceKm = data.routes[0].distance / 1000;
+             // إضافة معامل 1.25 لمطابقة مسافة OSRM مع مسار السيارات الفعلي في جوجل ماب
+             const osrmDistance = data.routes[0].distance / 1000;
+             const totalDistanceKm = osrmDistance * 1.25; 
              setCalculatedDistance(totalDistanceKm.toFixed(1));
 
              let calculatedPrice = 0;
@@ -705,15 +694,33 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
                } else {
                  calculatedPrice = 205 + ((totalDistanceKm - 45) * 3.2);
                }
-             } else if (vType === 'scooter') {
-               calculatedPrice = Math.max(12, totalDistanceKm * 3.75);
+            } else if (vType === 'scooter') {
+               // حساب سعر الاسكوتر بناءً على شرائح المسافة التراكمية:
+               if (totalDistanceKm <= 5) {
+                 calculatedPrice = totalDistanceKm * 5.60;
+               } else if (totalDistanceKm <= 10) {
+                 calculatedPrice = (5 * 5.60) + ((totalDistanceKm - 5) * 5.20);
+               } else {
+                 calculatedPrice = (5 * 5.60) + (5 * 5.20) + ((totalDistanceKm - 10) * 4.75);
+               }
+               // بحد أدنى 12 جنيه لأي مشوار سكوتر لضمان حق الكابتن في المسافات القصيرة جداً
+               calculatedPrice = Math.max(12, calculatedPrice);
              } else {
-               let basePriceForOne = Math.max(15, totalDistanceKm * 7);
-               const count = parseInt(passCountStr) || 1;
-               const extraPassengers = count - 1;
-               const passengerMultiplier = 1 + (extraPassengers * 0.40); 
-               calculatedPrice = basePriceForOne * passengerMultiplier;
-             }
+                       const count = parseInt(passCountStr) || 1;
+                       const extraPassengers = count - 1;
+                       
+                       if (requestedTuktukType === 'كيوت 3 راكب') {
+                         // الكيوت 3 راكب: 6.5 جنيه للكيلو بحد أدنى 10ج، و25% زيادة لكل راكب إضافي
+                         let basePriceForOne = Math.max(10, totalDistanceKm * 6.5);
+                         const passengerMultiplier = 1 + (extraPassengers * 0.25);
+                         calculatedPrice = basePriceForOne * passengerMultiplier;
+                       } else {
+                         // الجالاكسي 7 راكب: المنطق الحالي بدون تغيير
+                         let basePriceForOne = Math.max(15, totalDistanceKm * 7);
+                         const passengerMultiplier = 1 + (extraPassengers * 0.40);
+                         calculatedPrice = basePriceForOne * passengerMultiplier;
+                       }
+                     }
 
              let finalBase = Math.ceil(calculatedPrice);
              setCalculatedBasePrice(finalBase);
@@ -832,6 +839,8 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
     }
     try {
       const rideData = {
+        // لو السعر اللي الراكب طالبه بيساوي السعر الأساسي المحسوب من النظام، يبقى ده السعر العادل
+        isFairPrice: price === calculatedBasePrice.toString(), 
         passengerId: passengerProfile.id || await AsyncStorage.getItem('currentPassengerId'),
         name: passengerProfile.name,
         phone: passengerProfile.phone,

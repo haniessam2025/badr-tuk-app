@@ -114,6 +114,11 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
             <View style={styles.newPriceCol}>
               <Text style={styles.newTripDistanceText}>{tripDistanceDisplay} ~</Text>
               <Text style={styles.newPriceText}>{activePrice} EGP</Text>
+              {item.isFairPrice && (
+                <View style={{backgroundColor: '#10b981', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2}}>
+                  <Text style={{color: '#ffffff', fontSize: 10, fontWeight: 'bold'}}>السعر العادل ⚖️</Text>
+                </View>
+              )}
             </View>
             <View style={styles.newActionDotsCol}>
               <Text style={styles.newArrowIcon}>{isExpanded ? '▴' : '▾'}</Text>
@@ -177,7 +182,6 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
     </View>
   );
 };
-
 const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestination: boolean }) => {
   const lightningAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {

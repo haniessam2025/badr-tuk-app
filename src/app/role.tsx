@@ -8,11 +8,10 @@ export default function RoleScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>اختر نوع المستخدم</Text>
 
-      {/* زر الراكب */}
+{/* زر الراكب */}
       <TouchableOpacity style={styles.button} onPress={() => router.push('/passenger-choice')}>
-        <Text style={styles.buttonText}>راكب 🛺</Text>
+        <Text style={styles.buttonText}>راكب 👨‍💼</Text>
       </TouchableOpacity>
-
       {/* زر الكابتن يوجهه إلى صفحة الاختيار (تسجيل جديد أو تسجيل الدخول) */}
       <TouchableOpacity style={[styles.button, styles.captainButton]} onPress={() => router.push('/captain-choice')}>
         <Text style={styles.buttonText}>كابتن 👨‍✈️</Text>
