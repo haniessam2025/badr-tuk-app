@@ -9,9 +9,10 @@ import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoiding
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
+const [routeFlexibility, setRouteFlexibility] = useState<'fast' | 'flexible'>('fast');
+const [confirmedDestCoords, setConfirmedDestCoords] = useState<any>(null);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-// 👈 تم استرجاع رأس دالة كارت العرض اللي كانت محذوفة
 const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, onAcceptOffer: (offer: any) => void, isDarkMode: boolean }) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
@@ -38,7 +39,6 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, 
     if (imgStr.startsWith('http') || imgStr.startsWith('data:image') || imgStr.startsWith('file:/')) return imgStr;
     return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
   };
-
   return (
     <View style={[styles.offerCardPro, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
       <View style={[styles.offerTopRow, isDarkMode && { borderBottomColor: '#334155' }]}>
@@ -141,7 +141,36 @@ export default function PassengerHome() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState('');
   const latestMsgTimer = useRef<any>(null);
+  // 📍 دالة إرسال الاستغاثة الطارئة (SOS) من داخل الرحلة
+  const handleRideSOS = () => {
+    Alert.alert(
+      "تأكيد الاستغاثة ⚠️",
+      "هل أنت متأكد أنك في خطر وتريد إرسال استغاثة طارئة للإدارة؟",
+      [
+        { text: "إلغاء", style: "cancel" },
+        { 
+          text: "نعم، أنقذوني", 
+          style: "destructive", 
+          onPress: async () => {
+            try {
+              // بنبعت بيانات الراكب للفايربيز (استخدمنا علامة الاستفهام عشان نتجنب أي خطأ لو البيانات لسة بتحمل)
+              await addDoc(collection(db, 'sos_alerts'), {
+                passengerId: passengerProfile?.id || 'unknown',
+                passengerName: passengerProfile?.name || 'غير معروف',
+                passengerPhone: passengerProfile?.phone || '',
+                timestamp: new Date().getTime(),
+                status: 'active', // حالة نشطة للإدارة
+              });
 
+              Alert.alert("تم الإرسال", "تم إبلاغ الإدارة بنجاح، جاري التحرك والاتصال بأرقام الطوارئ.");
+            } catch (error) {
+              Alert.alert("خطأ", "حدث مشكلة في الإرسال، تأكد من الإنترنت.");
+            }
+          } 
+        }
+      ]
+    );
+  };
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
   const prevOffersCountRef = useRef(0);
 
@@ -155,6 +184,9 @@ export default function PassengerHome() {
     }
   };
 
+  // ---------------------------------------------------------
+  // 🚀 مراقب الإشعارات والرسائل المباشرة من الإدارة (المفقودات وغيرها)
+  // ---------------------------------------------------------
   useEffect(() => {
     let unsubscribeNotif: any;
     
@@ -182,6 +214,7 @@ export default function PassengerHome() {
                 text: 'حسناً', 
                 onPress: async () => {
                   try {
+                    // تعليم الإشعار كمقروء عشان ميظهرش تاني
                     await updateDoc(doc(db, 'notifications', notifId), { read: true });
                   } catch (e) {}
                 }
@@ -195,6 +228,7 @@ export default function PassengerHome() {
     listenToNotifications();
     return () => { if (unsubscribeNotif) unsubscribeNotif(); };
   }, []);
+  // ---------------------------------------------------------
 
   useEffect(() => {
     let unsubscribe: any;
@@ -263,6 +297,8 @@ export default function PassengerHome() {
   const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  
   const sidebarAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   const openSidebar = () => {
@@ -295,7 +331,17 @@ export default function PassengerHome() {
 
   const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0 });
   const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
+// 👈 متغيرات ودالة جلب إشعارات الراكب (تم وضعها هنا لتجنب خطأ الـ Scope)
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
 
+  useEffect(() => {
+    if (!passengerProfile || !passengerProfile.id) return;
+    const q = query(collection(db, 'notifications'), where('userId', '==', passengerProfile.id), where('read', '==', false));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadNotifsCount(snapshot.docs.length);
+    });
+    return () => unsubscribe();
+  }, [passengerProfile]);
   const getValidAvatar = (imgStr: any) => {
     if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return DEFAULT_AVATAR;
     if (imgStr.length > 950000) return DEFAULT_AVATAR;
@@ -629,22 +675,14 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
      else if (vType === 'scooter') {
         base = 12 + ((validDests.length - 1) * 5);
      }
-    else {
-               const count = parseInt(passCountStr) || 1;
-               const extraPassengers = count - 1;
-               
-               if (requestedTuktukType === 'كيوت 3 راكب') {
-                 // خطة الطوارئ للكيوت 3 راكب: السعر المبدئي مبني على 6.5ج وزيادة 25%
-                 let basePriceForOne = 15 + ((validDests.length - 1) * 6.5);
-                 const passengerMultiplier = 1 + (extraPassengers * 0.25);
-                 base = basePriceForOne * passengerMultiplier;
-               } else {
-                 // خطة الطوارئ للجالاكسي 7 راكب (بدون تغيير)
-                 let basePriceForOne = 17 + ((validDests.length - 1) * 7);
-                 const passengerMultiplier = 1 + (extraPassengers * 0.40);
-                 base = basePriceForOne * passengerMultiplier;
-               }
-             }
+     else {
+        let basePriceForOne = 17 + ((validDests.length - 1) * 7);
+        const count = parseInt(passCountStr) || 1;
+        const extraPassengers = count - 1;
+        const passengerMultiplier = 1 + (extraPassengers * 0.40);
+        base = basePriceForOne * passengerMultiplier;
+     }
+
      let finalBase = Math.ceil(base);
      setCalculatedBasePrice(finalBase); 
      setBasePriceForSuggestions(finalBase);
@@ -679,9 +717,7 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
           const data = await response.json();
 
           if (data.code === 'Ok') {
-             // إضافة معامل 1.25 لمطابقة مسافة OSRM مع مسار السيارات الفعلي في جوجل ماب
-             const osrmDistance = data.routes[0].distance / 1000;
-             const totalDistanceKm = osrmDistance * 1.25; 
+             const totalDistanceKm = data.routes[0].distance / 1000;
              setCalculatedDistance(totalDistanceKm.toFixed(1));
 
              let calculatedPrice = 0;
@@ -694,33 +730,15 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
                } else {
                  calculatedPrice = 205 + ((totalDistanceKm - 45) * 3.2);
                }
-            } else if (vType === 'scooter') {
-               // حساب سعر الاسكوتر بناءً على شرائح المسافة التراكمية:
-               if (totalDistanceKm <= 5) {
-                 calculatedPrice = totalDistanceKm * 5.60;
-               } else if (totalDistanceKm <= 10) {
-                 calculatedPrice = (5 * 5.60) + ((totalDistanceKm - 5) * 5.20);
-               } else {
-                 calculatedPrice = (5 * 5.60) + (5 * 5.20) + ((totalDistanceKm - 10) * 4.75);
-               }
-               // بحد أدنى 12 جنيه لأي مشوار سكوتر لضمان حق الكابتن في المسافات القصيرة جداً
-               calculatedPrice = Math.max(12, calculatedPrice);
+             } else if (vType === 'scooter') {
+               calculatedPrice = Math.max(12, totalDistanceKm * 3.75);
              } else {
-                       const count = parseInt(passCountStr) || 1;
-                       const extraPassengers = count - 1;
-                       
-                       if (requestedTuktukType === 'كيوت 3 راكب') {
-                         // الكيوت 3 راكب: 6.5 جنيه للكيلو بحد أدنى 10ج، و25% زيادة لكل راكب إضافي
-                         let basePriceForOne = Math.max(10, totalDistanceKm * 6.5);
-                         const passengerMultiplier = 1 + (extraPassengers * 0.25);
-                         calculatedPrice = basePriceForOne * passengerMultiplier;
-                       } else {
-                         // الجالاكسي 7 راكب: المنطق الحالي بدون تغيير
-                         let basePriceForOne = Math.max(15, totalDistanceKm * 7);
-                         const passengerMultiplier = 1 + (extraPassengers * 0.40);
-                         calculatedPrice = basePriceForOne * passengerMultiplier;
-                       }
-                     }
+               let basePriceForOne = Math.max(15, totalDistanceKm * 7);
+               const count = parseInt(passCountStr) || 1;
+               const extraPassengers = count - 1;
+               const passengerMultiplier = 1 + (extraPassengers * 0.40); 
+               calculatedPrice = basePriceForOne * passengerMultiplier;
+             }
 
              let finalBase = Math.ceil(calculatedPrice);
              setCalculatedBasePrice(finalBase);
@@ -839,8 +857,6 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
     }
     try {
       const rideData = {
-        // لو السعر اللي الراكب طالبه بيساوي السعر الأساسي المحسوب من النظام، يبقى ده السعر العادل
-        isFairPrice: price === calculatedBasePrice.toString(), 
         passengerId: passengerProfile.id || await AsyncStorage.getItem('currentPassengerId'),
         name: passengerProfile.name,
         phone: passengerProfile.phone,
@@ -1083,9 +1099,24 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         </Animated.View>
       )}
       <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }, { flexDirection: 'row-reverse' }]}>
-        <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={openSidebar}>
-          <Text style={[styles.headerMenuText, isDarkMode && { color: '#e2e8f0' }]}>≡</Text>
-        </TouchableOpacity>
+        {/* اليمين: القائمة الجانبية وزر الإشعارات للراكب */}
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={openSidebar}>
+            <Text style={[styles.headerMenuText, isDarkMode && { color: '#e2e8f0' }]}>≡</Text>
+            {/* البادج الأحمر الصغير على القائمة الجانبية */}
+            {unreadNotifsCount > 0 && <View style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: 6, backgroundColor: '#ef4444', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }} />}
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative', padding: 8 }]} onPress={() => router.push('/passenger-notifications')}>
+            <Ionicons name="notifications-outline" size={24} color={isDarkMode ? "#e2e8f0" : "#64748b"} />
+            {/* الرقم الأحمر بتاع عدد الإشعارات */}
+            {unreadNotifsCount > 0 && (
+              <View style={{ position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}>
+                <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: 'bold' }}>{unreadNotifsCount > 99 ? '+99' : unreadNotifsCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity style={styles.userInfoCentered} onPress={() => router.push('/passenger-profile')}>
           <Image source={{ uri: passengerProfile.avatar }} style={[styles.profileAvatar, isDarkMode && { borderColor: '#475569', borderWidth: 1 }]} />
@@ -1280,7 +1311,25 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
                 {rideStatus === 'accepted' ? 'الكابتن في طريقه إليك ...' : rideStatus === 'passenger_on_the_way' ? 'أنت الآن في طريقك للكابتن .' : rideStatus === 'waiting_for_scan' ? 'بانتظار إدخال أو مسح الكود' : 'الرحلة جارية الآن'}
               </Text>
             )}
-            
+            {/* زرار الاستغاثة السريع أثناء الرحلة */}
+            <TouchableOpacity 
+              style={{
+                backgroundColor: '#ef4444', 
+                paddingVertical: 12, 
+                borderRadius: 10, 
+                flexDirection: 'row-reverse', 
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                gap: 10,
+                marginTop: 15,
+                borderWidth: 2,
+                borderColor: '#b91c1c'
+              }}
+              onPress={handleRideSOS}
+            >
+              <Ionicons name="warning" size={24} color="#ffffff" />
+              <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold' }}>أنا في خطر (SOS)</Text>
+            </TouchableOpacity>
             {latestMessage ? (
               <View style={{ backgroundColor: isDarkMode ? '#334155' : '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2 }}>
                 <Text style={{ fontSize: 22, marginLeft: 10 }}>💬</Text>
@@ -1522,23 +1571,48 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
               <Text style={styles.sidebarPhone}>{passengerProfile.phone}</Text>
             </View>
             <ScrollView style={styles.sidebarLinks}>
+              
+              {/* 1. سجل الرحلات */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-history'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text>
               </TouchableOpacity>
+
+              {/* 2. تقييماتي */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-ratings'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>تقييماتي</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); openEmergencyEdit(); }}>
+
+              {/* 3. الإشعارات */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }, { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }]} onPress={() => { closeSidebar(); router.push('/passenger-notifications'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الإشعارات 🔔</Text>
+                {unreadNotifsCount > 0 && (
+                  <View style={{ backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 26, alignItems: 'center' }}>
+                    <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>{unreadNotifsCount}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* 4. رقم الطوارئ والأمان */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/emergency-contacts'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>رقم الطوارئ والأمان</Text>
               </TouchableOpacity>
+
+              {/* 5. الدعم الفني */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text>
               </TouchableOpacity>
+
+              {/* 6. المقترحات والشكاوى */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-complaints'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى</Text>
               </TouchableOpacity>
-            </ScrollView>
-            <TouchableOpacity 
+
+              {/* 7. السلامة */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-safety'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>السلامة 🛡️</Text>
+              </TouchableOpacity>
+
+            </ScrollView>            <TouchableOpacity 
               style={{ 
                 backgroundColor: '#10b981', 
                 paddingVertical: 14, 
@@ -1689,13 +1763,33 @@ const styles = StyleSheet.create({
   sidebarOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', flexDirection: 'row-reverse' },
   sidebarCloseArea: { flex: 1 },
   sidebarPanel: { width: '75%', backgroundColor: '#ffffff', height: '100%', elevation: 15 },
-  sidebarHeader: { backgroundColor: '#1e293b', padding: 20, paddingTop: 50, alignItems: 'center', borderBottomWidth: 3, borderColor: '#3b82f6' },
-  sidebarAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#3b82f6', marginBottom: 10 },
-  sidebarName: { fontSize: 18, fontWeight: 'bold', color: '#ffffff' },
-  sidebarPhone: { fontSize: 14, color: '#94a3b8', marginTop: 5 },
-  sidebarLinks: { padding: 20 },
-  sidebarLink: { paddingVertical: 18, borderBottomWidth: 1, borderColor: '#f1f5f9' },
-  sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
+  // --- ستايلات القائمة الجانبية (Sidebar) بعد التعديل ---
+  sidebarHeader: { 
+    backgroundColor: '#1e293b', 
+    padding: 15, // قللنا المسافة من 20 لـ 15
+    paddingTop: 30, // ده كان 50، قللناه عشان نرفع الصورة لفوق
+    alignItems: 'center', 
+    borderBottomWidth: 3, 
+    borderColor: '#eab308' 
+  },
+  sidebarAvatar: { 
+    width: 70, // صغرنا حجم الصورة شوية لتناسق أفضل (كانت 80)
+    height: 70, 
+    borderRadius: 35, 
+    borderWidth: 2, 
+    borderColor: '#eab308', 
+    marginBottom: 8 // مسافة أقل تحت الصورة
+  },
+  sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#ffffff' }, // صغرنا الخط سنة
+  sidebarPhone: { fontSize: 13, color: '#94a3b8', marginTop: 3 },
+  sidebarLinks: { padding: 15 }, // قللنا الحواف الجانبية للزراير
+  sidebarLink: { 
+    paddingVertical: 12, // دي أهم مسافة! قللناها من 18 لـ 12 عشان الزراير تقرب
+    borderBottomWidth: 1, 
+    borderColor: '#f1f5f9' 
+  },
+  sidebarLinkText: { fontSize: 15, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
+  // ----------------------------------------------------
   sidebarLogoutBtn: {backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
   sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },

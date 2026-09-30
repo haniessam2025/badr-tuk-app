@@ -1,5 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDocs, limit, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -15,6 +16,28 @@ export default function AdminComplaints() {
   const [refreshing, setRefreshing] = useState(false); // 👈 حالة التحديث اليدوي
   const [replyText, setReplyText] = useState<{ [key: string]: string }>({});
   const [sendingId, setSendingId] = useState<string | null>(null);
+
+  // 🚨 حالة مراقبة الاستغاثات (SOS)
+  const [sosCount, setSosCount] = useState(0);
+
+  useEffect(() => {
+    // رادار الاستغاثات الطارئة يعمل في الخلفية
+    const q = query(collection(db, 'sos_alerts'), orderBy('timestamp', 'desc'), limit(10));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      setSosCount(snapshot.size);
+      if (!snapshot.empty) {
+        Alert.alert(
+          "🚨 إنذار طوارئ (SOS) 🚨",
+          "يوجد راكب في خطر يطلب التدخل الفوري!",
+          [
+            { text: "تجاهل", style: "cancel" },
+            { text: "عرض التفاصيل", onPress: () => router.push('/admin-safety') }
+          ]
+        );
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // 👈 دالة جلب البيانات الموفرة للباقة (مرة واحدة بدلاً من المراقبة المستمرة)
   const fetchTickets = async () => {
@@ -172,10 +195,50 @@ export default function AdminComplaints() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backBtnText}>رجوع ⬅️</Text></TouchableOpacity>
-        <Text style={styles.headerTitle}>شكاوى ومقترحات ومفقودات 📬</Text>
+      <View style={[styles.header, { justifyContent: 'space-between', alignItems: 'center' }]}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backBtnText}>رجوع ⬅️️</Text></TouchableOpacity>
+        
+        {/* زرار الطوارئ الثابت في الهيدر */}
+        <TouchableOpacity 
+          style={{ 
+            backgroundColor: sosCount > 0 ? '#ef4444' : '#1e293b', 
+            paddingVertical: 8, 
+            paddingHorizontal: 12, 
+            borderRadius: 8, 
+            borderWidth: 1, 
+            borderColor: sosCount > 0 ? '#b91c1c' : '#334155',
+            flexDirection: 'row-reverse',
+            alignItems: 'center',
+            gap: 6
+          }}
+          onPress={() => router.push('/admin-safety')}
+        >
+          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>
+            🚨 طوارئ {sosCount > 0 ? `(${sosCount})` : ''}
+          </Text>
+        </TouchableOpacity>
+
+        <Text style={styles.headerTitle}>شكاوى ومقترحات</Text>
       </View>
+
+      {/* 🚨 زرار الأمان والطوارئ (SOS) الجديد 🚨 */}
+      <TouchableOpacity 
+        style={[styles.sosButton, { backgroundColor: sosCount > 0 ? '#fee2e2' : '#1e293b', borderColor: sosCount > 0 ? '#ef4444' : '#334155' }]} 
+        onPress={() => router.push('/admin-safety')}
+      >
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+          <Ionicons name="shield-checkmark" size={24} color={sosCount > 0 ? "#ef4444" : "#94a3b8"} />
+          <Text style={[styles.sosButtonText, { color: sosCount > 0 ? '#ef4444' : '#94a3b8' }]}>
+            الأمان والطوارئ (SOS)
+          </Text>
+        </View>
+        
+        {sosCount > 0 && (
+          <View style={styles.sosBadge}>
+            <Text style={styles.sosBadgeText}>{sosCount}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
 
       <View style={styles.mainTabsContainer}>
         <TouchableOpacity style={[styles.mainTab, activeMainTab === 'complaint' && styles.mainTabActiveComplaint]} onPress={() => setActiveMainTab('complaint')}>
@@ -240,7 +303,13 @@ export default function AdminComplaints() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a', padding: 15, paddingTop: 45 },
-  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  
+  // ستايلات زرار الطوارئ الجديد
+  sosButton: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', padding: 15, borderRadius: 12, marginBottom: 20, borderWidth: 1 },
+  sosButtonText: { fontSize: 16, fontWeight: 'bold' },
+  sosBadge: { backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  sosBadgeText: { color: '#ffffff', fontSize: 13, fontWeight: 'bold' },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#eab308' },
   backBtn: { backgroundColor: '#334155', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   backBtnText: { color: '#f8fafc', fontWeight: 'bold' },

@@ -496,11 +496,15 @@ const setAsCarAndClose = async () => {
     try { const savedDismissed = await AsyncStorage.getItem('dismissed_requests'); if (savedDismissed) setDismissedRequests(JSON.parse(savedDismissed)); } catch (e) {}
   };
 
+  // 👈 متغير جديد لتخزين عدد الإشعارات الغير مقروءة
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+
   useEffect(() => {
     if (!captainProfile.id) return;
     const q = query(collection(db, 'notifications'), where('userId', '==', captainProfile.id), where('read', '==', false));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) { setAdminMessage({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() }); setIsAdminMsgVisible(true); }
+      // بنعد الإشعارات ونخزنها عشان نظهرها في البادج الأحمر
+      setUnreadNotifsCount(snapshot.docs.length);
     });
     return () => unsubscribe();
   }, [captainProfile.id]);
@@ -822,10 +826,24 @@ const handleSelectPlace = (placeName: string) => {
       {/* الهيدر الجديد المنظم حسب طلبك */}
       <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
         
-        {/* اليمين: القائمة الجانبية */}
-        <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={openSidebar}>
-          <Text style={[styles.headerMenuText, isDarkMode && { color: '#e2e8f0' }]}>≡</Text>
-        </TouchableOpacity>
+        {/* اليمين: القائمة الجانبية وزر الإشعارات (جرس) */}
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={openSidebar}>
+            <Text style={[styles.headerMenuText, isDarkMode && { color: '#e2e8f0' }]}>≡</Text>
+            {/* نقطة حمراء صغيرة على القائمة الجانبية لو في إشعار */}
+            {unreadNotifsCount > 0 && <View style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: 6, backgroundColor: '#ef4444', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }} />}
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={[styles.headerSettingsBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={() => router.push('/captain-notifications')}>
+            <Ionicons name="notifications-outline" size={24} color={isDarkMode ? "#e2e8f0" : "#64748b"} />
+            {/* رقم الإشعارات باللون الأحمر */}
+            {unreadNotifsCount > 0 && (
+              <View style={{ position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}>
+                <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: 'bold' }}>{unreadNotifsCount > 99 ? '+99' : unreadNotifsCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
 
         {/* النص: صورة البروفايل والاسم والتقييم */}
         <TouchableOpacity style={styles.userInfoCentered} onPress={() => router.push('/captain-profile')}>
@@ -981,7 +999,7 @@ const handleSelectPlace = (placeName: string) => {
               />
             )} 
             showsVerticalScrollIndicator={false} 
-            contentContainerStyle={{ paddingBottom: 20 }} 
+            contentContainerStyle={{ paddingBottom: 100 }} 
           />
         )}
       </>      ) : (
@@ -1072,6 +1090,29 @@ const handleSelectPlace = (placeName: string) => {
         </ScrollView>
       )}
 
+      {/* 🚀 شريط التنقل السفلي السريع للكابتن 🚀 */}
+      <View style={[styles.bottomNavContainer, isDarkMode && { backgroundColor: '#1e293b', borderTopColor: '#334155' }]}>
+        
+        {/* زر الطلبات (يمين) - هو مفعل حالياً لأنه في نفس الصفحة */}
+        <TouchableOpacity style={styles.navItem} onPress={() => { /* هو في الصفحة بالفعل */ }}>
+          <Ionicons name="map" size={24} color={'#10b981'} />
+          <Text style={[styles.navItemText, { color: '#10b981' }]}>الطلبات</Text>
+        </TouchableOpacity>
+
+        {/* زر التقييمات (وسط) */}
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/captain-ratings')}>
+          <Ionicons name="star-outline" size={24} color={isDarkMode ? '#94a3b8' : '#64748b'} />
+          <Text style={[styles.navItemText, isDarkMode && { color: '#94a3b8' }]}>تقييماتي</Text>
+        </TouchableOpacity>
+
+        {/* زر المحفظة (يسار) */}
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/captain-wallet')}>
+          <Ionicons name="wallet-outline" size={24} color={isDarkMode ? '#94a3b8' : '#64748b'} />
+          <Text style={[styles.navItemText, isDarkMode && { color: '#94a3b8' }]}>المحفظة</Text>
+        </TouchableOpacity>
+
+      </View>
+
       <Modal visible={isTuktukTypeModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlayAdmin}>
           <View style={[styles.adminMsgModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -1149,6 +1190,16 @@ const handleSelectPlace = (placeName: string) => {
               <Text style={styles.sidebarPhone}>{captainProfile.phone}</Text>
             </View>
             <ScrollView style={styles.sidebarLinks}>
+              {/* زر الإشعارات المضاف حديثاً */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }, { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }]} onPress={() => { closeSidebar(); router.push('/captain-notifications'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الإشعارات 🔔</Text>
+                {unreadNotifsCount > 0 && (
+                  <View style={{ backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 26, alignItems: 'center' }}>
+                    <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>{unreadNotifsCount}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-wallet'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المحفظة</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-history'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-ratings'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>التقييمات</Text></TouchableOpacity>
@@ -1400,7 +1451,7 @@ const styles = StyleSheet.create({
   editPriceBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
   acceptBtn: { flex: 1, backgroundColor: '#2563eb', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   acceptBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
-  scrollContainer: { flexGrow: 1, paddingBottom: 20 },
+  scrollContainer: { flexGrow: 1, paddingBottom: 100 },
   activeRideContainer: { backgroundColor: '#ffffff', padding: 20, borderRadius: 20, borderWidth: 2, borderColor: '#2563eb', elevation: 6 },
   activeRidePulseContainer: { backgroundColor: '#ecfdf5', borderColor: '#059669' },
   activeRideTitle: { fontSize: 18, fontWeight: 'bold', color: '#2563eb', textAlign: 'center', marginBottom: 20 },
@@ -1550,5 +1601,37 @@ const styles = StyleSheet.create({
   newProgressBarBg: { width: '100%', height: 4, backgroundColor: '#fde047', borderRadius: 2, overflow: 'hidden' },
   newDistanceBadge: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: '#f8fafc', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginTop: 4, borderWidth: 1, borderColor: '#e2e8f0' },
   newDistanceBadgeText: { fontSize: 10, color: '#475569', fontWeight: 'bold' },
-  newProgressBarFill: { height: '100%', backgroundColor: '#d97706' }
+  newProgressBarFill: { height: '100%', backgroundColor: '#d97706' },
+
+  // --- تصميم شريط التنقل السفلي ---
+  bottomNavContainer: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 12,
+    paddingBottom: 55, // 👈 زودنا الرقم ده لـ 55 (وتقدر تخليه 65 لو لسة محتاج ترفعها أكتر)
+    paddingHorizontal: 15,
+    justifyContent: 'space-between',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    elevation: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+  },
+  navItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  navItemText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#64748b',
+    marginTop: 4,
+  }
 });

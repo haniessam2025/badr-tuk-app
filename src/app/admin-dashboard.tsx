@@ -1,10 +1,31 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebase';
+import { db } from '../firebase'; // تأكد من مسار الفايربيز
 
 export default function AdminDashboard() {
+  const [sosCount, setSosCount] = useState(0);
+
+  // 🚨 رادار مراقبة الاستغاثات الطارئة (SOS)
+  useEffect(() => {
+    const q = query(collection(db, 'sos_alerts'), where('status', '==', 'active'));
+    const unsubscribe = onSnapshot(q, (snapshot: any) => {
+      setSosCount(snapshot.size);
+      if (!snapshot.empty) {
+        Alert.alert(
+          "🚨 إنذار طوارئ (SOS) 🚨",
+          "يوجد راكب في خطر يطلب التدخل الفوري!",
+          [
+            { text: "تجاهل", style: "cancel" },
+            { text: "عرض التفاصيل", onPress: () => router.push('/admin-safety') }
+          ]
+        );
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // --- متغيرات الدعم الفني المباشر ---
   const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
   const [supportTickets, setSupportTickets] = useState<any[]>([]);
@@ -23,7 +44,6 @@ export default function AdminDashboard() {
   const [captains, setCaptains] = useState<any[]>([]);
   const [passengers, setPassengers] = useState<any[]>([]);
   const [updateRequests, setUpdateRequests] = useState<any[]>([]);
-  const [lostItems, setLostItems] = useState<any[]>([]); // تخزين بلاغات المفقودات
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -59,8 +79,8 @@ export default function AdminDashboard() {
     const q = query(collection(db, 'support_chats'), where('status', '==', 'open'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      tickets.sort((a: any, b: any) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));      
-      setSupportTickets(tickets);
+tickets.sort((a: any, b: any) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));      
+setSupportTickets(tickets);
     });
     return () => unsubscribe();
   }, []);
@@ -79,7 +99,7 @@ export default function AdminDashboard() {
     setActiveSupportChat(ticket);
     try { await updateDoc(doc(db, 'support_chats', ticket.id), { unreadAdminCount: 0 }); } catch (e) {}
   };
-
+  
   // الدالة الذكية لمراقبة كتابة الإدارة وتفعيل النقط
   const handleAdminTyping = async (text: string) => {
     setAdminReplyText(text);
@@ -108,6 +128,7 @@ export default function AdminDashboard() {
     const text = adminReplyText.trim();
     setAdminReplyText('');
 
+    // مسح علامة الكتابة فوراً بمجرد الضغط على إرسال
     isCurrentlyTypingRef.current = false;
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
@@ -117,7 +138,7 @@ export default function AdminDashboard() {
         lastMessage: text,
         lastMessageTime: serverTimestamp(),
         unreadUserCount: increment(1),
-        adminTyping: false 
+        adminTyping: false // التأكيد على إخفاء النقط من الراكب/الكابتن
       });
     } catch (error) {}
   };
@@ -130,61 +151,8 @@ export default function AdminDashboard() {
     } catch (error) {}
   };
 
-  // --- جلب الشكاوى غير المقروءة لحظياً ---
-  useEffect(() => {
-    const q = query(collection(db, 'support_tickets'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let unreadCount = 0;
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
-          unreadCount++;
-        }
-      });
-      setComplaintsCount(unreadCount);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // --- جلب بلاغات المفقودات الجديدة لحظياً وعمل إشعار ---
-  useEffect(() => {
-    const q = query(collection(db, 'lost_items'), where('status', '==', 'pending'));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      const enrichedItems = await Promise.all(items.map(async (item: any) => {
-        let enriched = { ...item, passengerInfo: null, captainInfo: null, rideInfo: null };
-        try {
-          if (item.rideId) {
-            const rideSnap = await getDoc(doc(db, 'rides', item.rideId));
-            if (rideSnap.exists()) enriched.rideInfo = rideSnap.data();
-          }
-          if (item.reporterId && item.reporterType === 'passenger') {
-             const passSnap = await getDoc(doc(db, 'passengers', item.reporterId));
-             if (passSnap.exists()) enriched.passengerInfo = passSnap.data();
-          }
-          if (item.captainId) {
-             const capSnap = await getDoc(doc(db, 'captains', item.captainId));
-             if (capSnap.exists()) enriched.captainInfo = capSnap.data();
-          }
-        } catch (e) { console.log('Error enriching lost item', e); }
-        return enriched;
-      }));
-
-      enrichedItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      
-      if (enrichedItems.length > lostItems.length && lostItems.length > 0) {
-         Alert.alert('🚨 بلاغ مفقودات جديد!', 'ورد بلاغ جديد من راكب بفقدان أشياء في الرحلة. يرجى المراجعة فوراً في سجل الرحلات.');
-      }
-      
-      setLostItems(enrichedItems);
-    });
-    
-    return () => unsubscribe();
-  }, [lostItems.length]);
-
-
   // --- باقي دوال لوحة التحكم ---
+
   const fetchDashboardData = async () => {
     try {
       const capSnap = await getDocs(query(collection(db, 'captains')));
@@ -197,6 +165,16 @@ export default function AdminDashboard() {
       const pendingUpdates = updSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setUpdateRequests(pendingUpdates);
+
+      const compSnap = await getDocs(query(collection(db, 'support_tickets'), orderBy('timestamp', 'desc'), limit(100)));
+      let unreadCount = 0;
+      compSnap.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
+          unreadCount++;
+        }
+      });
+      setComplaintsCount(unreadCount);
     } catch (error) {
       console.log('Error fetching dashboard data:', error);
     } finally {
@@ -417,15 +395,7 @@ export default function AdminDashboard() {
       setProfileMsgTitle('');
       setProfileMsgText('');
     } catch (error) { Alert.alert('خطأ', 'تعذر إرسال الإشعار.'); } finally { setSendingProfileMsg(false); }
-  };
-
-  const markLostItemResolved = async (itemId: string) => {
-     try {
-        await updateDoc(doc(db, 'lost_items', itemId), { status: 'resolved' });
-        Alert.alert('تم', 'تم تقفيل البلاغ بنجاح.');
-     } catch(e) {
-        Alert.alert('خطأ', 'فشل تحديث البلاغ.');
-     }
+    
   };
 
   const getAverageRating = () => {
@@ -434,13 +404,31 @@ export default function AdminDashboard() {
     return Math.round(total / userRatings.length);
   };
   const averageRating = getAverageRating();
-
+  
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.logoutBtn} onPress={() => router.replace('/captain-login')}><Text style={styles.logoutBtnText}>خروج</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>لوحة التحكم 👑</Text>
       </View>
+
+      {/* زرار تبويب الأمان والطوارئ للأدمن */}
+      <TouchableOpacity 
+        style={[styles.sidebarLink, { backgroundColor: sosCount > 0 ? '#fee2e2' : '#1e293b', marginBottom: 15, borderRadius: 12, borderWidth: 1, borderColor: sosCount > 0 ? '#ef4444' : '#334155' }]} 
+        onPress={() => router.push('/admin-safety')}
+      >
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <Text style={[styles.sidebarLinkText, sosCount > 0 && { color: '#ef4444', fontWeight: 'bold' }]}>
+            الأمان والطوارئ (SOS)
+          </Text>
+          
+          {sosCount > 0 && (
+            <View style={{ backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 }}>
+              <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 'bold' }}>{sosCount}</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
 
       <TouchableOpacity style={styles.fullWidthHistoryBtn} onPress={() => router.push('/admin-rides')}>
         <Text style={styles.fullWidthHistoryBtnText}>سجل الرحلات 📊</Text>
@@ -467,54 +455,7 @@ export default function AdminDashboard() {
       
       activeTab === 'pending' ? (
         <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-          
-          {/* قسم المفقودات الجديد */}
-          {lostItems.length > 0 && (
-             <View style={styles.lostItemsSection}>
-               <Text style={styles.lostItemsTitle}>🚨 بلاغات المفقودات ({lostItems.length})</Text>
-               {lostItems.map(item => (
-                  <View key={item.id} style={styles.lostItemCard}>
-                     <Text style={styles.lostItemDetails}>"{item.details}"</Text>
-                     <View style={styles.lostItemRow}>
-                        <Text style={styles.lostItemLabel}>الراكب المُبلغ:</Text>
-                        <Text style={styles.lostItemValue}>{item.passengerInfo?.name || 'غير معروف'} (📞 {item.passengerInfo?.phone || 'غير معروف'})</Text>
-                     </View>
-                     <View style={styles.lostItemRow}>
-                        <Text style={styles.lostItemLabel}>الكابتن:</Text>
-                        <Text style={styles.lostItemValue}>{item.captainInfo?.name || item.rideInfo?.captainName || 'غير مسجل'} (📞 {item.captainInfo?.phone || item.rideInfo?.captainPhone || 'غير مسجل'})</Text>
-                     </View>
-                     <View style={styles.lostItemRow}>
-                        <Text style={styles.lostItemLabel}>المركبة:</Text>
-                        <Text style={styles.lostItemValue}>{item.captainInfo?.vehicle || item.rideInfo?.captainVehicle || 'غير مسجل'} - {item.captainInfo?.vehicleDetails?.plate || item.rideInfo?.captainPlateNumber || 'بدون لوحة'}</Text>
-                     </View>
-                     <View style={styles.lostItemRow}>
-                        <Text style={styles.lostItemLabel}>الرحلة:</Text>
-                        <Text style={styles.lostItemValue}>من {item.rideInfo?.pickupLocation} إلى {item.rideInfo?.destinationLocation}</Text>
-                     </View>
-                     
-                     <View style={{ flexDirection: 'row-reverse', gap: 10, marginTop: 15 }}>
-                        <TouchableOpacity style={[styles.resolveLostItemBtn, { flex: 1, marginTop: 0 }]} onPress={() => markLostItemResolved(item.id)}>
-                           <Text style={styles.resolveLostItemBtnText}>تقفيل البلاغ ✅</Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                           style={{ flex: 1, backgroundColor: '#3b82f6', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
-                           onPress={() => {
-                              setSelectedUser({ id: item.reporterId, name: item.passengerInfo?.name || 'الراكب' });
-                              setSelectedUserType('passenger');
-                              setProfileMsgTitle('بخصوص بلاغ المفقودات: ');
-                              setProfileMsgModalVisible(true);
-                           }}
-                        >
-                           <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>مراسلة الراكب 💬</Text>
-                        </TouchableOpacity>
-                     </View>
-                  </View>
-               ))}
-             </View>
-          )}
-
-          {totalPending === 0 && lostItems.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
+          {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
             <>
               {pendingCaptains.map(item => (
                 <View key={item.id} style={styles.userCard}>
@@ -707,9 +648,9 @@ export default function AdminDashboard() {
 
       <TouchableOpacity style={styles.fullWidthComplaintsBtn} onPress={() => router.push('/admin-complaints')}>
         <Text style={styles.fullWidthComplaintsBtnText}>الشكاوى والمقترحات والمفقودات 📬</Text>
-        {(complaintsCount + lostItems.length) > 0 && (
+        {complaintsCount > 0 && (
           <View style={styles.complaintBadge}>
-            <Text style={styles.complaintBadgeText}>{complaintsCount + lostItems.length}</Text>
+            <Text style={styles.complaintBadgeText}>{complaintsCount}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -773,7 +714,7 @@ export default function AdminDashboard() {
                   placeholder="اكتب ردك..."
                   placeholderTextColor="#64748b"
                   value={adminReplyText}
-                  onChangeText={handleAdminTyping} 
+                  onChangeText={handleAdminTyping}
                   multiline
                 />
                 <TouchableOpacity onPress={sendAdminReply} style={{ backgroundColor: '#10b981', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
@@ -964,18 +905,6 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', marginTop: 80 },
   emptyText: { color: '#64748b', fontSize: 16, textAlign: 'center', marginTop: 20 },
 
-  // --- ستايل المفقودات الجديد ---
-  lostItemsSection: { backgroundColor: '#450a0a', padding: 15, borderRadius: 14, marginBottom: 20, borderWidth: 1, borderColor: '#7f1d1d' },
-  lostItemsTitle: { color: '#fca5a5', fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'right' },
-  lostItemCard: { backgroundColor: '#1e293b', padding: 15, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: '#f87171' },
-  lostItemDetails: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', marginBottom: 15, textAlign: 'right', fontStyle: 'italic' },
-  lostItemRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 5 },
-  lostItemLabel: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold' },
-  lostItemValue: { color: '#f1f5f9', fontSize: 13, flex: 1, textAlign: 'left', marginLeft: 10 },
-  resolveLostItemBtn: { backgroundColor: '#10b981', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginTop: 15 },
-  resolveLostItemBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
-  // ---------------------------------
-
   userCard: { backgroundColor: '#1e293b', borderRadius: 14, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
   cardHeader: { flexDirection: 'row-reverse', alignItems: 'center' },
   avatarImg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#334155' },
@@ -1088,5 +1017,18 @@ const styles = StyleSheet.create({
   confirmModalBtn: { flex: 2, backgroundColor: '#eab308', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   confirmModalBtnText: { color: '#000', fontWeight: 'bold' },
   cancelModalBtn: { flex: 1, backgroundColor: '#334155', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  cancelModalBtnText: { color: '#fff', fontWeight: 'bold' }
+  cancelModalBtnText: { color: '#fff', fontWeight: 'bold' },
+  
+  sidebarLink: {
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  sidebarLinkText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#f8fafc',
+    textAlign: 'right'
+  }
 });
