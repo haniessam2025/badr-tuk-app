@@ -14,10 +14,32 @@ export default function PassengerSignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  // 👈 المتغير الجديد الخاص بمربع الموافقة
+  const [errors, setErrors] = useState({ name: '', nationalId: '', phone: '' }); 
   const [isTermsAccepted, setIsTermsAccepted] = useState(false); 
   const [isPolicyModalVisible, setIsPolicyModalVisible] = useState(false);
   const router = useRouter();
+
+  // دوال الفحص الفوري للراكب
+  const validateName = async () => {
+    if (!name.trim()) { setErrors(prev => ({...prev, name: 'برجاء إدخال الاسم'})); return false; }
+    const q = query(collection(db, 'passengers'), where('name', '==', name.trim()));
+    if (!(await getDocs(q)).empty) { setErrors(prev => ({...prev, name: '❌ هذا الاسم مسجل بالفعل'})); return false; }
+    setErrors(prev => ({...prev, name: ''})); return true;
+  };
+
+  const validateNationalId = async () => {
+    if (nationalId.trim().length !== 14) { setErrors(prev => ({...prev, nationalId: 'يجب أن يكون 14 رقماً'})); return false; }
+    const q = query(collection(db, 'passengers'), where('nationalId', '==', nationalId.trim()));
+    if (!(await getDocs(q)).empty) { setErrors(prev => ({...prev, nationalId: '❌ الرقم القومي مسجل لحساب آخر'})); return false; }
+    setErrors(prev => ({...prev, nationalId: ''})); return true;
+  };
+
+  const validatePhone = async () => {
+    if (!/^01[0125][0-9]{8}$/.test(phone.trim())) { setErrors(prev => ({...prev, phone: 'أدخل رقم مصري صحيح'})); return false; }
+    const q = query(collection(db, 'passengers'), where('phone', '==', phone.trim()));
+    if (!(await getDocs(q)).empty) { setErrors(prev => ({...prev, phone: '❌ رقم الموبايل مسجل بالفعل'})); return false; }
+    setErrors(prev => ({...prev, phone: ''})); return true;
+  };
 
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -35,8 +57,12 @@ export default function PassengerSignupScreen() {
   };
 
   const handleSignup = async () => {
-    if (!name.trim() || !nationalId.trim() || !phone.trim() || !password.trim() || !confirmPassword.trim()) {
-      Alert.alert('خطأ', 'يرجى إدخال جميع البيانات المطلوبة.');
+    const isNameValid = await validateName();
+    const isIdValid = await validateNationalId();
+    const isPhoneValid = await validatePhone();
+
+    if (!isNameValid || !isIdValid || !isPhoneValid || !password.trim() || !confirmPassword.trim()) {
+      Alert.alert('خطأ', 'يرجى إدخال جميع البيانات المطلوبة بشكل صحيح أولاً.');
       return;
     }
 
@@ -45,42 +71,8 @@ export default function PassengerSignupScreen() {
       return;
     }
 
-    // 👈 فحص رقم الهاتف (مصري فقط، يبدأ بـ 010, 011, 012, 015 ومكون من 11 رقم)
-    const egyptianPhoneRegex = /^01[0125][0-9]{8}$/;
-    if (!egyptianPhoneRegex.test(phone.trim())) {
-      Alert.alert('خطأ', 'يرجى إدخال رقم هاتف مصري صحيح (مثال: 01012345678).');
-      return;
-    }
-
     setLoading(true);
     try {
-      // 1. فحص تكرار الاسم
-      const nameQuery = query(collection(db, 'passengers'), where('name', '==', name.trim()));
-      const nameSnapshot = await getDocs(nameQuery);
-      if (!nameSnapshot.empty) {
-        setLoading(false);
-        Alert.alert('خطأ', 'اسم المستخدم مسجل بالفعل. يرجى اختيار اسم آخر.');
-        return;
-      }
-
-      // 2. فحص تكرار رقم الموبايل
-      const phoneQuery = query(collection(db, 'passengers'), where('phone', '==', phone.trim()));
-      const phoneSnapshot = await getDocs(phoneQuery);
-      if (!phoneSnapshot.empty) {
-        setLoading(false);
-        Alert.alert('تنبيه', 'رقم الهاتف مسجل بالفعل لحساب راكب آخر.');
-        return; 
-      }
-
-      // 3. فحص تكرار الرقم القومي
-      const nationalIdQuery = query(collection(db, 'passengers'), where('nationalId', '==', nationalId.trim()));
-      const nationalIdSnapshot = await getDocs(nationalIdQuery);
-      if (!nationalIdSnapshot.empty) {
-        setLoading(false);
-        Alert.alert('تنبيه', 'الرقم القومي مسجل بالفعل لحساب راكب آخر.');
-        return; 
-      }
-
       // إضافة بيانات الراكب مع حالة قيد المراجعة
       const newPassenger = {
         name: name.trim(),
@@ -96,7 +88,7 @@ export default function PassengerSignupScreen() {
 
       setLoading(false);
       
-      // إظهار رسالة النجاح وتوجيه المستخدم لتسجيل الدخول بدلاً من الصفحة الرئيسية
+      // إظهار رسالة النجاح وتوجيه المستخدم لتسجيل الدخول
       Alert.alert(
         'نجاح', 
         'تم التسجيل بنجاح ستتم الموافقة بعد المراجعة خلال 24 ساعة على الأكثر', 
@@ -128,38 +120,44 @@ export default function PassengerSignupScreen() {
       <View style={styles.inputGroup}>
         <Text style={styles.label}>اسم المستخدم</Text>
         <TextInput 
-          style={styles.input} 
+          style={[styles.input, errors.name ? { borderColor: '#ef4444', borderWidth: 1.5 } : null]} 
           placeholder="اكتب اسمك هنا" 
           placeholderTextColor="#9ca3af"
           value={name} 
           onChangeText={setName} 
+          onBlur={validateName}
         />
+        {errors.name ? <Text style={{color: '#ef4444', fontSize: 12, textAlign: 'right', marginTop: 4, fontWeight: 'bold'}}>{errors.name}</Text> : null}
       </View>
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>الرقم القومي</Text>
         <TextInput 
-          style={styles.input} 
+          style={[styles.input, errors.nationalId ? { borderColor: '#ef4444', borderWidth: 1.5 } : null]} 
           placeholder="الرقم القومي (14 رقم)" 
           placeholderTextColor="#9ca3af"
           keyboardType="numeric"
           value={nationalId} 
           onChangeText={setNationalId} 
+          onBlur={validateNationalId}
           maxLength={14}
         />
+        {errors.nationalId ? <Text style={{color: '#ef4444', fontSize: 12, textAlign: 'right', marginTop: 4, fontWeight: 'bold'}}>{errors.nationalId}</Text> : null}
       </View>
 
       <View style={styles.inputGroup}>
         <Text style={styles.label}>رقم الموبايل</Text>
         <TextInput 
-          style={styles.input} 
+          style={[styles.input, errors.phone ? { borderColor: '#ef4444', borderWidth: 1.5 } : null]} 
           placeholder="رقم مصري (مثال: 01012345678)" 
           placeholderTextColor="#9ca3af"
           keyboardType="phone-pad"
           value={phone} 
           onChangeText={setPhone} 
-          maxLength={11} // 👈 منع الراكب من كتابة أكثر من 11 رقم
+          onBlur={validatePhone}
+          maxLength={11}
         />
+        {errors.phone ? <Text style={{color: '#ef4444', fontSize: 12, textAlign: 'right', marginTop: 4, fontWeight: 'bold'}}>{errors.phone}</Text> : null}
       </View>
 
       <View style={styles.inputGroup}>
@@ -186,7 +184,7 @@ export default function PassengerSignupScreen() {
         />
       </View>
 
-      {/* 👈 مربع الموافقة الإجباري وسياسة الخصوصية */}
+      {/* مربع الموافقة الإجباري وسياسة الخصوصية */}
       <View 
         style={{ 
           flexDirection: 'row-reverse', 
@@ -216,7 +214,7 @@ export default function PassengerSignupScreen() {
       {loading ? (
         <ActivityIndicator size="large" color="#d97706" style={{ marginTop: 10 }} />
       ) : (
-        /* 👈 زرار التسجيل محمي بشرط الموافقة */
+        /* زرار التسجيل محمي بشرط الموافقة */
         <TouchableOpacity 
           style={[
             styles.button, 

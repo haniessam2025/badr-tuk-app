@@ -83,11 +83,13 @@ export default function CaptainProfile() {
           setTuktukNumber(data.tukTukNumber || data.vehicle || '');
         }
 
-        setPhone(data.phone || '');
+setPhone(data.phone || '');
         setWalletBalance(data.walletBalance || 0);
         setRating(data.rating || 5);
+        // 🆕 تخزين الرقم الكودي لو موجود
+        setOriginalData((prev: any) => ({ ...data, vehicleSequenceNumber: data.vehicleSequenceNumber || null }));
       }
-    } catch (error) {
+        } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء تحميل البيانات');
     } finally {
       setIsLoading(false);
@@ -307,9 +309,19 @@ export default function CaptainProfile() {
             </View>
             <View style={[styles.statDivider, isDarkMode && { backgroundColor: '#475569' }]} />
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, isDarkMode && { color: '#cbd5e1' }]}>التقييم العام</Text>
+              <Text style={[styles.statLabel, isDarkMode && { color: '#cbd5e1' }]}>التقييم</Text>
               <Text style={[styles.statValue, { color: '#f59e0b' }]}>★ {rating}</Text>
             </View>
+            {/* 🆕 عرض رقم براق الكودي (فقط للتوكتوك والكيوت المعتمد) */}
+            {originalData?.vehicleSequenceNumber ? (
+              <>
+                <View style={[styles.statDivider, isDarkMode && { backgroundColor: '#475569' }]} />
+                <View style={styles.statBox}>
+                  <Text style={[styles.statLabel, isDarkMode && { color: '#cbd5e1' }]}>رقم بُرَاق</Text>
+                  <Text style={[styles.statValue, { color: '#3b82f6' }]}>{originalData.vehicleSequenceNumber}</Text>
+                </View>
+              </>
+            ) : null}
           </View>
 
           <View style={[styles.formContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>

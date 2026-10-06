@@ -236,9 +236,49 @@ setSupportTickets(tickets);
   const approveRegistration = async (id: string, type: 'captain' | 'passenger') => {
     const collectionName = type === 'captain' ? 'captains' : 'passengers';
     try { 
-      await updateDoc(doc(db, collectionName, id), { status: 'active' }); 
+      let nextNumber = null;
+      let notificationMessage = "تمت الموافقة على حسابك، يمكنك الآن بدء استقبال الرحلات.";
+
+    // 1️⃣ لو اللي بنوافق عليه كابتن، نفحصه هل هو بديل توكتوك ولا لأ
+      if (type === 'captain') {
+        const currentCaptain = captains.find(c => c.id === id);
+        if (currentCaptain && (currentCaptain.vehicleCategory === 'tuktuk_alt' || currentCaptain.vehicle?.includes('كيوت') || currentCaptain.vehicle?.includes('جالاكسي'))) {
+          
+          // ندور في كل الكباتن على أعلى رقم مسلسل موجود حالياً
+          let maxNumber = 0;
+          captains.forEach(c => {
+            const num = c.vehicleSequenceNumber || 0;
+            if (num > maxNumber) maxNumber = num;
+          });
+          
+          nextNumber = maxNumber + 1; // الرقم الكودي الجديد للكابتن
+          notificationMessage = `مبروووك لقد تم الموافقة على طلب تسجيلك بنجاح ورقمك الكودي هو (${nextNumber}) وسيتم التواصل معك في أقرب وقت لتسليمك شعار براق برقمك الكودي`;
+        }
+      }
+
+      // 2️⃣ تجهيز البيانات اللي هتتحدث في الفايربيز
+      const updateData: any = { status: 'active' };
+      
+      if (nextNumber !== null) {
+        updateData.vehicleSequenceNumber = nextNumber;
+        updateData.vehicleNumber = `${nextNumber}`; // هيتخزن كرقم اللوحة عشان يظهر للركاب
+      }
+
+      // تحديث حالة المستخدم
+      await updateDoc(doc(db, collectionName, id), updateData); 
+
+      // 3️⃣ إرسال إشعار فوري للمستخدم (سواء كابتن أو راكب)
+      await addDoc(collection(db, 'notifications'), {
+        userId: id,
+        userType: type,
+        title: 'مبروك! تمت الموافقة ✅',
+        message: notificationMessage,
+        read: false,
+        timestamp: new Date().getTime()
+      });
+
       fetchDashboardData(); 
-      Alert.alert('تم ✅', 'تم تفعيل الحساب بنجاح.'); 
+      Alert.alert('تم ✅', nextNumber ? `تم تفعيل الكابتن بنجاح ورقم مركبته (${nextNumber})` : 'تم تفعيل الحساب بنجاح.'); 
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء التفعيل.'); }
   };
 
@@ -542,14 +582,23 @@ setSupportTickets(tickets);
               <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'captain')}>
                 <View style={styles.cardHeader}>
                   <View style={styles.balanceBadge}><Text style={styles.balanceLabelText}>الرصيد</Text><Text style={[styles.balanceNum, { color: (item.walletBalance || 0) < 0 ? '#ef4444' : '#10b981' }]}>{item.walletBalance ? item.walletBalance.toFixed(2) : '0'} ج</Text></View>
-                  <View style={styles.cardInfo}><Text style={styles.cardName}>{item.name}</Text><Text style={styles.cardDetail}>📞 {item.phone}</Text><Text style={[styles.statusText, item.status === 'banned' && { color: '#ef4444' }]}>{item.status === 'banned' ? '🚫 رقم محظور' : '🟢 نشط'}</Text></View>
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardName}>{item.name}</Text>
+                    <Text style={styles.cardDetail}>📞 {item.phone}</Text>
+                    {/* إضافة نوع المركبة والرقم الكودي من الذاكرة مباشرة */}
+                    <Text style={styles.cardDetail}>
+                      {item.vehicleCategory === 'car' || item.vehicle?.includes('سيارة') ? '🚗 سيارة' : item.vehicleCategory === 'scooter' || item.vehicle?.includes('سكوتر') ? '🛵 سكوتر' : `🛺 ${item.vehicle || 'بديل توكتوك'}`}
+                      {item.vehicleSequenceNumber ? ` | (رقم بُرَاق: ${item.vehicleSequenceNumber})` : ''}
+                    </Text>
+                    <Text style={[styles.statusText, item.status === 'banned' && { color: '#ef4444' }]}>{item.status === 'banned' ? '🚫 رقم محظور' : '🟢 نشط'}</Text>
+                  </View>
                   <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImgMini} />
                 </View>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
-      ) : activeTab === 'passengers' ? (
+              ) : activeTab === 'passengers' ? (
         <View style={{ flex: 1 }}>
           <TextInput style={styles.searchInput} placeholder="بحث عن راكب (اسم أو رقم)..." placeholderTextColor="#64748b" value={searchPassenger} onChangeText={setSearchPassenger} textAlign="right" />
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
@@ -743,19 +792,29 @@ setSupportTickets(tickets);
                   <Text style={styles.profileAvgStars}>{'⭐'.repeat(averageRating)}{'☆'.repeat(5 - averageRating)}</Text>
                   <Text style={styles.profileRatingCount}>({userRatings.length})</Text>
                 </View>
-                <Text style={styles.profileBigName}>{selectedUser.name}</Text>
+              <Text style={styles.profileBigName}>{selectedUser.name}</Text>
                 <Text style={styles.profileBigPhone}>📞 {selectedUser.phone}</Text>
+                {/* عرض الرقم القومي */}
+                <Text style={styles.profileBigPhone}>🪪 الرقم القومي: {selectedUser.nationalId || 'غير مسجل'}</Text>
                 
                 {selectedUserType === 'captain' && (
-                  <Text style={styles.profileBigVehicle}>
-                    {selectedUser.vehicleCategory === 'car' || selectedUser.vehicle?.includes('سيارة') ? '🚗 سيارة' :
-                     selectedUser.vehicleCategory === 'scooter' || selectedUser.vehicle?.includes('سكوتر') ? '🛵 سكوتر' :
-                     (selectedUser.vehicle?.includes('جالاكسي') || selectedUser.vehicleDetails?.type?.includes('جالاكسي') || selectedUser.requestedTuktukType?.includes('جالاكسي')) ? '🛺 جالاكسي 7 راكب' :
-                     (selectedUser.vehicle?.includes('كيوت') || selectedUser.vehicleDetails?.type?.includes('كيوت') || selectedUser.requestedTuktukType?.includes('كيوت')) ? '🛺 كيوت 3 راكب' :
-                     selectedUser.vehicleCategory === 'tuktuk_alt' ? '🛺 كيوت 3 راكب' :
-                     selectedUser.vehicle ? `🛺 ${selectedUser.vehicle}` : 
-                     '⚠️ نوع المركبة غير مسجل بالدقة المطلوبة'}
-                  </Text>
+                  <>
+                    <Text style={styles.profileBigVehicle}>
+                      {selectedUser.vehicleCategory === 'car' || selectedUser.vehicle?.includes('سيارة') ? '🚗 سيارة' :
+                       selectedUser.vehicleCategory === 'scooter' || selectedUser.vehicle?.includes('سكوتر') ? '🛵 سكوتر' :
+                       (selectedUser.vehicle?.includes('جالاكسي') || selectedUser.vehicleDetails?.type?.includes('جالاكسي') || selectedUser.requestedTuktukType?.includes('جالاكسي')) ? '🛺 جالاكسي 7 راكب' :
+                       (selectedUser.vehicle?.includes('كيوت') || selectedUser.vehicleDetails?.type?.includes('كيوت') || selectedUser.requestedTuktukType?.includes('كيوت')) ? '🛺 كيوت 3 راكب' :
+                       selectedUser.vehicleCategory === 'tuktuk_alt' ? '🛺 كيوت 3 راكب' :
+                       selectedUser.vehicle ? `🛺 ${selectedUser.vehicle}` : 
+                       '⚠️ نوع المركبة غير مسجل بالدقة المطلوبة'}
+                    </Text>
+                    {/* عرض الرقم الكودي إن وجد في شكل بارز */}
+                    {selectedUser.vehicleSequenceNumber && (
+                      <View style={{ backgroundColor: '#eff6ff', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                        <Text style={{ color: '#1d4ed8', fontWeight: 'bold', fontSize: 14 }}>رقم بُرَاق الكودي: {selectedUser.vehicleSequenceNumber}</Text>
+                      </View>
+                    )}
+                  </>
                 )}
 
                 <Text style={[styles.profileStatusBadge, selectedUser.status === 'banned' && { backgroundColor: '#ef4444' }]}>{selectedUser.status === 'banned' ? 'محظور من التسجيل 🚫' : 'حساب نشط 🟢'}</Text>

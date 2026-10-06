@@ -1,13 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Contacts from 'expo-contacts/legacy';
 import { useRouter } from 'expo-router';
 import { addDoc, collection } from 'firebase/firestore';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
-// 👈 رجعنا للاستيراد الأساسي لأننا هنستخدم الدالة الحديثة
-import * as Contacts from 'expo-contacts/legacy';
 
 export default function EmergencyContacts() {
   const router = useRouter();
@@ -16,21 +15,37 @@ export default function EmergencyContacts() {
   const [contactPhone, setContactPhone] = useState('');
   const [relation, setRelation] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // 👈 حالة لعرض الرقم المحفوظ الحالي
+  const [savedEmergencyPhone, setSavedEmergencyPhone] = useState('');
 
-  // 📍 دالة فتح دليل الهاتف الأساسي للموبايل
+  // 👈 استرجاع الرقم المحفوظ أول ما الصفحة تفتح
+  useEffect(() => {
+    const fetchSavedPhone = async () => {
+      try {
+        const savedPhone = await AsyncStorage.getItem('emergency_phone');
+        if (savedPhone) {
+          setSavedEmergencyPhone(savedPhone);
+        }
+      } catch (error) {
+        console.log('Error fetching saved emergency phone:', error);
+      }
+    };
+    fetchSavedPhone();
+  }, []);
+
   const openContactsList = async () => {
     try {
       const { status } = await Contacts.requestPermissionsAsync();
       if (status === 'granted') {
-        // السطر ده هو اللي بيفتح دليل الهاتف بتاع الأندرويد/الآيفون
         const contact = await Contacts.presentContactPickerAsync();
         
-        // لو الراكب اختار رقم (معملش إلغاء)
         if (contact) {
           setContactName(contact.name || '');
-          // نتأكد إن الاسم اللي اختاره متسجل ليه رقم تليفون
           if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
-            setContactPhone(contact.phoneNumbers[0].number || '');
+            // تنظيف الرقم من المسافات والشرطات
+            let cleanedPhone = contact.phoneNumbers[0].number?.replace(/\s|-/g, '') || '';
+            setContactPhone(cleanedPhone);
           } else {
             Alert.alert('تنبيه', 'جهة الاتصال هذه لا تحتوي على رقم هاتف.');
           }
@@ -60,6 +75,7 @@ export default function EmergencyContacts() {
         passengerName = profile.name;
       }
 
+      // 1. حفظ في قاعدة بيانات فايربيز (للإدارة)
       await addDoc(collection(db, 'emergencyContacts'), {
         passengerId: passengerId || 'unknown',
         passengerName: passengerName,
@@ -69,7 +85,15 @@ export default function EmergencyContacts() {
         timestamp: new Date().getTime()
       });
 
-      Alert.alert('تم بنجاح', 'تم حفظ جهة الاتصال للطوارئ.');
+      // 2. 👈 حفظ في ذاكرة الهاتف لرسالة الواتساب
+      let formattedPhone = contactPhone;
+      if (formattedPhone.startsWith('01')) formattedPhone = '+20' + formattedPhone.substring(1);
+      else if (formattedPhone.startsWith('0')) formattedPhone = '+2' + formattedPhone;
+      
+      await AsyncStorage.setItem('emergency_phone', formattedPhone);
+      setSavedEmergencyPhone(formattedPhone);
+
+      Alert.alert('تم بنجاح', 'تم حفظ جهة الاتصال للطوارئ وسيتم إرسال رسالة واتساب لها عند الضغط على "أنا في خطر".');
       setContactName('');
       setContactPhone('');
       setRelation('');
@@ -79,6 +103,30 @@ export default function EmergencyContacts() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 👈 دالة لحذف الرقم المحفوظ
+  const handleDeleteSavedContact = async () => {
+    Alert.alert(
+      'تأكيد الحذف',
+      'هل تريد مسح رقم الطوارئ الحالي؟',
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        { 
+          text: 'حذف', 
+          style: 'destructive', 
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem('emergency_phone');
+              setSavedEmergencyPhone('');
+              Alert.alert('تم', 'تم حذف رقم الطوارئ بنجاح.');
+            } catch (error) {
+              Alert.alert('خطأ', 'تعذر حذف الرقم.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -93,7 +141,7 @@ export default function EmergencyContacts() {
 
       <View style={styles.content}>
         <Text style={[styles.infoText, isDarkMode && { color: '#cbd5e1' }]}>
-          قم بإضافة أرقام أشخاص مقربين ليتم التواصل معهم من قبل الإدارة في حالات الطوارئ الشديدة.
+          قم بإضافة أرقام أشخاص مقربين ليتم مراسلتهم عبر الواتساب فوراً في حالات الطوارئ.
         </Text>
 
         <View style={styles.inputRow}>
@@ -135,9 +183,26 @@ export default function EmergencyContacts() {
           {loading ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <Text style={styles.saveBtnText}>حفظ وإضافة</Text>
+            <Text style={styles.saveBtnText}>حفظ وتعيين للطوارئ</Text>
           )}
         </TouchableOpacity>
+
+        {/* 👈 عرض الرقم المحفوظ مع زر الحذف */}
+        {savedEmergencyPhone ? (
+          <View style={[styles.savedContactBox, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }]}>
+            <Text style={[styles.savedContactTitle, isDarkMode && { color: '#ffffff' }]}>رقم الطوارئ المسجل حالياً:</Text>
+            <View style={styles.savedContactRow}>
+<Text style={[styles.savedContactPhone, isDarkMode && { color: '#38bdf8' }]}>{savedEmergencyPhone}</Text>              <Ionicons name="logo-whatsapp" size={24} color="#10b981" />
+            </View>
+            <Text style={[styles.savedContactHint, isDarkMode && { color: '#94a3b8' }]}>سيتم إرسال رسالة استغاثة لهذا الرقم عند الحاجة.</Text>
+            
+            <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteSavedContact}>
+              <Ionicons name="trash-outline" size={18} color="#ef4444" />
+              <Text style={styles.deleteBtnText}>حذف الرقم المسجل</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        
       </View>
     </View>
   );
@@ -159,5 +224,14 @@ const styles = StyleSheet.create({
   
   inputDark: { backgroundColor: '#1e293b', borderColor: '#475569', color: '#ffffff' },
   saveBtn: { backgroundColor: '#10b981', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10 },
-  saveBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' }
+  saveBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+
+  // 👈 تنسيقات المربع اللي بيعرض الرقم المحفوظ
+  savedContactBox: { marginTop: 30, padding: 20, backgroundColor: '#eff6ff', borderRadius: 16, borderWidth: 1, borderColor: '#bfdbfe', alignItems: 'center' },
+  savedContactTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e3a8a', marginBottom: 10 },
+  savedContactRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 },
+  savedContactPhone: { fontSize: 22, fontWeight: 'bold', color: '#2563eb', letterSpacing: 1 },
+  savedContactHint: { fontSize: 12, color: '#64748b', textAlign: 'center', marginBottom: 15 },
+  deleteBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fee2e2', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 8, gap: 5 },
+  deleteBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 }
 });

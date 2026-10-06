@@ -32,11 +32,11 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c * 1000;
 };
 
-const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSentOffer, captainLocation, onImagePress, onWithdrawOffer }: { item: any, onSendOffer: (item: any, price: string) => void, onEditPrice: (item: any) => void, onDismiss: (item: any) => void, hasSentOffer: boolean, captainLocation: any, onImagePress: (url: string) => void, onWithdrawOffer: (id: string) => void }) => {
-  const translateX = useRef(new Animated.Value(0)).current;
+const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSentOffer, captainLocation, onImagePress, onWithdrawOffer, isDarkMode }: { item: any, onSendOffer: (item: any, price: string) => void, onEditPrice: (item: any) => void, onDismiss: (item: any) => void, hasSentOffer: boolean, captainLocation: any, onImagePress: (url: string) => void, onWithdrawOffer: (id: string) => void, isDarkMode: boolean }) => {  const translateX = useRef(new Animated.Value(0)).current;
   const progressAnim = useRef(new Animated.Value(100)).current; 
   const [activePrice, setActivePrice] = useState(item.price);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [hasAutoExpanded, setHasAutoExpanded] = useState(false); // 👈 متغير لمنع التكرار المزعج
   
   const basePrice = parseInt(item.price) || 0;
   useEffect(() => { setActivePrice(item.price); }, [item.price]);
@@ -62,8 +62,31 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
     ? calculateDistance(captainLocation.latitude, captainLocation.longitude, item.pickupCoords.latitude, item.pickupCoords.longitude)
     : null;
 
-  const capToPickDisplay = capToPickMeters !== null
-    ? (capToPickMeters < 1000 ? `${Math.round(capToPickMeters)} م` : `${(capToPickMeters / 1000).toFixed(1)} كم`)
+ // 🟢 تعريف أنيميشن الوميض الأخضر الفاتح
+ const flashAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (capToPickMeters !== null && capToPickMeters < 1000 && !hasAutoExpanded && !hasSentOffer) {
+      setIsExpanded(true); 
+      setHasAutoExpanded(true); 
+      Vibration.vibrate([0, 500, 200, 500]); 
+
+      // تشغيل وميض أخضر فاتح مرتين ورا بعض
+      Animated.sequence([
+        Animated.timing(flashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 300, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [capToPickMeters, hasAutoExpanded, hasSentOffer]);
+
+  const cardBackgroundColor = flashAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', '#10b981'] // أخضر صريح وواضح للوميض
+  });
+
+  const capToPickDisplay = capToPickMeters !== null    ? (capToPickMeters < 1000 ? `${Math.round(capToPickMeters)} م` : `${(capToPickMeters / 1000).toFixed(1)} كم`)
     : 'جارِ الحساب';
 
   let tripDistanceDisplay = item.distance || item.tripDistance; 
@@ -95,9 +118,17 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.hiddenBackground}><Text style={styles.hiddenText}>إخفاء الطلب</Text></View>
-      <Animated.View style={[styles.newRequestCard, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
+      
+      {/* الكارت الخارجي مسئول عن السحب فقط */}
+        
+        <Animated.View style={[styles.newRequestCard, isDarkMode && { backgroundColor: '#1e293b' }, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
+        
+        {/* 🟢 طبقة الوميض الخلفية: لا تؤثر على الضغط أو اللمس نهائياً */}
+        <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: cardBackgroundColor, borderRadius: 12, zIndex: -1 }} />
+
         <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} activeOpacity={0.8}>
           <View style={styles.newCardRow}>
+             {/* ... باقي محتوى الكارت زي ما هو ... */}
             <View style={styles.newUserCol}>
               <TouchableOpacity onPress={() => onImagePress(getSafeAvatar(item.avatar))}>
                 <Image source={{ uri: getSafeAvatar(item.avatar) }} style={styles.newAvatar} />
@@ -134,11 +165,6 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
                    💳 {item.paymentMethod || 'كاش'}
                  </Text>
                </View>
-               {item.passengersCount && (
-                 <View style={[styles.newSmallBadge, {backgroundColor: '#fef3c7', marginRight: 5}]}>
-                   <Text style={[styles.newSmallBadgeText, {color: '#92400e'}]}>👥 {item.passengersCount}</Text>
-                 </View>
-               )}
             </View>
             {item.notes && item.notes.trim() !== '' ? (<View style={styles.newNotesContainer}><Text style={styles.newNotesText}>ملاحظة: {item.notes}</Text></View>) : null}
             {!hasSentOffer && basePrice > 0 && (
@@ -205,7 +231,7 @@ const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestinat
 
 export default function CaptainHome() {
   const router = useRouter();
-  const { isDarkMode, isVibrationEnabled } = useApp(); // العقل المركزي للإعدادات
+  const { isDarkMode, isVibrationEnabled } = useApp();
   const [refreshing, setRefreshing] = useState(false);
 
   const onRefresh = useCallback(() => {
@@ -279,7 +305,7 @@ export default function CaptainHome() {
   const [confirmedDestCoords, setConfirmedDestCoords] = useState<any>(null);
   const [placesSuggestions, setPlacesSuggestions] = useState<any[]>([]);
 
-  const GOOGLE_API_KEY = 'ضع_مفتاح_جوجل_هنا'; // 👈 تذكر وضع مفتاح جوجل الخاص بك هنا
+  const GOOGLE_API_KEY = 'ضع_مفتاح_جوجل_هنا'; 
 
   const fetchPlaceSuggestions = async (text: string) => {
     setDestinationFilterText(text);
@@ -297,7 +323,7 @@ export default function CaptainHome() {
       setPlacesSuggestions([]);
     }
   }; 
-const setAsCarAndClose = async () => {
+  const setAsCarAndClose = async () => {
     try {
       await updateDoc(doc(db, 'captains', captainProfile.id), {
         vehicleCategory: 'car',
@@ -362,7 +388,6 @@ const setAsCarAndClose = async () => {
   };
 
   useFocusEffect(useCallback(() => { loadCaptainProfileFromFirebase(); loadDismissedRequests(); getInitialCaptainLocation(); }, []));
-
   const getInitialCaptainLocation = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
     if (status === 'granted') { 
@@ -485,6 +510,12 @@ const setAsCarAndClose = async () => {
               setIsOnline(data.isOnline); 
               toggleAnim.setValue(data.isOnline ? 100 : 0); 
             }
+          } else {
+            // 🚨 الطرد الفوري للكابتن لو الإدارة مسحت حسابه
+            if (profileUnsubscribeRef.current) profileUnsubscribeRef.current();
+            await AsyncStorage.clear();
+            router.replace('/captain-login');
+            Alert.alert('تنبيه ⚠️', 'تم حذف حسابك نهائياً بواسطة الإدارة.');
           }
         });
       } else router.replace('/captain-login');
@@ -496,20 +527,148 @@ const setAsCarAndClose = async () => {
     try { const savedDismissed = await AsyncStorage.getItem('dismissed_requests'); if (savedDismissed) setDismissedRequests(JSON.parse(savedDismissed)); } catch (e) {}
   };
 
-  // 👈 متغير جديد لتخزين عدد الإشعارات الغير مقروءة
-  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+
+const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+
+  // ⏱️ --- متغيرات ودالة العداد الجديد ---
+  const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); // 5 دقائق
+
+useEffect(() => {
+    let interval: any;
+    if (activeRide && (activeRide.status === 'captain_arrived' || activeRide.status === 'passenger_on_the_way' || activeRide.status === 'waiting_for_scan')) {
+      // ⏱ حساب الوقت بناءً على ساعة السيرفر وقت الوصول عشان ميقفش لو الشاشة اتقفلت
+      const arrivalTime = activeRide.arrivedAt || new Date().getTime();
+      const targetTime = arrivalTime + (5 * 60 * 1000); // 5 دقائق لقدام
+
+      const updateTimer = () => {
+        const now = new Date().getTime();
+        const diffInSeconds = Math.max(0, Math.floor((targetTime - now) / 1000));
+        setWaitingTimeLeft(diffInSeconds);
+      };
+
+      updateTimer(); // تشغيل أول مرة فوراً
+      interval = setInterval(updateTimer, 1000); // تحديث كل ثانية
+    } else {
+      setWaitingTimeLeft(300);
+    }
+    return () => clearInterval(interval);
+  }, [activeRide?.status, activeRide?.arrivedAt]);
+
+  const formatTimer = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `0${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+  // ------------------------------------
+
+  // 🚀 --- متغيرات ودوال كارت أقرب رحلة (inDrive Style) ---
+  const [closestPoppedRide, setClosestPoppedRide] = useState<any>(null);
+  const [skippedPoppedRides, setSkippedPoppedRides] = useState<string[]>([]);
+  const [offerPriceForPopped, setOfferPriceForPopped] = useState('');
+
+  // دالة حساب المسافة بالكيلومتر بين الكابتن والراكب
+  const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; 
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // المسافة بالكيلو
+  };
+
+// مراقبة الطلبات لفتح أقرب رحلة تلقائياً لو أقل من 2 كيلو
+  useEffect(() => {
+    try {
+      // التأكد من عدم وجود رحلة مفتوحة بالفعل في وش الكابتن، ووجود طلبات وموقع للكابتن
+      if (closestPoppedRide || activeRide || !allRequests || allRequests.length === 0 || !location) return;
+
+      let closestRide: any = null;
+      let minDistance = 2.0; // 🎯 الحد الأقصى 2 كيلو متر
+
+      // تحديد خط الطول والعرض للكابتن وتخطي مشكلة الـ TypeScript
+      const capLat = (location as any).coords ? (location as any).coords.latitude : (location as any).latitude;
+      const capLon = (location as any).coords ? (location as any).coords.longitude : (location as any).longitude;
+
+      if (!capLat || !capLon) return;
+
+      allRequests.forEach((ride: any) => {
+        if (ride.pickupCoords && ride.status === 'pending' && !skippedPoppedRides.includes(ride.id)) {
+          const dist = getDistanceFromLatLonInKm(
+            capLat, capLon,
+            ride.pickupCoords.latitude, ride.pickupCoords.longitude
+          );
+          if (dist <= minDistance) {
+            minDistance = dist;
+            closestRide = ride;
+          }
+        }
+      });
+      if (closestRide) {
+        setClosestPoppedRide(closestRide);
+        setOfferPriceForPopped(String(closestRide.price || '')); // السعر الافتراضي للراكب
+      }
+    } catch (e) {
+      console.log("Error finding closest ride:", e);
+    }
+  }, [allRequests, location, skippedPoppedRides, closestPoppedRide, activeRide]);
+
+  const handleSkipPoppedRide = () => {
+    if (closestPoppedRide) {
+      setSkippedPoppedRides(prev => [...prev, closestPoppedRide.id]); // حفظها عشان متفتحش تاني
+      setClosestPoppedRide(null); // قفل الكارت
+    }
+  };
+
+  const handleSendOfferForPopped = async () => {
+    if (!closestPoppedRide || !offerPriceForPopped) return;
+    try {
+      const rideRef = doc(db, 'rides', closestPoppedRide.id);
+      const rideSnap = await getDoc(rideRef);
+      if (rideSnap.exists()) {
+         const currentOffers = rideSnap.data().offers || [];
+         const newOffer = {
+            captainId: captainProfile.id,
+            captainName: captainProfile.name,
+            captainPhone: captainProfile.phone,
+            captainAvatar: captainProfile.avatar,
+            captainVehicle: captainProfile.vehicle,
+            captainPlateNumber: (captainProfile as any).plateNumber || '',
+            captainRating: (captainProfile as any).averageRating || 5,
+            price: offerPriceForPopped,
+            offerTimestamp: new Date().getTime()
+         };
+         // إضافة عرض الكابتن لقاعدة البيانات
+         await updateDoc(rideRef, { offers: [...currentOffers.filter((o:any)=>o.captainId !== captainProfile.id), newOffer] });
+         setSentOffers(prev => [...prev, closestPoppedRide.id]);
+         setClosestPoppedRide(null);
+         Alert.alert("نجاح ✅", "تم إرسال عرضك للراكب بنجاح!");
+      }
+    } catch(e) {
+      Alert.alert("خطأ", "حدثت مشكلة أثناء إرسال العرض");
+    }
+  };
+  // 🚀 ----------------------------------------------------
 
   useEffect(() => {
     if (!captainProfile.id) return;
     const q = query(collection(db, 'notifications'), where('userId', '==', captainProfile.id), where('read', '==', false));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // بنعد الإشعارات ونخزنها عشان نظهرها في البادج الأحمر
       setUnreadNotifsCount(snapshot.docs.length);
+      
+      // 2️⃣ إظهار تنبيه منبثق للكابتن فور وصول إشعار جديد (مثل رفض العرض)
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const notif = change.doc.data();
+          Alert.alert(
+            notif.title || 'تنبيه 🔔',
+            notif.message,
+            [{ text: 'حسناً', onPress: () => updateDoc(doc(db, 'notifications', change.doc.id), { read: true }) }]
+          );
+        }
+      });
     });
     return () => unsubscribe();
-  }, [captainProfile.id]);
-
-  const markAdminMessageAsRead = async () => {
+  }, [captainProfile.id]);  const markAdminMessageAsRead = async () => {
     if (adminMessage && adminMessage.id) {
       try { await updateDoc(doc(db, 'notifications', adminMessage.id), { read: true }); setIsAdminMsgVisible(false); setAdminMessage(null); } catch (error) {}
     }
@@ -558,14 +717,8 @@ const setAsCarAndClose = async () => {
           }
         }
       });
-      pendingRequests.sort((a, b) => b.timestamp - a.timestamp);
+pendingRequests.sort((a, b) => b.timestamp - a.timestamp);
       setAllRequests(pendingRequests);
-      
-      // الهزاز عند وصول طلب جديد
-      if (pendingRequests.length > prevRequestsCountRef.current && isVibrationEnabled) {
-        Vibration.vibrate([0, 500, 200, 500]);
-      }
-      prevRequestsCountRef.current = pendingRequests.length;
     });
     return () => unsubscribe();
   }, [isOnline, captainProfile.vehicleCategory, captainProfile.tuktukAltType, isDestinationFilterActive, confirmedDestinationFilter]);
@@ -649,8 +802,19 @@ const setAsCarAndClose = async () => {
   const sendOffer = async (ride: any, offerPrice: string, selectedPerks: string[] = []) => {
     try {
       const safeAvatar = getSafeAvatar(captainProfile.avatar);
-      const cleanOfferData = { captainId: String(captainProfile.id), captainName: String(captainProfile.name), captainPhone: String(captainProfile.phone), captainVehicle: String(captainProfile.vehicle), captainAvatar: safeAvatar, price: String(offerPrice), captainRating: captainProfile.averageRating, captainRatingCount: captainProfile.ratingCount, offerTimestamp: new Date().getTime(), perks: selectedPerks }; 
-      await updateDoc(doc(db, 'rides', ride.id), { price: String(offerPrice), offers: arrayUnion(cleanOfferData) });
+const cleanOfferData = { 
+        captainId: String(captainProfile.id), 
+        captainName: String(captainProfile.name), 
+        captainPhone: String(captainProfile.phone), 
+        captainVehicle: String(captainProfile.vehicle), 
+        captainAvatar: safeAvatar, 
+        price: String(offerPrice), 
+        captainRating: captainProfile.averageRating, 
+        captainRatingCount: captainProfile.ratingCount, 
+captainPlateNumber: String((captainProfile as any).plateNumber || ''), // 👈 إرسال الرقم الكودي بأمان تام        offerTimestamp: new Date().getTime(), 
+        perks: selectedPerks 
+      };
+            await updateDoc(doc(db, 'rides', ride.id), { price: String(offerPrice), offers: arrayUnion(cleanOfferData) });
       setSentOffers(prev => [...prev, ride.id]);
     } catch (error) {}
   };
@@ -660,7 +824,6 @@ const handleSelectPlace = (placeName: string) => {
   };
 
   const confirmDestinationWithCoords = async () => {
-    // لو العنوان متغيرش (يعني الكابتن عدل نوع المسار بس)، مش هنكلم جوجل، هنأكد ونقفل فوراً
     if (destinationFilterText === confirmedDestinationFilter && confirmedDestCoords) {
       setIsDestFilterExpanded(false);
       Alert.alert("تم التحديث 📍", `تم تحديث إعدادات المسار بنجاح.`);
@@ -695,6 +858,24 @@ const handleSelectPlace = (placeName: string) => {
     } catch (error) { console.log("Error withdrawing offer:", error); }
   };
 
+// 1️⃣ إرجاع الكارت لتقديم عرض جديد لو الراكب رفض العرض القديم
+  useEffect(() => {
+    if (sentOffers.length > 0 && allRequests.length > 0) {
+      sentOffers.forEach(rideId => {
+        const ride = allRequests.find(r => r.id === rideId);
+        if (ride && Array.isArray(ride.offers)) {
+          // بنشوف هل عرض الكابتن لسه موجود في الرحلة ولا الراكب مسحه (رفضه)
+          const myOfferStillThere = ride.offers.some((o: any) => o.captainId === String(captainProfile.id));
+          if (!myOfferStillThere) {
+            // لو الراكب رفضه، بنطلعه بس من حالة الانتظار عشان يرجع تاني كارت مفتوح يقدر يقدم فيه سعر جديد
+            setSentOffers(prev => prev.filter(id => id !== rideId));
+            // لغينا دالة الحذف النهائي (handleDismissRequest) عشان الكارت يفضل قدامه
+          }
+        }
+      });
+    }
+  }, [allRequests, sentOffers]);
+
   useEffect(() => {
     if (activeRide && sentOffers.length > 0) {
       sentOffers.forEach(id => {
@@ -703,7 +884,6 @@ const handleSelectPlace = (placeName: string) => {
       setSentOffers([]);
     }
   }, [activeRide]);
-
   const openPriceModal = (ride: any) => { setSelectedRideForPrice(ride); setTempCaptainPrice(ride.price ? ride.price.toString() : ''); setOfferPerks([]); setIsPriceModalVisible(true); };
 
   const confirmCustomPrice = () => {
@@ -714,7 +894,14 @@ const handleSelectPlace = (placeName: string) => {
     sendOffer(selectedRideForPrice, tempCaptainPrice, offerPerks); 
     setIsPriceModalVisible(false);
   };
-  const notifyArrival = async () => { if (activeRide) await updateDoc(doc(db, 'rides', activeRide.id), { status: 'captain_arrived' }); };
+const notifyArrival = async () => { 
+    if (activeRide) {
+      await updateDoc(doc(db, 'rides', activeRide.id), { 
+        status: 'captain_arrived',
+        arrivedAt: new Date().getTime() // ⏳ حفظ وقت الوصول الفعلي بالسيرفر
+      }); 
+    }
+  };
 
   const completeRide = () => {
     if (!activeRide) return;
@@ -736,7 +923,28 @@ const handleSelectPlace = (placeName: string) => {
       ]
     );
   };
-  const openGoogleMaps = (locationName: string) => { const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName)}`; Linking.openURL(url); };
+
+  const openGoogleMaps = (locationName: string) => { 
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName)}`; 
+    Linking.openURL(url); 
+  };
+
+  // 📍 الدالة الجديدة السحرية للمسار المجمع (Multi-stop)
+  const openMultiStopGoogleMaps = (pickup: string, dests: string[]) => {
+    if (!dests || dests.length === 0) return;
+    
+    const origin = encodeURIComponent(pickup);
+    const destination = encodeURIComponent(dests[dests.length - 1]);
+    let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+    
+    // إضافة المحطات اللي في النص باستخدام waypoints
+    if (dests.length > 1) {
+      const waypoints = dests.slice(0, -1).map((d: string) => encodeURIComponent(d)).join('|');
+      url += `&waypoints=${waypoints}`;
+    }
+    
+    Linking.openURL(url);
+  };
 
   const submitRating = async () => {
     if (rating === 0) return;
@@ -815,6 +1023,14 @@ const handleSelectPlace = (placeName: string) => {
     return distMeters <= 15000;
   });
 
+  // 📳 تشغيل الاهتزاز "فقط" لو فيه طلب جديد (قريب) ظهر على الشاشة
+  useEffect(() => {
+    if (visibleRequests.length > prevRequestsCountRef.current && isVibrationEnabled) {
+      Vibration.vibrate([0, 500, 200, 500]);
+    }
+    prevRequestsCountRef.current = visibleRequests.length;
+  }, [visibleRequests.length, isVibrationEnabled]);
+
   return (
     <View style={[styles.container, isDarkMode && { backgroundColor: '#0f172a' }]}>
       {toastVisible && (
@@ -823,7 +1039,7 @@ const handleSelectPlace = (placeName: string) => {
         </Animated.View>
       )}
 
-      {/* الهيدر الجديد المنظم حسب طلبك */}
+      {/* الهيدر الجديد المنظم */}
       <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
         
         {/* اليمين: القائمة الجانبية وزر الإشعارات (جرس) */}
@@ -977,16 +1193,17 @@ const handleSelectPlace = (placeName: string) => {
               <Text style={styles.emptyText}>أنت الآن غير متصل</Text>
               <Text style={{ fontSize: 13, color: '#94a3b8', marginTop: 5 }}>فعل زر الاتصال بالأعلى لاستقبال الطلبات</Text>
             </View>
-         ) : displayRequests.length === 0 ? (
-          <EmptySearchingState hasConfirmedDestination={isDestinationFilterActive && confirmedDestinationFilter !== ''} />
-        ) : (
-          <FlatList 
-            data={visibleRequests} 
-            keyExtractor={(item) => item.id}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#10b981']} />
-            }
-            renderItem={({ item }) => (
+          ) : displayRequests.length === 0 ? (
+            <EmptySearchingState hasConfirmedDestination={isDestinationFilterActive && confirmedDestinationFilter !== ''} />
+          ) : (
+            <FlatList 
+              data={visibleRequests} 
+              keyExtractor={(item) => item.id + '_' + (item.timestamp || '') + '_' + (item.destinationLocation || '')}
+              extraData={visibleRequests}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#10b981']} />
+              }
+              renderItem={({ item }) => (
               <SwipeableRequestItem 
                 item={item} 
                 onSendOffer={sendOffer} 
@@ -996,15 +1213,17 @@ const handleSelectPlace = (placeName: string) => {
                 captainLocation={captainLocation} 
                 onImagePress={handleImagePress} 
                 onWithdrawOffer={withdrawOffer} 
+                isDarkMode={isDarkMode} // 👈 تمرير الوضع الليلي للمكون
               />
-            )} 
-            showsVerticalScrollIndicator={false} 
-            contentContainerStyle={{ paddingBottom: 100 }} 
-          />
-        )}
-      </>      ) : (
+              )}
+              showsVerticalScrollIndicator={false} 
+              contentContainerStyle={{ paddingBottom: 100 }} 
+            />
+          )}
+        </>
+      ) : (
         <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-          <View style={[styles.activeRideContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#3b82f6' }, (activeRide.status === 'passenger_on_the_way' || activeRide.status === 'in_progress') && styles.activeRidePulseContainer]}>
+          <View style={[styles.activeRideContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#3b82f6' }, (activeRide.status === 'passenger_on_the_way' || activeRide.status === 'in_progress') && styles.activeRidePulseContainer]}>            
             {latestMessage ? (
               <View style={{ backgroundColor: isDarkMode ? '#334155' : '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, flexDirection: 'row-reverse', alignItems: 'center' }}>
                 <Text style={{ fontSize: 22, marginLeft: 10 }}>💬</Text>
@@ -1014,9 +1233,27 @@ const handleSelectPlace = (placeName: string) => {
                 </View>
               </View>
             ) : null}
-            <Text style={styles.activeRideTitle}>
-              {activeRide.status === 'accepted' ? 'أنت الآن في طريقك للراكب' : activeRide.status === 'passenger_on_the_way' ? 'الراكب نازل الآن' : activeRide.status === 'captain_arrived' ? 'لقد وصلت للراكب' : activeRide.status === 'waiting_for_scan' ? 'بانتظار مسح الـ QR' : 'الرحلة جارية الآن'}
-            </Text>
+            
+            {/* ⏱️ عنوان الرحلة ومربع العداد بالأعلى */}
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, width: '100%' }}>
+              <Text style={[styles.activeRideTitle, { marginBottom: 0, flex: 1, textAlign: 'right', paddingLeft: 10 }]}>
+                {activeRide.status === 'accepted' ? 'أنت الآن في طريقك للراكب' : activeRide.status === 'passenger_on_the_way' ? 'الراكب نازل الآن' : activeRide.status === 'captain_arrived' ? 'لقد وصلت للراكب' : activeRide.status === 'waiting_for_scan' ? 'بانتظار مسح الـ QR' : 'الرحلة جارية الآن'}
+              </Text>
+
+            {/* ظهور العداد المربع مرة واحدة فقط */}
+              {['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status) && (
+                <View style={{ backgroundColor: waitingTimeLeft === 0 ? '#dcfce7' : '#fee2e2', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1.5, borderColor: waitingTimeLeft === 0 ? '#22c55e' : '#ef4444', alignItems: 'center', elevation: 2 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: waitingTimeLeft === 0 ? '#166534' : '#991b1b', marginBottom: 2 }}>
+                    {waitingTimeLeft === 0 ? 'إلغاء آمن' : 'وقت'}
+                  </Text>
+                  <Text style={{ fontSize: 18, fontWeight: '900', color: waitingTimeLeft === 0 ? '#166534' : '#b91c1c' }}>
+                    {formatTimer(waitingTimeLeft)}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* كارت بيانات الراكب */}
             <View style={[styles.passengerCard, isDarkMode && { backgroundColor: '#334155' }]}>
               <Image source={{ uri: activeRide.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.activeAvatar} />
               <View style={styles.detailsCol}>
@@ -1026,6 +1263,8 @@ const handleSelectPlace = (placeName: string) => {
                 </View>
               </View>
             </View>
+            
+            {/* التتبع والخريطة */}
             {activeRide.status !== 'in_progress' ? (
               <View style={[styles.navigationContainer, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#059669' }]}>
                 <Text style={[styles.navigationHeader, isDarkMode && { color: '#a7f3d0' }]}>نقطة التقابل (مكان الراكب):</Text>
@@ -1046,19 +1285,41 @@ const handleSelectPlace = (placeName: string) => {
               </View>
             ) : (
               <View style={[styles.navigationContainer, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#059669' }]}>
-                <Text style={[styles.navigationHeader, isDarkMode && { color: '#a7f3d0' }]}>مسار الرحلة (اضغط للتتبع):</Text>
-                {activeRide.destinationsList && activeRide.destinationsList.map((d: string, i: number) => (
-                  <TouchableOpacity key={i} style={[styles.navButton, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#34d399' }]} onPress={() => openGoogleMaps(d)}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.navButtonTitle, isDarkMode && { color: '#34d399' }]}>الوجهة {i + 1}</Text>
-                      <Text style={[styles.navButtonText, isDarkMode && { color: '#e2e8f0' }]}>{d}</Text>
-                    </View>
-                    <Text style={styles.navIcon}>📍</Text>
-                  </TouchableOpacity>
-                ))}
-                <Text style={styles.priceTagActive}>الأجرة المستحقة لك: {activeRide.price} جنيه</Text>
+                <Text style={[styles.navigationHeader, isDarkMode && { color: '#a7f3d0' }]}>خط سير الرحلة بالكامل:</Text>
+                
+                {/* 🟢 نقطة الانطلاق */}
+                <View style={styles.timelineRow}>
+                  <View style={styles.timelineIconContainer}>
+                    <Text style={{fontSize: 16}}>🟢</Text>
+                    <View style={styles.timelineLine} />
+                  </View>
+                  <View style={styles.timelineTextContainer}>
+                    <Text style={styles.timelineLabel}>نقطة الانطلاق (تم الركوب)</Text>
+                    <Text style={[styles.timelineValue, isDarkMode && {color: '#e2e8f0'}]}>{activeRide.pickupLocation}</Text>
+                  </View>
+                </View>
+
+                {/* 🟡/🔴 الوجهات المتعددة */}
+                {activeRide.destinationsList && activeRide.destinationsList.map((d: string, i: number) => {
+                  const isLast = i === activeRide.destinationsList.length - 1;
+                  return (
+                    <TouchableOpacity key={i} style={[styles.navButton, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#34d399' }]} onPress={() => openGoogleMaps(d)}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.navButtonTitle, isDarkMode && { color: '#34d399' }]}>{isLast ? 'الوجهة النهائية 🔴' : `محطة ${i + 1} 🟡`}</Text>
+                        <Text style={[styles.navButtonText, isDarkMode && { color: '#e2e8f0' }]} numberOfLines={2}>{d}
+                        </Text>                      
+                        </View>
+                      <View style={{ backgroundColor: isLast ? '#ef4444' : '#f59e0b', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, flexDirection: 'row-reverse', alignItems: 'center' }}>
+                        <Ionicons name="map" size={20} color="#ffffff" />
+                        <Text style={{color: '#ffffff', fontWeight: 'bold', marginRight: 4, fontSize: 13}}>تتبع</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                <Text style={[styles.priceTagActive, {marginTop: 10}]}>الأجرة المستحقة لك: {activeRide.price} جنيه</Text>
               </View>
             )}
+            
             <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 15 }}>
               <TouchableOpacity style={[styles.actionBtnCall, { flex: 1, marginLeft: 5 }]} onPress={handleCallClick}>
                 <Text style={styles.actionBtnText}>اتصال</Text>
@@ -1068,6 +1329,8 @@ const handleSelectPlace = (placeName: string) => {
                 {unreadChatCount > 0 && <View style={styles.badgeContainer}><Text style={styles.badgeText}>{unreadChatCount}</Text></View>}
               </AnimatedTouchableOpacity>
             </View>
+            
+            {/* أزرار الحالات */}
             {activeRide.status === 'accepted' ? (
               <TouchableOpacity style={styles.arriveButton} onPress={notifyArrival}>
                 <Text style={styles.arriveButtonText}>إبلاغ بالوصول</Text>
@@ -1081,10 +1344,45 @@ const handleSelectPlace = (placeName: string) => {
                 <Text style={styles.completeButtonText}>إنهاء المشوار واستلام الكاش</Text>
               </TouchableOpacity>
             ) : null}
+
+            {/* 🛑 زرار الإلغاء الوحيد والذكي */}
             {activeRide.status !== 'in_progress' && (
-              <TouchableOpacity style={styles.cancelRideBtn} onPress={() => Alert.alert("التراجع عن الرحلة", "هل أنت متأكد؟ (قد يعرضك لحظر مؤقت إذا تكرر)", [{ text: 'لا', style: 'cancel' }, { text: 'نعم', onPress: cancelRideByCaptain }])}>
-                <Text style={styles.cancelRideBtnText}>التراجع عن الرحلة</Text>
-              </TouchableOpacity>
+              <View style={{ marginTop: 15 }}>
+                <TouchableOpacity 
+                  style={{ 
+                    backgroundColor: (waitingTimeLeft === 0 && ['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status)) ? '#22c55e' : '#fee2e2', 
+                    paddingVertical: 14, 
+                    borderRadius: 12, 
+                    alignItems: 'center', 
+                    elevation: 1 
+                  }} 
+                  onPress={() => {
+                    const isSafeCancel = ['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status) && waitingTimeLeft === 0;
+                    const isEarlyCancel = activeRide.status === 'accepted';
+                    
+                    Alert.alert(
+                      isSafeCancel ? 'إلغاء آمن ✅' : 'تأكيد الإلغاء ⚠️', 
+                      isSafeCancel 
+                        ? 'هل أنت متأكد من إلغاء الرحلة؟ لن يتم توقيع أي عقوبة عليك.' 
+                        : isEarlyCancel 
+                          ? 'التراجع عن الرحلة الآن قد يعرضك لحظر مؤقت إذا تكرر. هل أنت متأكد؟'
+                          : 'إلغاء الرحلة قبل انتهاء وقت الانتظار (5 دقائق) قد يعرضك لغرامة. هل أنت متأكد؟',
+                      [
+                        { text: 'تراجع', style: 'cancel' }, 
+                        { text: 'نعم، متأكد', style: 'destructive', onPress: cancelRideByCaptain }
+                      ]
+                    );
+                  }}
+                >
+                  <Text style={{ color: (waitingTimeLeft === 0 && ['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status)) ? '#ffffff' : '#ef4444', fontSize: 16, fontWeight: 'bold' }}>
+                    {(waitingTimeLeft === 0 && ['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status)) 
+                      ? 'إلغاء الرحلة (آمن)' 
+                      : ['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status) 
+                        ? 'إلغاء الرحلة' 
+                        : 'التراجع عن الرحلة'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </ScrollView>
@@ -1140,15 +1438,9 @@ const handleSelectPlace = (placeName: string) => {
             <TouchableOpacity style={[styles.adminMsgCloseBtn, { backgroundColor: '#2563eb', marginBottom: 15 }]} onPress={() => setIsTuktukTypeModalVisible(false)}>
               <Text style={[styles.adminMsgCloseText, { color: '#ffffff' }]}>حفظ ومتابعة</Text>
             </TouchableOpacity>
-{/* الزرار الجديد لتصحيح الفئة للسيارات */}
+            {/* الزرار الجديد لتصحيح الفئة للسيارات */}
             <TouchableOpacity style={{ paddingVertical: 10, width: '100%', alignItems: 'center', marginTop: 10 }} onPress={setAsCarAndClose}>
               <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 14, textAlign: 'center', textDecorationLine: 'underline' }}>
-                مركبتي ليست بديل توكتوك (تغيير إلى سيارة 🚗)
-              </Text>
-            </TouchableOpacity>
-            {/* الزرار الجديد لتصحيح الفئة للسيارات */}
-            <TouchableOpacity style={{ paddingVertical: 10, width: '100%', alignItems: 'center' }} onPress={setAsCarAndClose}>
-              <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 14, textAlign: 'center' }}>
                 مركبتي ليست بديل توكتوك (تغيير إلى سيارة 🚗)
               </Text>
             </TouchableOpacity>
@@ -1267,13 +1559,92 @@ const handleSelectPlace = (placeName: string) => {
         </View>
       </Modal>
 
-      <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
+{/* 🚀 شاشة أقرب رحلة (inDrive Style - Full Screen) */}
+      <Modal visible={!!closestPoppedRide} transparent={true} animationType="slide">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, elevation: 15, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0', minHeight: '60%' }}>
+            
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <Text style={{ fontSize: 22, fontWeight: '900', color: '#10b981' }}>🔥 أقرب رحلة لك !</Text>
+              <View style={{ backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 12 }}>أقل من 2 كم</Text>
+              </View>
+            </View>
+
+            {closestPoppedRide && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {/* بيانات الراكب */}
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 20, backgroundColor: isDarkMode ? '#334155' : '#f8fafc', padding: 15, borderRadius: 15 }}>
+                  <Image source={{ uri: closestPoppedRide.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={{ width: 55, height: 55, borderRadius: 30, marginLeft: 12, borderWidth: 2, borderColor: '#cbd5e1' }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: isDarkMode ? '#ffffff' : '#1e293b', textAlign: 'right' }}>{closestPoppedRide.name || 'راكب'}</Text>
+                    <Text style={{ fontSize: 14, color: '#64748b', textAlign: 'right', marginTop: 2 }}>طريقة الدفع: {closestPoppedRide.paymentMethod || 'كاش'}</Text>
+                  </View>
+                </View>
+
+                {/* المسار */}
+                <View style={{ marginBottom: 20, padding: 15, backgroundColor: isDarkMode ? '#0f172a' : '#ffffff', borderRadius: 15, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0' }}>
+                  <Text style={{ fontSize: 14, color: '#f59e0b', fontWeight: 'bold', textAlign: 'right', marginBottom: 5 }}>🟢 نقطة الانطلاق:</Text>
+                  <Text style={{ fontSize: 17, color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginBottom: 15, fontWeight: 'bold' }}>{closestPoppedRide.pickupLocation}</Text>
+                  
+                  <View style={{ height: 1, backgroundColor: isDarkMode ? '#334155' : '#e2e8f0', marginBottom: 15 }} />
+
+                  <Text style={{ fontSize: 14, color: '#ef4444', fontWeight: 'bold', textAlign: 'right', marginBottom: 5 }}>🔴 الوجهة المطلوبة:</Text>
+                  <Text style={{ fontSize: 17, color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', fontWeight: 'bold' }}>{closestPoppedRide.destinationLocation}</Text>
+                </View>
+
+                {/* السعر وتعديل العرض */}
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isDarkMode ? '#064e3b' : '#ecfdf5', padding: 15, borderRadius: 15, marginBottom: 20, borderWidth: 1, borderColor: '#10b981' }}>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#a7f3d0' : '#064e3b' }}>أجرة الراكب المقترحة:</Text>
+                  <Text style={{ fontSize: 26, fontWeight: '900', color: '#10b981' }}>{closestPoppedRide.price} ج</Text>
+                </View>
+
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#475569', textAlign: 'right', marginBottom: 10 }}>عدل سعرك (اختياري):</Text>
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 25, gap: 10 }}>
+                  <TextInput 
+                    style={{ flex: 1, backgroundColor: isDarkMode ? '#334155' : '#f1f5f9', borderWidth: 2, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderRadius: 12, padding: 12, fontSize: 22, fontWeight: 'bold', color: isDarkMode ? '#ffffff' : '#1e293b', textAlign: 'center' }}
+                    keyboardType="numeric"
+                    value={offerPriceForPopped}
+                    onChangeText={setOfferPriceForPopped}
+                  />
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#475569' }}>جنيه</Text>
+                </View>
+
+                {/* الأزرار (تقديم أو تخطي) */}
+                <View style={{ flexDirection: 'row-reverse', gap: 12, marginBottom: 10 }}>
+                  <TouchableOpacity style={{ flex: 2, backgroundColor: '#10b981', paddingVertical: 16, borderRadius: 14, alignItems: 'center', elevation: 3 }} onPress={handleSendOfferForPopped}>
+                    <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: 'bold' }}>إرسال العرض</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={{ flex: 1, backgroundColor: isDarkMode ? '#334155' : '#fee2e2', paddingVertical: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#fca5a5' }} onPress={handleSkipPoppedRide}>
+                    <Text style={{ color: isDarkMode ? '#f87171' : '#ef4444', fontSize: 18, fontWeight: 'bold' }}>تخطي ⏭</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={isCallModalVisible} transparent={true} animationType="fade">        
         <View style={styles.modalOverlay}>
           <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
             <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال</Text>
-            <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
-              <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#e2e8f0' }]}>مكالمة عادية (شبكة المحمول)</Text>
-            </TouchableOpacity>
+            
+            {/* 🛡️ التحقق من خصوصية رقم الراكب */}
+            {activeRide?.isPhoneHidden ? (
+              <View style={{ backgroundColor: '#f0fdf4', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#bbf7d0', alignItems: 'center', width: '100%' }}>
+                <Text style={{ fontSize: 30, marginBottom: 5 }}>🛡</Text>
+                <Text style={{ color: '#166534', fontSize: 13, fontWeight: 'bold', textAlign: 'center', lineHeight: 20 }}>
+                  الراكب مفعّل خاصية إخفاء الرقم.
+                  التواصل متاح فقط عبر المكالمة المجانية أو المراسلة داخل التطبيق.
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
+                <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#ffffff' }]}>مكالمة عادية (شبكة المحمول)</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
               <Text style={styles.freeCallBtnText}>مكالمة مجانية داخل التطبيق</Text>
             </TouchableOpacity>
@@ -1283,7 +1654,6 @@ const handleSelectPlace = (placeName: string) => {
           </View>
         </View>
       </Modal>
-
       <Modal visible={isRatingModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.ratingModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -1357,7 +1727,16 @@ const handleSelectPlace = (placeName: string) => {
 }
 
 const styles = StyleSheet.create({
-  // تنسيقات الهيدر الجديد المنظم 
+  // تنسيقات التايم لاين (خط السير المضاف حديثاً)
+  timelineRow: { flexDirection: 'row-reverse', alignItems: 'flex-start', minHeight: 50 },
+  timelineIconContainer: { width: 30, alignItems: 'center', height: '100%' },
+  timelineLine: { width: 2, flex: 1, backgroundColor: '#cbd5e1', marginVertical: 4 },
+  timelineTextContainer: { flex: 1, paddingRight: 10, paddingBottom: 15 },
+  timelineLabel: { fontSize: 12, color: '#64748b', fontWeight: 'bold', textAlign: 'right' },
+  timelineValue: { fontSize: 15, color: '#1e293b', fontWeight: 'bold', textAlign: 'right', marginTop: 2 },
+  navButtonMulti: { backgroundColor: '#3b82f6', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 2 },
+  navButtonMultiText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
+
   userInfoCentered: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1, justifyContent: 'center' },
   profileTextContainer: { alignItems: 'center', marginRight: 10 },
   headerSettingsBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' },

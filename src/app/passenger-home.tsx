@@ -3,17 +3,33 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
-const [routeFlexibility, setRouteFlexibility] = useState<'fast' | 'flexible'>('fast');
-const [confirmedDestCoords, setConfirmedDestCoords] = useState<any>(null);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
-const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, onAcceptOffer: (offer: any) => void, isDarkMode: boolean }) => {
+const getSafeAvatar = (imgStr: any) => {
+  if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+  if (imgStr.startsWith('http') || imgStr.startsWith('file:/') || imgStr.startsWith('data:image')) return imgStr;
+  if (imgStr.length > 50) return `data:image/jpeg;base64,${imgStr}`;
+  return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+};
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; 
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c * 1000; // المسافة بالمتر
+};
+const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode }: { offer: any, onAcceptOffer: (offer: any) => void, onRejectOffer: (offer: any) => void, isDarkMode: boolean }) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
   useEffect(() => {
@@ -34,16 +50,11 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, 
   if (offer.captainVehicleCategory === 'car' || offer.captainVehicle?.includes('سيارة')) vIcon = '🚗';
   else if (offer.captainVehicleCategory === 'scooter' || offer.captainVehicle?.includes('سكوتر')) vIcon = '🛵';
 
-  const getValidAvatar = (imgStr: any) => {
-    if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
-    if (imgStr.startsWith('http') || imgStr.startsWith('data:image') || imgStr.startsWith('file:/')) return imgStr;
-    return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
-  };
   return (
     <View style={[styles.offerCardPro, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
       <View style={[styles.offerTopRow, isDarkMode && { borderBottomColor: '#334155' }]}>
         <View style={styles.offerCaptainSide}>
-          <Image source={{ uri: getValidAvatar(offer.captainAvatar) }} style={[styles.offerAvatarPro, isDarkMode && { borderColor: '#475569' }]} />
+          <Image source={{ uri: getSafeAvatar(offer.captainAvatar) }} style={[styles.offerAvatarPro, isDarkMode && { borderColor: '#475569' }]} />
           <View style={styles.offerInfoCol}>
             <Text style={[styles.offerNamePro, isDarkMode && { color: '#ffffff' }]} numberOfLines={1}>{offer.captainName}</Text>
             <View style={{ flexDirection: 'row-reverse', marginTop: 2 }}>
@@ -53,16 +64,21 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, isDarkMode }: { offer: any, 
             </View>
           </View>
         </View>
-        <View style={[styles.offerActionSide, isDarkMode && { borderRightColor: '#334155' }]}>
+        <View style={[styles.offerActionSide, isDarkMode && { borderRightColor: '#334155' }, { alignItems: 'center' }]}>
           <Text style={styles.offerPricePro}>{offer.price} ج</Text>
-          <TouchableOpacity style={styles.acceptOfferBtnPro} onPress={() => onAcceptOffer(offer)}>
-            <Text style={styles.acceptOfferBtnTextPro}>قبول العرض</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row-reverse', gap: 5 }}>
+            <TouchableOpacity style={styles.acceptOfferBtnPro} onPress={() => onAcceptOffer(offer)}>
+              <Text style={styles.acceptOfferBtnTextPro}>قبول</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.rejectOfferBtnPro} onPress={() => onRejectOffer(offer)}>
+              <Text style={styles.rejectOfferBtnTextPro}>رفض</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
       <View style={[styles.offerBottomRow, isDarkMode && { backgroundColor: '#0f172a', borderTopColor: '#334155' }]}>
         <Text style={[styles.offerFullVehicleText, isDarkMode && { color: '#93c5fd' }]} numberOfLines={2}>
-          {offer.captainVehicle} {offer.captainPlateNumber && offer.captainPlateNumber !== 'لم يسجل لوحة' ? ` | لوحة: ${offer.captainPlateNumber}` : ''}
+          {offer.captainVehicle ? offer.captainVehicle.replace('بديل توكتوك', '').replace(/[()\-]/g, '').trim() || 'كيوت 3 راكب' : 'مركبة'} {offer.captainPlateNumber && offer.captainPlateNumber !== 'لم يسجل لوحة' ? (offer.captainVehicleCategory === 'tuktuk_alt' || offer.captainVehicle?.includes('كيوت') || offer.captainVehicle?.includes('جالاكسي') ? ` | الرقم الكودي للمركبة: (${offer.captainPlateNumber})` : ` | لوحة: ${offer.captainPlateNumber}`) : ''}
         </Text>
         <Text style={styles.offerVehicleIcon}>{vIcon}</Text>
       </View>
@@ -111,6 +127,7 @@ export default function PassengerHome() {
   const router = useRouter();
   const { isDarkMode, isVibrationEnabled } = useApp();
   const pathname = usePathname();
+  
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number, longitude: number } | null>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
@@ -127,50 +144,239 @@ export default function PassengerHome() {
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
   const [calculatedDistance, setCalculatedDistance] = useState('0');
-  
+  const [destinationsPrices, setDestinationsPrices] = useState<number[]>([]); // 👈 مصفوفة الأسعار المجزأة
   const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const debounceTimer = useRef<any>(null);
 
   const [notes, setNotes] = useState('');
   const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'captain_arrived' | 'passenger_on_the_way' | 'waiting_for_scan' | 'in_progress'>('idle');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
-  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+ const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
+  // 💾 مراقب التخزين التلقائي: أي تغيير في السعر بيتحفظ محلياً فوراً
+  useEffect(() => {
+    const savePriceLocally = async () => {
+      if (price && price !== '0') {
+        try {
+          const savedRide = await AsyncStorage.getItem('active_ride');
+          if (savedRide) {
+            const data = JSON.parse(savedRide);
+            data.price = price;
+            await AsyncStorage.setItem('active_ride', JSON.stringify(data));
+          }
+        } catch (e) {}
+      }
+    };
+    savePriceLocally();
+  }, [price]);
+
+  // 📂 استرجاع السعر فور فتح الشاشة أو رجوع التطبيق للحياة
+  useFocusEffect(
+    useCallback(() => {
+      const getLocalPrice = async () => {
+        try {
+          const savedRide = await AsyncStorage.getItem('active_ride');
+          if (savedRide) {
+            const data = JSON.parse(savedRide);
+            if (data.price && (!price || price === '0')) {
+              setPrice(data.price.toString());
+            }
+          }
+        } catch (e) {}
+      };
+      getLocalPrice();
+    }, [])
+  );
+// 👈 مراقب السعر الذكي: أي تغيير في السعر عند الراكب هيتبعت فوراً للكابتن
+  useEffect(() => {
+    if (currentRideId && rideStatus === 'searching' && price) {
+      updateDoc(doc(db, 'rides', currentRideId), { 
+        price: price.toString(),
+        timestamp: new Date().getTime() // تحديث الوقت لضمان إنعاش شاشة الكابتن
+      }).catch((e) => console.log('Price Sync Error:', e));
+    }
+  }, [price, currentRideId, rideStatus]);
+  const saveNewDestinations = async () => {
+    const validDests = tempDestinations.filter(d => d.trim().length > 0);
+    if (validDests.length === 0) {
+      Alert.alert('تنبيه', 'يجب إدخال وجهة واحدة على الأقل');
+      return;
+    }
+    
+    setDestinations(validDests);
+    setIsEditDestModalVisible(false);
+    
+    try {
+      if (currentRideId) {
+        await updateDoc(doc(db, 'rides', currentRideId), { 
+          destinationsList: validDests,
+          destinationLocation: validDests.join(' - '),
+          timestamp: new Date().getTime(), // 👈 السطر ده بيجبر كارت الكابتن يعمل ريفريش فوري
+          offers: [] // 👈 السطر ده بيمسح العروض القديمة لأن الوجهة اتغيرت والكباتن لازم تسعر من جديد
+        });
+      }
+      
+// استرجاع السعر المحفوظ محلياً بشكل صحيح عند فتح التطبيق أو العودة له
+      const savedRide = await AsyncStorage.getItem('active_ride');
+      if (savedRide) {
+        const data = JSON.parse(savedRide);
+        if (data.price) {
+          setPrice(data.price.toString());
+        }
+      }
+      
+      // تحديث السعر المقترح في الخلفية بناءً على المسافة للوجهة الجديدة
+      updatePriceCalculation(pickup, validDests, requestedVehicleType, passengersCount, pickupCoords);
+
+    } catch (e) {
+      console.log(e);
+    }
+  };
   const [offers, setOffers] = useState<any[]>([]);
   const [numericSecret, setNumericSecret] = useState('');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState('');
   const latestMsgTimer = useRef<any>(null);
-  // 📍 دالة إرسال الاستغاثة الطارئة (SOS) من داخل الرحلة
-  const handleRideSOS = () => {
+
+  // ⏱️ --- متغيرات ودالة العداد للراكب ---
+  const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); // 5 دقائق
+  const [rideArrivedAt, setRideArrivedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    let interval: any;
+    if (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'passenger_on_the_way') {
+      const arrivalTime = rideArrivedAt || new Date().getTime();
+      const targetTime = arrivalTime + (5 * 60 * 1000);
+
+      const updateTimer = () => {
+        const now = new Date().getTime();
+        const diffInSeconds = Math.max(0, Math.floor((targetTime - now) / 1000));
+        setWaitingTimeLeft(diffInSeconds);
+      };
+
+      updateTimer();
+      interval = setInterval(updateTimer, 1000);
+    } else {
+      setWaitingTimeLeft(300);
+    }
+    return () => clearInterval(interval);
+  }, [rideStatus, rideArrivedAt]);
+
+  const formatTimer = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `0${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+  // ------------------------------------
+
+  const [isCallModalVisible, setIsCallModalVisible] = useState(false);
+  const [phoneToCall, setPhoneToCall] = useState('');
+  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+  const [isSendingLocation, setIsSendingLocation] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [isEmergencyModalVisible, setIsEmergencyModalVisible] = useState(false);
+  const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const sidebarAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
+
+  const openSidebar = () => {
+    setIsSidebarOpen(true);
+    Animated.timing(sidebarAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
+  };
+
+  const closeSidebar = () => {
+    Animated.timing(sidebarAnim, { toValue: Dimensions.get('window').width, duration: 300, useNativeDriver: true }).start(() => setIsSidebarOpen(false));
+  };
+
+  // دالة الاستغاثة للطوارئ
+  const handleRideSOS = async () => {
+    let finalPhone = emergencyPhone;
+
+    if (!finalPhone && passengerProfile?.id) {
+      try {
+        const contactDoc = await getDoc(doc(db, 'emergencyContacts', passengerProfile.id));
+        if (contactDoc.exists() && contactDoc.data().phone) {
+          finalPhone = contactDoc.data().phone;
+          setEmergencyPhone(finalPhone);
+          await AsyncStorage.setItem('emergency_phone', finalPhone);
+        }
+      } catch (error) {
+        console.log("Error fetching emergency contact:", error);
+      }
+    }
+
+    if (!finalPhone) {
+      Alert.alert("تنبيه", "لم تقم بتسجيل رقم طوارئ. يرجى إضافته أولاً من القائمة الجانبية (رقم الطوارئ والأمان).");
+      return;
+    }
+
     Alert.alert(
       "تأكيد الاستغاثة ⚠️",
-      "هل أنت متأكد أنك في خطر وتريد إرسال استغاثة طارئة للإدارة؟",
+      "هل أنت متأكد أنك في خطر وتريد إرسال رسالة استغاثة طارئة عبر الواتساب لجهة الاتصال الخاصة بك؟",
       [
         { text: "إلغاء", style: "cancel" },
         { 
-          text: "نعم، أنقذوني", 
+          text: "نعم، أرسل الآن", 
           style: "destructive", 
           onPress: async () => {
             try {
-              // بنبعت بيانات الراكب للفايربيز (استخدمنا علامة الاستفهام عشان نتجنب أي خطأ لو البيانات لسة بتحمل)
-              await addDoc(collection(db, 'sos_alerts'), {
-                passengerId: passengerProfile?.id || 'unknown',
-                passengerName: passengerProfile?.name || 'غير معروف',
-                passengerPhone: passengerProfile?.phone || '',
-                timestamp: new Date().getTime(),
-                status: 'active', // حالة نشطة للإدارة
-              });
-
-              Alert.alert("تم الإرسال", "تم إبلاغ الإدارة بنجاح، جاري التحرك والاتصال بأرقام الطوارئ.");
+              let phone = finalPhone;
+              if (phone.startsWith('01')) {
+                phone = '+20' + phone.substring(1);
+              } else if (phone.startsWith('0')) {
+                phone = '+2' + phone;
+              }
+              
+              const trackingLink = currentRideId ? `\nتتبع مساري (لايف) من هنا:\nhttps://badr-cute.web.app/?ride=${currentRideId}` : '';
+              const message = `🚨 استغاثة عاجلة! أنا في خطر أثناء رحلتي، أرجو المساعدة فوراً.${trackingLink}`;
+              
+              const whatsappUrl = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
+              
+              try { 
+                await Linking.openURL(whatsappUrl); 
+              } catch (err) { 
+                const waMeUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+                try {
+                  await Linking.openURL(waMeUrl);
+                } catch (e) {
+                  Alert.alert("تنبيه", "تعذر فتح الواتساب. تأكد من تثبيت التطبيق.");
+                }
+              }
             } catch (error) {
-              Alert.alert("خطأ", "حدث مشكلة في الإرسال، تأكد من الإنترنت.");
+              Alert.alert("خطأ", "حدثت مشكلة أثناء محاولة إرسال الاستغاثة.");
             }
           } 
         }
       ]
     );
   };
+
+  const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [ratingReason, setRatingReason] = useState('');
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const passengerRatingTags = ['كابتن مهذب', 'مركبة نظيفة', 'قيادة آمنة', 'موسيقى جيدة'];
+  const [rideToRate, setRideToRate] = useState<any>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+  const chatPulseAnim = useRef(new Animated.Value(0)).current;
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(-10)).current;
+  const [toastVisible, setToastVisible] = useState(false);
+  const prevUnreadRef = useRef(0);
+  const toastTimer = useRef<any>(null);
+  const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+
+  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0, hidePhoneNumber: false });  
+const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
+  const [captainLiveCoords, setCaptainLiveCoords] = useState<any>(null); // 👈 متغير جديد لتتبع موقع الكابتن لايف
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
   const prevOffersCountRef = useRef(0);
 
@@ -184,9 +390,147 @@ export default function PassengerHome() {
     }
   };
 
-  // ---------------------------------------------------------
-  // 🚀 مراقب الإشعارات والرسائل المباشرة من الإدارة (المفقودات وغيرها)
-  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!passengerProfile || !passengerProfile.id) return;
+    const q = query(collection(db, 'notifications'), where('userId', '==', passengerProfile.id), where('read', '==', false));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadNotifsCount(snapshot.docs.length);
+    });
+    return () => unsubscribe();
+  }, [passengerProfile]);
+  
+  useFocusEffect(useCallback(() => { loadPassengerProfile(); loadEmergencyPhone(); }, []));
+
+  const loadEmergencyPhone = async () => {
+    try {
+      const savedPhone = await AsyncStorage.getItem('emergency_phone');
+      if (savedPhone) setEmergencyPhone(savedPhone);
+    } catch (e) {}
+  };
+
+  const loadPassengerProfile = async () => {
+    try {
+      const passengerId = await AsyncStorage.getItem('currentPassengerId');
+      if (passengerId) {
+        const ratingQ = query(collection(db, 'ratings'), where('passengerId', '==', passengerId), where('type', '==', 'captain_rating_passenger'));
+        let sum = 0;
+        const ratingSnap = await getDocs(ratingQ);
+        ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
+        const rCount = ratingSnap.docs.length;
+        const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : '5';
+        const savedProfile = await AsyncStorage.getItem('passenger_profile');
+        let pName = 'مستخدم جديد';
+        let freshAvatar = DEFAULT_AVATAR;
+        
+        if (savedProfile) {
+          const parsed = JSON.parse(savedProfile);
+          pName = parsed.name || 'مستخدم جديد';
+          setPassengerProfile({ id: passengerId, name: pName, phone: parsed.phone || '', avatar: getSafeAvatar(parsed.avatar), averageRating: Number(avgRate), ratingCount: rCount, hidePhoneNumber: parsed.hidePhoneNumber || false });
+        }
+        
+        const docRef = doc(db, 'passengers', passengerId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          pName = data.name || 'مستخدم جديد';
+          freshAvatar = getSafeAvatar(data.avatar || data.image);
+          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar, averageRating: Number(avgRate), ratingCount: rCount, hidePhoneNumber: data.hidePhoneNumber || false });
+          
+          if (savedProfile) {
+            const parsed = JSON.parse(savedProfile);
+            parsed.name = pName;
+            parsed.avatar = freshAvatar;
+            parsed.hidePhoneNumber = data.hidePhoneNumber || false;
+            await AsyncStorage.setItem('passenger_profile', JSON.stringify(parsed));
+          }
+          checkRideStatus(passengerId, pName);
+        }
+      } else {
+        router.replace('/passenger-login');
+      }
+    } catch (e) {}
+  };
+
+  const checkRideStatus = async (passengerId: string, passengerName: string) => {
+    try {
+      const savedRideStr = await AsyncStorage.getItem('active_ride');
+      if (savedRideStr) {
+        const savedRide = JSON.parse(savedRideStr);
+        if (savedRide.id && ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(savedRide.status)) {
+          setCurrentRideId(savedRide.id); 
+          setPickup(savedRide.pickupLocation || '');
+          if (savedRide.pickupCoords) setPickupCoords(savedRide.pickupCoords);
+          if (savedRide.destinationsList && savedRide.destinationsList.length > 0) {
+            setDestinations(savedRide.destinationsList);
+          } else {
+            setDestinations([savedRide.destinationLocation || '']);
+          }
+          // 👈 جلب الأسعار المجزأة لو الراكب فاتح التطبيق من جديد
+          if (savedRide.destinationsPrices) {
+            setDestinationsPrices(savedRide.destinationsPrices);
+          }
+          return; 
+        }
+      }
+
+      let q = query(collection(db, 'rides'), where('passengerId', '==', passengerId), limit(15));
+      let querySnapshot = await getDocs(q);
+      let docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length === 0 && passengerName) {
+        const qName = query(collection(db, 'rides'), where('name', '==', passengerName), limit(15));
+        const snapName = await getDocs(qName);
+        docs = snapName.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+      
+      docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
+      
+      // 👈 هنا تعريف activeRide اللي كان طاير
+      const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
+      
+      if (activeRide) {
+        setCurrentRideId(activeRide.id);
+        setPickup(activeRide.pickupLocation || '');
+        if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
+        if (activeRide.numericSecret) setNumericSecret(activeRide.numericSecret);
+        if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
+          setDestinations(activeRide.destinationsList);
+        } else {
+          setDestinations([activeRide.destinationLocation || '']);
+        }
+        
+        // 👈 سحب أسعار المحطات من الداتابيز لعرضها للراكب
+        if (activeRide.destinationsPrices) {
+          setDestinationsPrices(activeRide.destinationsPrices);
+        }
+
+        setPrice(activeRide.price || '');
+        setUnreadChatCount(activeRide.unreadCountPassenger || 0);
+        
+        if (activeRide.status === 'pending') {
+          setRideStatus('searching');
+          setOffers(activeRide.offers || []);
+          prevOffersCountRef.current = (activeRide.offers || []).length;
+        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
+          setRideStatus(activeRide.status);
+          if (activeRide.arrivedAt) setRideArrivedAt(activeRide.arrivedAt); // ⏳ استرجاع وقت الوصول
+          setCaptainInfo({
+            name: activeRide.captainName || '',
+            phone: activeRide.captainPhone || 'غير مسجل',
+            vehicle: activeRide.captainVehicle || 'مركبة',
+            avatar: getSafeAvatar(activeRide.captainAvatar),
+            vehicleImage: getSafeAvatar(activeRide.captainVehicleImage),
+            plateNumber: activeRide.captainPlateNumber || ''
+          });
+        }
+        await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
+      } else {
+        setRideStatus('idle');
+        await AsyncStorage.removeItem('active_ride');
+        setCurrentRideId(null);
+        setNumericSecret('');
+      }
+    } catch (error) {}
+  };
   useEffect(() => {
     let unsubscribeNotif: any;
     
@@ -214,7 +558,6 @@ export default function PassengerHome() {
                 text: 'حسناً', 
                 onPress: async () => {
                   try {
-                    // تعليم الإشعار كمقروء عشان ميظهرش تاني
                     await updateDoc(doc(db, 'notifications', notifId), { read: true });
                   } catch (e) {}
                 }
@@ -228,7 +571,6 @@ export default function PassengerHome() {
     listenToNotifications();
     return () => { if (unsubscribeNotif) unsubscribeNotif(); };
   }, []);
-  // ---------------------------------------------------------
 
   useEffect(() => {
     let unsubscribe: any;
@@ -242,7 +584,7 @@ export default function PassengerHome() {
         if (docSnap.exists()) {
           const dbSessionId = docSnap.data().sessionId;
           if (dbSessionId && dbSessionId !== localSessionId) {
-            Alert.alert('تنبيه ⚠️', 'لقد تم فتح الحساب من جهاز آخر، سيتم تسجيل الخروج الآن.', [
+            Alert.alert('تنبيه ⚠', 'لقد تم فتح الحساب من جهاز آخر، سيتم تسجيل الخروج الآن.', [
               { 
                 text: 'حسناً', 
                 onPress: async () => {
@@ -252,13 +594,17 @@ export default function PassengerHome() {
               }
             ]);
           }
+        } else {
+          // 🚨 الطرد الفوري للراكب لو الإدارة مسحت حسابه من الفايربيز
+          await AsyncStorage.clear();
+          router.replace('/passenger-login');
+          Alert.alert('تنبيه ⚠️', 'تم حذف حسابك نهائياً بواسطة الإدارة.');
         }
       });
     };
     monitorSession();
     return () => { if (unsubscribe) unsubscribe(); };
   }, []);
-
   useEffect(() => {
     Animated.sequence([
       Animated.timing(vehicleImageAnim, { toValue: 0.5, duration: 150, useNativeDriver: true }),
@@ -287,185 +633,6 @@ export default function PassengerHome() {
     return () => { if (latestMsgTimer.current) clearTimeout(latestMsgTimer.current); };
   }, [latestMessage]);
 
-  const [isCallModalVisible, setIsCallModalVisible] = useState(false);
-  const [phoneToCall, setPhoneToCall] = useState('');
-  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
-  const [isSendingLocation, setIsSendingLocation] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [emergencyPhone, setEmergencyPhone] = useState('');
-  const [isEmergencyModalVisible, setIsEmergencyModalVisible] = useState(false);
-  const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  
-  
-  const sidebarAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
-
-  const openSidebar = () => {
-    setIsSidebarOpen(true);
-    Animated.timing(sidebarAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
-  };
-
-  const closeSidebar = () => {
-    Animated.timing(sidebarAnim, { toValue: Dimensions.get('window').width, duration: 300, useNativeDriver: true }).start(() => setIsSidebarOpen(false));
-  };
-
-  const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
-  const [rating, setRating] = useState(0);
-  const [ratingReason, setRatingReason] = useState('');
-  const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const passengerRatingTags = ['كابتن مهذب', 'مركبة نظيفة', 'قيادة آمنة', 'موسيقى جيدة'];
-  const [rideToRate, setRideToRate] = useState<any>(null);
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [isScannerVisible, setIsScannerVisible] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const pulseAnim = useRef(new Animated.Value(0)).current;
-  const chatPulseAnim = useRef(new Animated.Value(0)).current;
-  const toastOpacity = useRef(new Animated.Value(0)).current;
-  const toastTranslateY = useRef(new Animated.Value(-10)).current;
-  const [toastVisible, setToastVisible] = useState(false);
-  const prevUnreadRef = useRef(0);
-  const toastTimer = useRef<any>(null);
-  const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
-
-  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0 });
-  const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
-// 👈 متغيرات ودالة جلب إشعارات الراكب (تم وضعها هنا لتجنب خطأ الـ Scope)
-  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
-
-  useEffect(() => {
-    if (!passengerProfile || !passengerProfile.id) return;
-    const q = query(collection(db, 'notifications'), where('userId', '==', passengerProfile.id), where('read', '==', false));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadNotifsCount(snapshot.docs.length);
-    });
-    return () => unsubscribe();
-  }, [passengerProfile]);
-  const getValidAvatar = (imgStr: any) => {
-    if (!imgStr || typeof imgStr !== 'string' || imgStr.trim() === '') return DEFAULT_AVATAR;
-    if (imgStr.length > 950000) return DEFAULT_AVATAR;
-    if (imgStr.startsWith('http') || imgStr.startsWith('data:image') || imgStr.startsWith('file:/')) return imgStr;
-    if (imgStr.length > 50) return `data:image/jpeg;base64,${imgStr}`;
-    return DEFAULT_AVATAR;
-  };
-
-  useFocusEffect(useCallback(() => { loadPassengerProfile(); loadEmergencyPhone(); }, []));
-
-  const loadEmergencyPhone = async () => {
-    try {
-      const savedPhone = await AsyncStorage.getItem('emergency_phone');
-      if (savedPhone) setEmergencyPhone(savedPhone);
-    } catch (e) {}
-  };
-
-  const loadPassengerProfile = async () => {
-    try {
-      const passengerId = await AsyncStorage.getItem('currentPassengerId');
-      if (passengerId) {
-        const ratingQ = query(collection(db, 'ratings'), where('passengerId', '==', passengerId), where('type', '==', 'captain_rating_passenger'));
-        let sum = 0;
-        const ratingSnap = await getDocs(ratingQ);
-        ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
-        const rCount = ratingSnap.docs.length;
-        const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : '5';
-        const savedProfile = await AsyncStorage.getItem('passenger_profile');
-        let pName = 'مستخدم جديد';
-        let freshAvatar = DEFAULT_AVATAR;
-        if (savedProfile) {
-          const parsed = JSON.parse(savedProfile);
-          pName = parsed.name || 'مستخدم جديد';
-          setPassengerProfile({ id: passengerId, name: pName, phone: parsed.phone || '', avatar: getValidAvatar(parsed.avatar), averageRating: Number(avgRate), ratingCount: rCount });
-        }
-        const docRef = doc(db, 'passengers', passengerId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          pName = data.name || 'مستخدم جديد';
-          freshAvatar = getValidAvatar(data.avatar || data.image);
-          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar, averageRating: Number(avgRate), ratingCount: rCount });
-          if (savedProfile) {
-            const parsed = JSON.parse(savedProfile);
-            parsed.name = pName;
-            parsed.avatar = freshAvatar;
-            await AsyncStorage.setItem('passenger_profile', JSON.stringify(parsed));
-          }
-          checkRideStatus(passengerId, pName);
-        }
-      } else {
-        router.replace('/passenger-login');
-      }
-    } catch (e) {}
-  };
-
-  const checkRideStatus = async (passengerId: string, passengerName: string) => {
-    try {
-      const savedRideStr = await AsyncStorage.getItem('active_ride');
-      if (savedRideStr) {
-        const savedRide = JSON.parse(savedRideStr);
-        if (savedRide.id && ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(savedRide.status)) {
-          setCurrentRideId(savedRide.id); 
-          setPickup(savedRide.pickupLocation || '');
-          if (savedRide.pickupCoords) setPickupCoords(savedRide.pickupCoords);
-          if (savedRide.destinationsList && savedRide.destinationsList.length > 0) {
-            setDestinations(savedRide.destinationsList);
-          } else {
-            setDestinations([savedRide.destinationLocation || '']);
-          }
-          return; 
-        }
-      }
-
-      let q = query(collection(db, 'rides'), where('passengerId', '==', passengerId), limit(15));
-      let querySnapshot = await getDocs(q);
-      let docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (docs.length === 0 && passengerName) {
-        const qName = query(collection(db, 'rides'), where('name', '==', passengerName), limit(15));
-        const snapName = await getDocs(qName);
-        docs = snapName.docs.map(d => ({ id: d.id, ...d.data() }));
-      }
-      
-      docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
-      const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
-      
-      if (activeRide) {
-        setCurrentRideId(activeRide.id);
-        setPickup(activeRide.pickupLocation || '');
-        if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
-        if (activeRide.numericSecret) setNumericSecret(activeRide.numericSecret);
-        if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
-          setDestinations(activeRide.destinationsList);
-        } else {
-          setDestinations([activeRide.destinationLocation || '']);
-        }
-        setPrice(activeRide.price || '');
-        setUnreadChatCount(activeRide.unreadCountPassenger || 0);
-        
-        if (activeRide.status === 'pending') {
-          setRideStatus('searching');
-          setOffers(activeRide.offers || []);
-          prevOffersCountRef.current = (activeRide.offers || []).length;
-        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
-          setRideStatus(activeRide.status);
-          setCaptainInfo({
-            name: activeRide.captainName || '',
-            phone: activeRide.captainPhone || 'غير مسجل',
-            vehicle: activeRide.captainVehicle || 'مركبة',
-            avatar: getValidAvatar(activeRide.captainAvatar),
-            vehicleImage: getValidAvatar(activeRide.captainVehicleImage),
-            plateNumber: activeRide.captainPlateNumber || ''
-          });
-        }
-        await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
-      } else {
-        setRideStatus('idle');
-        await AsyncStorage.removeItem('active_ride');
-        setCurrentRideId(null);
-        setNumericSecret('');
-      }
-    } catch (error) {}
-  };
-
   useEffect(() => {
     if (!currentRideId) return;
     const rideRef = doc(db, 'rides', currentRideId);
@@ -488,15 +655,28 @@ export default function PassengerHome() {
         if (firebaseData.numericSecret) setNumericSecret(firebaseData.numericSecret);
         if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(firebaseData.status)) {
           setRideStatus(firebaseData.status);
+          if (firebaseData.arrivedAt) setRideArrivedAt(firebaseData.arrivedAt); // ⏳ تحديث وقت الوصول فوراً
           setPrice(firebaseData.price ? String(firebaseData.price) : '');
-          setCaptainInfo({
+setCaptainInfo({
             name: firebaseData.captainName || 'كابتن',
             phone: firebaseData.captainPhone || 'غير مسجل',
             vehicle: firebaseData.captainVehicle || 'مركبة',
-            avatar: getValidAvatar(firebaseData.captainAvatar),
-            vehicleImage: getValidAvatar(firebaseData.captainVehicleImage),
+            avatar: getSafeAvatar(firebaseData.captainAvatar),
+            vehicleImage: getSafeAvatar(firebaseData.captainVehicleImage),
             plateNumber: firebaseData.captainPlateNumber || ''
           });
+          
+          // 👈 السر هنا: هنجيب موقع الكابتن فوراً من العرض بتاعه حتى لو لسه متحركش
+          let loc = firebaseData.liveCoords || firebaseData.captainCoords || firebaseData.captainLocation;
+          if (!loc && firebaseData.offers && firebaseData.offers.length > 0) {
+            const acceptedOffer = firebaseData.offers.find((o: any) => o.captainId === firebaseData.captainId);
+            if (acceptedOffer && acceptedOffer.captainLocation) {
+              loc = acceptedOffer.captainLocation;
+            }
+          }
+          if (loc) {
+            setCaptainLiveCoords(loc);
+          }
         } else if (firebaseData.status === 'completed') {
           setRideToRate({ firebaseData, id: currentRideId });
           setIsRatingModalVisible(true);
@@ -634,6 +814,174 @@ export default function PassengerHome() {
     }
   };
 
+// 🌍 دالة ذكية لتحويل أسماء الأماكن لإحداثيات باستخدام OpenStreetMap بدقة عالية في مصر
+  const getCoordinatesFromText = async (text: string) => {
+    try {
+      // 1️⃣ المحاولة الأولى عبر خريطة الموبايل الافتراضية
+      const expoResult = await Location.geocodeAsync(text + ' مصر');
+      if (expoResult && expoResult.length > 0) {
+        return { latitude: expoResult[0].latitude, longitude: expoResult[0].longitude };
+      }
+    } catch (e) { }
+
+    try {
+      // 2️⃣ المحاولة الثانية عبر سيرفر OpenStreetMap (تم إضافة User-Agent لضمان عدم الرفض)
+      const osmResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(text + ' مصر')}&format=json&limit=1`, {
+        headers: {
+          'User-Agent': 'BuraqPassengerApp/1.0',
+          'Accept-Language': 'ar'
+        }
+      });
+      const osmData = await osmResponse.json();
+      if (osmData && osmData.length > 0) {
+        return { latitude: parseFloat(osmData[0].lat), longitude: parseFloat(osmData[0].lon) };
+      }
+    } catch (e) { }
+    return null;
+  };
+
+  const fallbackCalculation = (validDests: string[], vType: string, passCountStr: string) => {
+     let base = 0;
+     if (vType === 'car') {
+        base = 35 + ((validDests.length - 1) * 20);
+     }
+     else if (vType === 'scooter') {
+        base = 12 + ((validDests.length - 1) * 5);
+     }
+     else {
+        // تسعيرة الطوارئ: 15 جنيه أساسي + 6.5 لكل وجهة إضافية
+        let basePriceForOne = 15 + ((validDests.length - 1) * 6.5);
+        const count = parseInt(passCountStr) || 1;
+        const extraPassengers = count - 1;
+        // زيادة 25% لكل راكب إضافي (عشان الـ 100 تبقى 125 و 150)
+        const passengerMultiplier = 1 + (extraPassengers * 0.25);
+        base = basePriceForOne * passengerMultiplier;
+     }
+
+     let finalBase = Math.ceil(base);
+     setCalculatedBasePrice(finalBase); 
+     setBasePriceForSuggestions(finalBase);
+     setCalculatedDistance('0'); 
+     setPrice(finalBase.toString());
+  };
+
+  const updatePriceCalculation = async (pickupText: string, dests: string[], vType: string = requestedVehicleType, passCountStr: string = passengersCount, overrideStartCoords: any = null) => {
+    const validDests = dests.filter(d => d.trim().length > 0);
+    
+    if (pickupText.trim().length > 0 && validDests.length > 0) {
+      setIsCalculatingPrice(true);
+      try {
+        let startCoords = overrideStartCoords || pickupCoords;
+        // استخدام المساعد الذكي لجلب إحداثيات نقطة الانطلاق
+        if (!startCoords && pickupText !== 'موقعي الحالي') {
+          startCoords = await getCoordinatesFromText(pickupText);
+        }
+
+        // استخدام المساعد الذكي لجلب إحداثيات كل الوجهات
+        let destsCoords: any[] = [];
+        for (let dest of validDests) {
+          const coords = await getCoordinatesFromText(dest);
+          if (coords) destsCoords.push(coords);
+        }
+
+        // لو قدرنا نجيب الإحداثيات كلها بنجاح
+        if (startCoords && destsCoords.length === validDests.length) {
+          let totalDistanceKm = 0;
+          let osrmSuccess = false;
+
+          try {
+            // محاولة تتبع مسار الشوارع
+            let coordsString = `${startCoords.longitude},${startCoords.latitude}`;
+            destsCoords.forEach((c: any) => { coordsString += `;${c.longitude},${c.latitude}`; });
+            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=false`;
+            
+            const response = await fetch(osrmUrl);
+            const data = await response.json();
+
+            if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+               totalDistanceKm = data.routes[0].distance / 1000;
+               osrmSuccess = true;
+            }
+          } catch (osrmError) {
+             console.log("OSRM API failed, switching to fallback");
+          }
+
+       // 👈 الحل الرياضي الذكي (حساب مسافة كل محطة بشكل مستقل عشان نوزع السعر بالعدل)
+          let legsDistances: number[] = [];
+          let totalDirectMeters = 0;
+          let currentPoint = startCoords;
+          for (let dest of destsCoords) {
+            let d = calculateDistance(currentPoint.latitude, currentPoint.longitude, dest.latitude, dest.longitude);
+            legsDistances.push(d);
+            totalDirectMeters += d;
+            currentPoint = dest;
+          }
+
+          if (!osrmSuccess) {
+            totalDistanceKm = (totalDirectMeters / 1000) * 1.35; 
+          }
+
+          // تطبيق التسعيرة على المسافة النهائية
+          if (totalDistanceKm > 0) {
+             setCalculatedDistance(totalDistanceKm.toFixed(1));
+
+             let calculatedPrice = 0;
+             if (vType === 'car') {
+               if (totalDistanceKm <= 15) {
+                 calculatedPrice = 15 + (totalDistanceKm * 4.4);
+               } else if (totalDistanceKm <= 45) {
+                 calculatedPrice = 91 + ((totalDistanceKm - 15) * 3.8);
+               } else {
+                 calculatedPrice = 205 + ((totalDistanceKm - 45) * 3.2);
+               }
+             } else if (vType === 'scooter') {
+               calculatedPrice = Math.max(12, totalDistanceKm * 3.75);
+             } else {
+               let basePriceForOne = Math.max(15, totalDistanceKm * 6.5);
+               const count = parseInt(passCountStr) || 1;
+               const extraPassengers = count - 1;
+               const passengerMultiplier = 1 + (extraPassengers * 0.25); 
+               calculatedPrice = basePriceForOne * passengerMultiplier;
+             }
+
+             let finalBase = Math.ceil(calculatedPrice);
+             setCalculatedBasePrice(finalBase);
+             setBasePriceForSuggestions(finalBase);
+             setPrice(finalBase.toString());
+             
+             // 👈 توزيع السعر الإجمالي على المحطات بنسبة المسافة (عشان مجموعهم يساوي السعر الكلي بالظبط)
+             let destPricesList = [];
+             let accumulated = 0;
+             for(let i = 0; i < validDests.length; i++) {
+                if(i === validDests.length - 1) {
+                   destPricesList.push(finalBase - accumulated); // الباقي بيتحط للمحطة الأخيرة لضمان الدقة
+                } else {
+                   let legPrice = Math.round((legsDistances[i] / totalDirectMeters) * finalBase) || 0;
+                   destPricesList.push(legPrice);
+                   accumulated += legPrice;
+                }
+             }
+             setDestinationsPrices(destPricesList);
+
+             setIsCalculatingPrice(false);
+             return; 
+          }   
+        }
+        
+        // لو الراكب كتب كلام غريب ومش موجود ع الخريطة خالص
+        fallbackCalculation(validDests, vType, passCountStr);
+        
+      } catch(e) {
+         fallbackCalculation(validDests, vType, passCountStr);
+      } finally {
+         setIsCalculatingPrice(false);
+      }
+    } else {
+      setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setPrice(''); setCalculatedDistance('0');
+      setIsCalculatingPrice(false);
+    }
+  };
+
   const handleGetCurrentLocation = async () => {
     setIsFetchingLocation(true);
     try {
@@ -650,15 +998,26 @@ export default function PassengerHome() {
         return;
       }
       let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setPickupCoords({ latitude: location.coords.latitude, longitude: location.coords.longitude });
-      let geocode = await Location.reverseGeocodeAsync({ latitude: location.coords.latitude, longitude: location.coords.longitude });
+      const currentCoords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
+      setPickupCoords(currentCoords); // ✅ حفظ الإحداثيات صح بدون مسحها
+
+      let geocode = await Location.reverseGeocodeAsync(currentCoords);
+      let addressText = 'موقعي الحالي';
       if (geocode && geocode.length > 0) {
         const place = geocode[0];
         const address = [place.street, place.subregion || place.district, place.city].filter(Boolean).join(', ');
-        handlePickupChange(address.trim() ? address : `موقعي الحالي (${location.coords.latitude.toFixed(4)})`);
-      } else {
-        handlePickupChange('موقعي الحالي');
+        addressText = address.trim() ? address : `موقعي الحالي (${currentCoords.latitude.toFixed(4)})`;
       }
+      
+      setPickup(addressText);
+      
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      setIsCalculatingPrice(true);
+      debounceTimer.current = setTimeout(() => {
+        // ✅ تمرير الإحداثيات مباشرة لضمان الدقة
+        updatePriceCalculation(addressText, destinations, requestedVehicleType, passengersCount, currentCoords);
+      }, 1500);
+
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء التقاط إشارة الـ GPS');
     } finally {
@@ -666,108 +1025,13 @@ export default function PassengerHome() {
     }
   };
 
-const fallbackCalculation = (validDests: string[], vType: string, passCountStr: string) => {
-     let base = 0;
-     if (vType === 'car') {
-        // خطة الطوارئ للسيارات (عند تعطل الخريطة وعدم وجود مسافة): سعر افتراضي متوسط
-        base = 35 + ((validDests.length - 1) * 20);
-     }
-     else if (vType === 'scooter') {
-        base = 12 + ((validDests.length - 1) * 5);
-     }
-     else {
-        let basePriceForOne = 17 + ((validDests.length - 1) * 7);
-        const count = parseInt(passCountStr) || 1;
-        const extraPassengers = count - 1;
-        const passengerMultiplier = 1 + (extraPassengers * 0.40);
-        base = basePriceForOne * passengerMultiplier;
-     }
-
-     let finalBase = Math.ceil(base);
-     setCalculatedBasePrice(finalBase); 
-     setBasePriceForSuggestions(finalBase);
-     setCalculatedDistance('0'); 
-     setPrice(finalBase.toString());
-  };
-
-  const updatePriceCalculation = async (pickupText: string, dests: string[], vType: string = requestedVehicleType, passCountStr: string = passengersCount) => {
-    const validDests = dests.filter(d => d.trim().length > 0);
-    
-    if (pickupText.trim().length > 0 && validDests.length > 0) {
-      setIsCalculatingPrice(true);
-      try {
-        let startCoords = pickupCoords;
-        if (!startCoords && pickupText !== 'موقعي الحالي') {
-          const geoStart = await Location.geocodeAsync(pickupText + ' مصر');
-          if (geoStart.length > 0) startCoords = { latitude: geoStart[0].latitude, longitude: geoStart[0].longitude };
-        }
-
-        let destsCoords = [];
-        for (let dest of validDests) {
-          const geoDest = await Location.geocodeAsync(dest + ' مصر');
-          if (geoDest.length > 0) destsCoords.push({ latitude: geoDest[0].latitude, longitude: geoDest[0].longitude });
-        }
-
-        if (startCoords && destsCoords.length === validDests.length) {
-          let coordsString = `${startCoords.longitude},${startCoords.latitude}`;
-          destsCoords.forEach(c => { coordsString += `;${c.longitude},${c.latitude}`; });
-
-          const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=false`;
-          const response = await fetch(osrmUrl);
-          const data = await response.json();
-
-          if (data.code === 'Ok') {
-             const totalDistanceKm = data.routes[0].distance / 1000;
-             setCalculatedDistance(totalDistanceKm.toFixed(1));
-
-             let calculatedPrice = 0;
-             if (vType === 'car') {
-               // نظام الشرائح الفعلي للسيارات بناءً على المسافة الحقيقية
-               if (totalDistanceKm <= 15) {
-                 calculatedPrice = 15 + (totalDistanceKm * 4.4);
-               } else if (totalDistanceKm <= 45) {
-                 calculatedPrice = 91 + ((totalDistanceKm - 15) * 3.8);
-               } else {
-                 calculatedPrice = 205 + ((totalDistanceKm - 45) * 3.2);
-               }
-             } else if (vType === 'scooter') {
-               calculatedPrice = Math.max(12, totalDistanceKm * 3.75);
-             } else {
-               let basePriceForOne = Math.max(15, totalDistanceKm * 7);
-               const count = parseInt(passCountStr) || 1;
-               const extraPassengers = count - 1;
-               const passengerMultiplier = 1 + (extraPassengers * 0.40); 
-               calculatedPrice = basePriceForOne * passengerMultiplier;
-             }
-
-             let finalBase = Math.ceil(calculatedPrice);
-             setCalculatedBasePrice(finalBase);
-             setBasePriceForSuggestions(finalBase);
-             setPrice(finalBase.toString());
-             
-          } else {
-             fallbackCalculation(validDests, vType, passCountStr);
-          }
-        } else {
-           fallbackCalculation(validDests, vType, passCountStr);
-        }
-      } catch(e) {
-         fallbackCalculation(validDests, vType, passCountStr);
-      } finally {
-         setIsCalculatingPrice(false);
-      }
-    } else {
-      setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setPrice(''); setCalculatedDistance('0');
-      setIsCalculatingPrice(false);
-    }
-  };
   const handlePickupChange = (text: string) => {
     setPickup(text);
     setPickupCoords(null);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     setIsCalculatingPrice(true);
     debounceTimer.current = setTimeout(() => {
-      updatePriceCalculation(text, destinations);
+      updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, null);
     }, 1500);
   };
 
@@ -778,9 +1042,53 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     setIsCalculatingPrice(true);
     debounceTimer.current = setTimeout(() => {
-      updatePriceCalculation(pickup, newDests);
+      updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords);
     }, 1500);
   };
+
+  const addDestination = () => {
+    if (destinations.length < 3) {
+      setDestinations([...destinations, '']);
+    } else {
+      Alert.alert('تنبيه', 'الحد الأقصى هو 3 وجهات في الرحلة الواحدة.');
+    }
+  };
+
+  const removeDestination = (index: number) => {
+    const newDests = [...destinations];
+    newDests.splice(index, 1);
+    setDestinations(newDests);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    setIsCalculatingPrice(true);
+    debounceTimer.current = setTimeout(() => {
+      updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords);
+    }, 1500);
+  };
+// 👈 متغيرات ودوال تعديل الوجهة السريع داخل شاشة الانتظار
+  const [isEditDestModalVisible, setIsEditDestModalVisible] = useState(false);
+  const [tempDestinations, setTempDestinations] = useState<string[]>(['']);
+
+  const openEditDestModal = () => {
+    setTempDestinations([...destinations]);
+    setIsEditDestModalVisible(true);
+  };
+
+  const handleTempDestChange = (text: string, index: number) => {
+    const newDests = [...tempDestinations];
+    newDests[index] = text;
+    setTempDestinations(newDests);
+  };
+
+  const addTempDest = () => {
+    if (tempDestinations.length < 3) setTempDestinations([...tempDestinations, '']);
+  };
+
+  const removeTempDest = (index: number) => {
+    const newDests = [...tempDestinations];
+    newDests.splice(index, 1);
+    setTempDestinations(newDests);
+  };
+
 
   const openEditPriceModal = () => {
     const validDests = destinations.filter(d => d.trim().length > 0);
@@ -813,37 +1121,15 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
     } catch (e) {}
   };
 
-  const handleSearchCaptain = async () => {
+ const handleSearchCaptain = async () => {
     if (isSubmitting) return;
 
-    try {
-      const passengerIdStr = passengerProfile.id || await AsyncStorage.getItem('currentPassengerId');
-      if (passengerIdStr) {
-        const passSnap = await getDoc(doc(db, 'passengers', passengerIdStr));
-        if (passSnap.exists()) {
-          const passData = passSnap.data();
-          if (passData.bannedUntil && passData.bannedUntil > Date.now()) {
-            const hoursLeft = Math.ceil((passData.bannedUntil - Date.now()) / (1000 * 60 * 60));
-            Alert.alert(
-              'حساب موقوف 🚫', 
-              `عذراً، تم إيقاف حسابك مؤقتاً لكثرة إلغاء الرحلات بعد تحرك الكابتن. يرجى المحاولة بعد ${hoursLeft} ساعة.`
-            );
-            return; 
-          }
-        }
-      }
-    } catch (error) {
-      console.log('Error checking ban status:', error);
-    }
-
     const validDests = destinations.filter(d => d.trim() !== '');
-    if (!pickup || validDests.length === 0 || !price) {
-      Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
+    if (!pickup || validDests.length === 0 || !price) {      Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
       return;
     }
 
     setIsSubmitting(true);
-
     setRideStatus('searching');
     setOffers([]);
     prevOffersCountRef.current = 0; 
@@ -860,7 +1146,8 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
         passengerId: passengerProfile.id || await AsyncStorage.getItem('currentPassengerId'),
         name: passengerProfile.name,
         phone: passengerProfile.phone,
-        avatar: getValidAvatar(passengerProfile.avatar),
+        isPhoneHidden: passengerProfile.hidePhoneNumber || false,
+        avatar: getSafeAvatar(passengerProfile.avatar),
         passengerRating: passengerProfile.averageRating,
         passengerRatingCount: passengerProfile.ratingCount,
         pickupLocation: pickup,
@@ -869,12 +1156,13 @@ const fallbackCalculation = (validDests: string[], vType: string, passCountStr: 
         destinationLocation: validDests.join(' '),
         price: price,
         distance: calculatedDistance, 
-numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
+        numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         qrSecret: Math.random().toString(36).substring(2, 10),
         notes: notes.trim(),
         requestedVehicleType,
         requestedTuktukType: requestedVehicleType === 'tuktuk_alt' ? requestedTuktukType : null,
         passengersCount: requestedVehicleType === 'tuktuk_alt' ? passengersCount : null,
+        destinationsPrices: destinationsPrices.length > 0 ? destinationsPrices : [parseInt(price) || 0],
         paymentMethod: paymentMethod,
         offers: [],
         status: 'pending',
@@ -920,72 +1208,109 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
     }
   };
 
-  const acceptCaptainOffer = async (offer: any) => {
+const acceptCaptainOffer = async (offer: any) => {
     try {
-      let rideId = currentRideId || JSON.parse(await AsyncStorage.getItem('active_ride') || '{}').id;
+      // 1️⃣ نجيب بيانات الرحلة المحفوظة
+      const savedRideStr = await AsyncStorage.getItem('active_ride');
+      const savedRide = savedRideStr ? JSON.parse(savedRideStr) : {};
+      let rideId = currentRideId || savedRide.id;
+      
       if (!rideId) { 
         Alert.alert('خطأ', 'بيانات الرحلة مفقودة'); 
         return; 
       }
 
-      const cleanData = { 
+      // 2️⃣ تأمين إحداثيات الراكب (لو كانت مفقودة من الشاشة لأي سبب نرجعها)
+      if (!pickupCoords && savedRide.pickupCoords) {
+        setPickupCoords(savedRide.pickupCoords);
+      }
+
+      const cleanData: any = { 
         status: 'accepted', 
         price: String(offer?.price || price || '0'), 
         captainId: String(offer?.captainId || 'unknown'),
         captainName: String(offer?.captainName || 'غير مسجل'),
         captainPhone: String(offer?.captainPhone || ''),
         captainVehicle: String(offer?.captainVehicle || 'مركبة'),
-        captainAvatar: getValidAvatar(offer?.captainAvatar),
-        captainPlateNumber: String(offer?.captainPlateNumber || '')
+        captainAvatar: getSafeAvatar(offer?.captainAvatar),
+        captainPlateNumber: String(offer?.captainPlateNumber || ''),
       };
 
+      // 3️⃣ السر العظيم: خطف إحداثيات الكابتن مباشرة من جدول الكباتن في الداتابيز!
+      if (cleanData.captainId !== 'unknown') {
+        const capDoc = await getDoc(doc(db, 'captains', cleanData.captainId));
+        if (capDoc.exists()) {
+          const capData = capDoc.data();
+          // بندور على أي إحداثيات متسجلة للكابتن ونسحبها
+          const loc = capData.location || capData.liveCoords || capData.coords || offer?.captainLocation;
+          if (loc) {
+            cleanData.captainLocation = loc; // نحفظها في الرحلة
+            cleanData.captainCoords = loc;
+            setCaptainLiveCoords(loc); // 👈 دي اللي هتشغل شريط الدقايق فوراً
+          }
+        }
+      }
+
+      // 4️⃣ تحديث الرحلة في الداتابيز وحفظها محلياً
       await setDoc(doc(db, 'rides', rideId), cleanData, { merge: true }); 
       setPrice(cleanData.price);
       
-      const savedRideStr = await AsyncStorage.getItem('active_ride');
-      const savedRide = savedRideStr ? JSON.parse(savedRideStr) : {};
       await AsyncStorage.setItem('active_ride', JSON.stringify({ ...savedRide, ...cleanData }));
+    } catch (error) {}
+  };
+
+  const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
+
+  const rejectCaptainOffer = async (offerToReject: any) => {
+    setOffers(prev => prev.filter(o => o.captainId !== offerToReject.captainId));
+    try {
+      let rideId = currentRideId || JSON.parse(await AsyncStorage.getItem('active_ride') || '{}').id;
+      if (!rideId) return;
+      const rideRef = doc(db, 'rides', rideId);
+      const rideSnap = await getDoc(rideRef);
+      if (rideSnap.exists()) {
+        const currentOffers = rideSnap.data().offers || [];
+        const updatedOffers = currentOffers.filter((o: any) => o.captainId !== offerToReject.captainId);
+        await updateDoc(rideRef, { offers: updatedOffers });
+        
+        await addDoc(collection(db, 'notifications'), {
+          userId: offerToReject.captainId,
+          userType: 'captain',
+          title: 'تم رفض العرض ❌',
+          message: 'عذراً، لقد قام الراكب برفض عرضك لأن السعر غير مناسب.',
+          read: false,
+          timestamp: new Date().getTime()
+        });
+      }
     } catch (error) {
-      console.log(error);
+      console.log("Error rejecting offer:", error);
     }
   };
+
+  useEffect(() => {
+    if (autoAcceptEnabled && rideStatus === 'searching' && offers.length > 0) {
+      const myPrice = parseInt(price) || 0;
+      
+      offers.forEach(o => {
+        const offerPrice = parseInt(o.price) || 0;
+        if (offerPrice <= myPrice) {
+          acceptCaptainOffer(o);
+        } else {
+          rejectCaptainOffer(o);
+        }
+      });
+    }
+  }, [offers, autoAcceptEnabled, price]);
 
   const notifyPassengerOnTheWay = async () => {
     if (!currentRideId) return;
     try { await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); } catch (error) {}
   };
 
-  const handleCancelRide = async () => {
+const handleCancelRide = async () => {
     if (!currentRideId) return;
 
     try {
-      if (rideStatus === 'accepted' || rideStatus === 'captain_arrived') {
-        const passengerIdStr = passengerProfile.id || await AsyncStorage.getItem('currentPassengerId');
-        if (passengerIdStr) {
-          const passengerRef = doc(db, 'passengers', passengerIdStr);
-          const passSnap = await getDoc(passengerRef);
-          
-          if (passSnap.exists()) {
-            const passData = passSnap.data();
-            const currentStrikes = passData.cancelStrikes || 0;
-            
-            if (currentStrikes >= 2) {
-              const banTime = Date.now() + (24 * 60 * 60 * 1000);
-              await updateDoc(passengerRef, {
-                cancelStrikes: 0,
-                bannedUntil: banTime
-              });
-              Alert.alert('حظر مؤقت 🚫', 'تم إيقاف حسابك من طلب الرحلات لمدة 24 ساعة بسبب تكرار إلغاء الرحلات بعد تحرك الكابتن.');
-            } else {
-              await updateDoc(passengerRef, {
-                cancelStrikes: increment(1)
-              });
-              Alert.alert('تنبيه ⚠️', `تم تسجيل مخالفة إلغاء. لديك ${currentStrikes + 1} من أصل 3 مخالفات قبل إيقاف حسابك مؤقتاً.`);
-            }
-          }
-        }
-      }
-
       await updateDoc(doc(db, 'rides', currentRideId), {
         status: 'cancelled_by_passenger',
         canceledAt: new Date().getTime()
@@ -1034,7 +1359,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         setRatingSubmitted(false);
         setRideToRate(null);
       }, 2000);
-    } catch (error) { console.log(error); }
+    } catch (error) {}
   };
 
   const handleCallClick = () => {
@@ -1099,17 +1424,14 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         </Animated.View>
       )}
       <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }, { flexDirection: 'row-reverse' }]}>
-        {/* اليمين: القائمة الجانبية وزر الإشعارات للراكب */}
         <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={openSidebar}>
             <Text style={[styles.headerMenuText, isDarkMode && { color: '#e2e8f0' }]}>≡</Text>
-            {/* البادج الأحمر الصغير على القائمة الجانبية */}
             {unreadNotifsCount > 0 && <View style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: 6, backgroundColor: '#ef4444', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }} />}
           </TouchableOpacity>
           
           <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative', padding: 8 }]} onPress={() => router.push('/passenger-notifications')}>
             <Ionicons name="notifications-outline" size={24} color={isDarkMode ? "#e2e8f0" : "#64748b"} />
-            {/* الرقم الأحمر بتاع عدد الإشعارات */}
             {unreadNotifsCount > 0 && (
               <View style={{ position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}>
                 <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: 'bold' }}>{unreadNotifsCount > 99 ? '+99' : unreadNotifsCount}</Text>
@@ -1135,7 +1457,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         <TouchableOpacity style={[styles.headerSettingsBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={() => router.push('/settings' as any)}>
           <Ionicons name="settings-sharp" size={24} color={isDarkMode ? "#e2e8f0" : "#64748b"} />
         </TouchableOpacity>
-      </View>      
+      </View>     
       
       {rideStatus === 'idle' && (
         <ScrollView style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]} contentContainerStyle={{ paddingBottom: 90 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" overScrollMode="never">
@@ -1174,24 +1496,10 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
                 </TouchableOpacity>
               </View>
 
-              <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>حدد عدد الركاب 👥</Text>
-              <View style={{ flexDirection: 'row-reverse', justifyContent: 'center', flexWrap: 'wrap', paddingVertical: 5, gap: 8 }}>
-                {(requestedTuktukType === 'كيوت 3 راكب' ? ['1', '2', '3'] : ['1', '2', '3', '4', '5', '6', '7']).map((num) => (
-                  <TouchableOpacity 
-                    key={num} 
-                    style={[styles.countBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, passengersCount === num && styles.countBtnActive, { marginBottom: 8 }]} 
-                    onPress={() => {
-                      setPassengersCount(num);
-                      updatePriceCalculation(pickup, destinations, requestedVehicleType, num);
-                    }}
-                  >
-                    <Text style={[styles.countBtnText, isDarkMode && { color: '#cbd5e1' }, passengersCount === num && styles.countBtnTextActive]}>{num}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+             </View>
           )}
 
+          {/* 1. موقع الانطلاق الحالي */}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
           <View style={styles.rowInputContainer}>
             <TextInput style={[styles.inputWithButton, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="اكتب مكان الانطلاق" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={pickup} onChangeText={handlePickupChange} />
@@ -1200,25 +1508,48 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
             </TouchableOpacity>
           </View>
 
+          {/* 2. الوجهة المطلوبة (مستطيل واحد بيزيد لما تدوس إضافة) */}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الوجهة المطلوبة</Text>
-          <View style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }]}>
-            <View style={styles.modernDestRight}>
-              <Ionicons name="search" size={22} color="#9ca3af" />
-              <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>إلى</Text>
-              <TextInput 
-                style={[styles.modernDestInput, isDarkMode && { color: '#ffffff' }]} 
-                placeholder="ابحث عن وجهتك..." 
-                placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'} 
-                value={destinations[0]} 
-                onChangeText={(text) => handleDestinationChange(text, 0)} 
-              />
-            </View>
+          {destinations.map((dest, index) => (
+            <View key={index} style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10 }]}>
+              <View style={styles.modernDestRight}>
+                <Ionicons name="search" size={22} color="#9ca3af" />
+                <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>
+                  {index === 0 ? 'إلى' : 'ثم'}
+                </Text>
+                <TextInput 
+                  style={[styles.modernDestInput, isDarkMode && { color: '#ffffff' }]} 
+                  placeholder={index === 0 ? "ابحث عن وجهتك..." : "اكتب الوجهة الإضافية..."} 
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'} 
+                  value={dest} 
+                  onChangeText={(text) => handleDestinationChange(text, index)} 
+                />
+              </View>
 
-            <TouchableOpacity style={styles.modernDestMapBtn} onPress={openMapForDestination}>
-              <Ionicons name="map" size={22} color="#60a5fa" />
+              {index === 0 ? (
+                <TouchableOpacity style={styles.modernDestMapBtn} onPress={openMapForDestination}>
+                  <Ionicons name="map" size={22} color="#60a5fa" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={[styles.modernDestMapBtn, { backgroundColor: '#fee2e2' }]} onPress={() => removeDestination(index)}>
+                  <Ionicons name="trash" size={22} color="#ef4444" />
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+
+          {/* زرار إضافة واجهة بيظهر بس لو عدد الوجهات أقل من 3 */}
+          {destinations.length < 3 && (
+            <TouchableOpacity 
+              style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderStyle: 'dashed', flexDirection: 'row-reverse', justifyContent: 'center' }} 
+              onPress={addDestination}
+            >
+              <Ionicons name="add-circle-outline" size={20} color={isDarkMode ? '#60a5fa' : '#3b82f6'} style={{ marginLeft: 5 }} />
+              <Text style={{ color: isDarkMode ? '#60a5fa' : '#3b82f6', fontWeight: 'bold', fontSize: 14 }}>إضافة واجهة</Text>
             </TouchableOpacity>
-          </View>
-          
+          )}
+
+          {/* 3. ملاحظات للكابتن */}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>ملاحظات للكابتن (اختياري)</Text>
           <TextInput style={[styles.notesInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="مثال معايا أغراض خفيفة ..." placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={notes} onChangeText={setNotes} multiline={true} />
 
@@ -1283,35 +1614,171 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
           </TouchableOpacity>
         </ScrollView>
       )}
-      {rideStatus === 'searching' && (
+
+{rideStatus === 'searching' && (
         <View style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
           <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
+          
+          {/* المربع المختصر لبيانات الرحلة والتعديل السريع */}
+          <View style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#e2e8f0' }}>
+            
+            <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 8 }}>
+              <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🟢 الانطلاق:</Text>
+              <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{pickup}</Text>
+            </View>
+            
+            <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🔴 الوجهة:</Text>
+              <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{destinations.join(' - ')}</Text>
+            </View>
+
+ {/* 👈 زرار تعديل الوجهة */}
+            <TouchableOpacity 
+              style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f1f5f9', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', marginBottom: 10, alignItems: 'center' }} 
+              onPress={openEditDestModal}
+            >
+              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 'bold', fontSize: 13 }}>تعديل الوجهة 🗺️</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 1, backgroundColor: isDarkMode ? '#475569' : '#e2e8f0', marginBottom: 10 }} />
+
+            {/* 👈 سطر السعر المقترح وتعديل السعر (تم حل مشكلة اختفاء السعر) */}
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: (basePriceForSuggestions > 0 || parseInt(price) > 0) ? 10 : 0 }}>
+              <View style={{ flexDirection: 'row-reverse', alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, color: '#64748b', marginLeft: 5 }}>سعرك المقترح:</Text>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10b981' }}>{price || calculatedBasePrice || '0'} ج</Text>
+              </View>
+              <TouchableOpacity 
+                style={{ backgroundColor: '#d97706', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, elevation: 1 }}
+                onPress={openEditPriceModal}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 'bold' }}>تعديل السعر ✏️</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* 👈 أزرار التسعير السريع المدمجة تحت السعر مباشرة */}
+            {(basePriceForSuggestions > 0 || parseInt(price) > 0) && (
+              <View style={[styles.suggestionsRow, { marginBottom: 0, marginTop: 5 }]}>
+                {[1.2, 1.4, 1.6].map((multiplier, index) => {
+                  const displayBasePrice = basePriceForSuggestions > 0 ? basePriceForSuggestions : parseInt(price);
+                  const suggestedPrice = Math.round(displayBasePrice * multiplier);
+                  const currentPrice = price || displayBasePrice.toString();
+                  const isSelected = currentPrice === suggestedPrice.toString();
+                  const percentage = Math.round((multiplier - 1) * 100);
+                  return (
+                    <TouchableOpacity 
+                      key={index} 
+                      style={[styles.suggestionBtn, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#475569' }, isSelected && styles.suggestionBtnActive]} 
+                      onPress={async () => { 
+                        const newPriceStr = suggestedPrice.toString();
+                        setPrice(newPriceStr); 
+                        try {
+                          if (currentRideId) await updateDoc(doc(db, 'rides', currentRideId), { price: newPriceStr });
+                          const savedRide = await AsyncStorage.getItem('active_ride');
+                          if (savedRide) {
+                            const data = JSON.parse(savedRide);
+                            data.price = newPriceStr;
+                            await AsyncStorage.setItem('active_ride', JSON.stringify(data));
+                          }
+                        } catch(e) {}
+                      }}
+                    >
+                      <Text style={[styles.suggestionText, isDarkMode && { color: '#cbd5e1' }, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
+                      <Text style={[styles.suggestionSubText, isDarkMode && { color: '#94a3b8' }, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+
+          {/* زر القبول التلقائي */}
+          <TouchableOpacity 
+            style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: autoAcceptEnabled ? '#ecfdf5' : (isDarkMode ? '#0f172a' : '#ffffff'), padding: 10, borderRadius: 10, borderWidth: 1, borderColor: autoAcceptEnabled ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), marginBottom: 15 }} 
+            onPress={() => setAutoAcceptEnabled(!autoAcceptEnabled)}
+          >
+            <Ionicons name={autoAcceptEnabled ? "checkmark-circle" : "ellipse-outline"} size={24} color={autoAcceptEnabled ? "#10b981" : "#94a3b8"} />
+            <View style={{ marginRight: 10, flex: 1 }}>
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: autoAcceptEnabled ? '#064e3b' : (isDarkMode ? '#cbd5e1' : '#475569'), textAlign: 'right' }}>القبول التلقائي ⚡</Text>
+              <Text style={{ fontSize: 11, color: '#64748b', textAlign: 'right' }}>قبول العروض المطابقة لسعرك تلقائياً ورفض الأعلى.</Text>
+            </View>
+          </TouchableOpacity>
+
           {offers.length === 0 ? (<Text style={styles.subText}>يرجى الانتظار قليلاً لتلقي عروض الكباتن...</Text>) : null}
           <ScrollView style={styles.offersContainer} showsVerticalScrollIndicator={false}>
             {offers.map((offer, index) => (
-              <PassengerOfferCard key={index} offer={offer} onAcceptOffer={acceptCaptainOffer} isDarkMode={isDarkMode} />
+              <PassengerOfferCard key={index} offer={offer} onAcceptOffer={acceptCaptainOffer} onRejectOffer={rejectCaptainOffer} isDarkMode={isDarkMode} />
             ))}
           </ScrollView>
-          <TouchableOpacity style={styles.cancelBtnOnly} onPress={() => Alert.alert('إلغاء الطلب', 'هل أنت متأكد من إلغاء البحث؟', [{ text: 'تراجع', style: 'cancel' }, { text: 'نعم، إلغاء', onPress: handleCancelRide }])}>
-            <Text style={styles.cancelBtnOnlyText}>إلغاء الطلب</Text>
+          
+          {/* 👈 زرار إلغاء البحث بقى تحت خالص وبعرض الشاشة كامل */}
+          <TouchableOpacity 
+            style={styles.cancelBtnOnly} 
+            onPress={() => Alert.alert('إلغاء البحث', 'هل أنت متأكد من إلغاء البحث عن كابتن؟', [{ text: 'تراجع', style: 'cancel' }, { text: 'نعم، إلغاء', onPress: handleCancelRide }])}
+          >
+            <Text style={styles.cancelBtnOnlyText}>إلغاء البحث</Text>
           </TouchableOpacity>
+
         </View>
       )}
+      
+{/* 🚀 شاشة الرحلة النشطة 🚀 */}
       {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'in_progress') && (
         <Animated.View style={[styles.cardActive, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#d97706' }, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }]}>
           
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
-            {rideStatus === 'captain_arrived' ? (
-              <>
-                <Text style={styles.superArrivalTitle}>براقك وصل !</Text>
-                <Text style={styles.statusArrivalAlert}>لقد وصل الكابتن إلى نقطة الإقلال وهو في انتظارك الآن .</Text>
-              </>
-            ) : (
-              <Text style={[styles.statusAlertTitle, rideStatus === 'waiting_for_scan' && { color: '#ffffff' }]}>
-                {rideStatus === 'accepted' ? 'الكابتن في طريقه إليك ...' : rideStatus === 'passenger_on_the_way' ? 'أنت الآن في طريقك للكابتن .' : rideStatus === 'waiting_for_scan' ? 'بانتظار إدخال أو مسح الكود' : 'الرحلة جارية الآن'}
-              </Text>
+            
+            {/* ⏱️ عنوان الرحلة ومربع العداد بالأعلى */}
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, width: '100%' }}>
+              <View style={{ flex: 1 }}>
+                {rideStatus === 'captain_arrived' ? (
+                  <>
+                    <Text style={[styles.superArrivalTitle, { textAlign: 'right', marginBottom: 4 }]}>براقك وصل !</Text>
+                    <Text style={[styles.statusArrivalAlert, { textAlign: 'right', marginBottom: 0, fontSize: 13 }]}>الكابتن في الخارج بانتظارك.</Text>
+                  </>
+                ) : (
+                  <Text style={[styles.statusAlertTitle, rideStatus === 'waiting_for_scan' && { color: '#ffffff' }, { textAlign: 'right', marginBottom: 0, fontSize: 16 }]}>
+                    {rideStatus === 'accepted' ? 'الكابتن في طريقه إليك ...' : rideStatus === 'passenger_on_the_way' ? 'الكابتن في انتظارك' : rideStatus === 'waiting_for_scan' ? 'يرجى مسح كود QR للبدء' : 'الرحلة جارية الآن'}
+                  </Text>
+                )}
+              </View>
+
+              {/* ظهور العداد المربع عند الراكب */}
+              {['captain_arrived', 'waiting_for_scan', 'passenger_on_the_way'].includes(rideStatus) && (
+                <View style={{ backgroundColor: waitingTimeLeft === 0 ? '#fee2e2' : '#eff6ff', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1.5, borderColor: waitingTimeLeft === 0 ? '#ef4444' : '#3b82f6', alignItems: 'center', elevation: 2, marginLeft: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: waitingTimeLeft === 0 ? '#991b1b' : '#1e3a8a', marginBottom: 2 }}>
+                    {waitingTimeLeft === 0 ? 'انتهى الوقت!' : 'وقت الانتظار'}
+                  </Text>
+                  <Text style={{ fontSize: 18, fontWeight: '900', color: waitingTimeLeft === 0 ? '#b91c1c' : '#1d4ed8' }}>
+                    {formatTimer(waitingTimeLeft)}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+{/* ⏱️ شريط الوقت المقدر للوصول (يظهر دائماً والكابتن في الطريق) */}
+            {rideStatus === 'accepted' && (
+              <View style={{ 
+                backgroundColor: isDarkMode ? '#1e3a8a' : '#dbeafe', 
+                padding: 12, 
+                borderRadius: 12, 
+                marginBottom: 15, 
+                flexDirection: 'row-reverse', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                borderWidth: 1, 
+                borderColor: '#3b82f6', 
+                elevation: 2 
+              }}>
+                <Text style={{ fontSize: 22, marginLeft: 10 }}>⏱</Text>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: isDarkMode ? '#bfdbfe' : '#1e3a8a' }}>
+                  {pickupCoords && captainLiveCoords 
+                    ? `الوقت المقدر للوصول: ${Math.max(1, Math.ceil((calculateDistance(captainLiveCoords.latitude, captainLiveCoords.longitude, pickupCoords.latitude, pickupCoords.longitude) / 1000) * 2.5))} دقيقة` 
+                    : 'جاري الاتصال بالكابتن وحساب الوقت...'}
+                </Text>
+              </View>
             )}
-            {/* زرار الاستغاثة السريع أثناء الرحلة */}
+
             <TouchableOpacity 
               style={{
                 backgroundColor: '#ef4444', 
@@ -1330,6 +1797,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
               <Ionicons name="warning" size={24} color="#ffffff" />
               <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold' }}>أنا في خطر (SOS)</Text>
             </TouchableOpacity>
+
             {latestMessage ? (
               <View style={{ backgroundColor: isDarkMode ? '#334155' : '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2 }}>
                 <Text style={{ fontSize: 22, marginLeft: 10 }}>💬</Text>
@@ -1341,12 +1809,16 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
             ) : null}
             
             <View style={[styles.captainCard, isDarkMode && { backgroundColor: '#334155' }]}>
-              <Image source={{ uri: getValidAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
+              <Image source={{ uri: getSafeAvatar(captainInfo.avatar) }} style={styles.captainAvatar} />
               <View style={styles.captainDetails}>
                 <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={1}>الكابتن: {captainInfo.name}</Text>
-                <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={2}>المركبة: {captainInfo.vehicle}</Text>
+                <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={2}>
+                  المركبة: {captainInfo.vehicle ? captainInfo.vehicle.replace('بديل توكتوك', '').replace(/[()\-]/g, '').trim() || 'كيوت 3 راكب' : 'مركبة'}
+                </Text>
                 {captainInfo.plateNumber && captainInfo.plateNumber !== 'لم يسجل لوحة' ? (
-                  <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={1}>لوحة: {captainInfo.plateNumber}</Text>
+                  <Text style={[styles.captainText, isDarkMode && { color: '#f8fafc' }]} numberOfLines={1}>
+                    {captainInfo.vehicle?.includes('توكتوك') || captainInfo.vehicle?.includes('كيوت') || captainInfo.vehicle?.includes('جالاكسي') ? `الرقم الكودي للمركبة: (${captainInfo.plateNumber})` : `لوحة: ${captainInfo.plateNumber}`}
+                  </Text>
                 ) : null}
               </View>
             </View>
@@ -1381,7 +1853,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
                   <Text style={[styles.routeIconText, destinations.length === 1 && { fontSize: 18, marginTop: 4 }]}>🔴</Text>
                   <Text 
                     style={[styles.routeDestText, isDarkMode && { color: '#cbd5e1' }, destinations.length === 1 && { fontSize: 20, lineHeight: 30 }]} 
-                    numberOfLines={destinations.length > 1 ? 1 : 3}
+                    numberOfLines={destinations.length > 1 ? 2 : 3}
                     adjustsFontSizeToFit={true}
                     minimumFontScale={0.7}
                   >
@@ -1436,7 +1908,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
           </ScrollView>
         </Animated.View>
       )}
-
+      {/* مودال الطوارئ */}
       <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
           <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -1455,6 +1927,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         </View>
       </Modal>
 
+      {/* مودال الماسح الضوئي */}
       <Modal visible={isScannerVisible} transparent={true} animationType="slide">
         <View style={styles.modalOverlayQR}>
           <Text style={styles.qrHeader}>وجه الكاميرا نحو كود الكابتن</Text>
@@ -1467,6 +1940,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         </View>
       </Modal>
 
+      {/* مودال التقييم */}
       <Modal visible={isRatingModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
           <View style={[styles.ratingModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -1525,7 +1999,52 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
           </View>
         </View>
       </Modal>
+{/* مودال تعديل الوجهة السريع داخل شاشة البحث */}
+      <Modal visible={isEditDestModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modaloverlay}>
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تعديل الوجهة 🗺️</Text>
+            
+            {tempDestinations.map((dest, index) => (
+              <View key={index} style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 10 }}>
+                <TextInput 
+                  style={[styles.modalInput, { flex: 1, marginBottom: 0, paddingVertical: 12 }, isDarkMode && { backgroundColor: '#334155', color: '#ffffff', borderColor: '#475569' }]} 
+                  value={dest} 
+                  onChangeText={(text) => handleTempDestChange(text, index)} 
+                  placeholder={index === 0 ? "الوجهة الجديدة..." : "وجهة إضافية..."} 
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} 
+                  textAlign="right"
+                />
+                {index > 0 && (
+                  <TouchableOpacity style={{ backgroundColor: '#fee2e2', padding: 12, borderRadius: 10, marginLeft: 10, borderWidth: 1, borderColor: '#fca5a5' }} onPress={() => removeTempDest(index)}>
+                    <Ionicons name="trash" size={22} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
 
+            {tempDestinations.length < 3 && (
+              <TouchableOpacity 
+                style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderStyle: 'dashed', flexDirection: 'row-reverse', justifyContent: 'center' }} 
+                onPress={addTempDest}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={isDarkMode ? '#60a5fa' : '#3b82f6'} style={{ marginLeft: 5 }} />
+                <Text style={{ color: isDarkMode ? '#60a5fa' : '#3b82f6', fontWeight: 'bold', fontSize: 14 }}>إضافة وجهة</Text>
+              </TouchableOpacity>
+            )}
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveNewDestinations}>
+                <Text style={styles.modalSaveBtnText}>تأكيد الوجهة</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEditDestModalVisible(false)}>
+                <Text style={styles.modalCancelBtnText}>إلغاء</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* مودال تعديل السعر */}
       <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
           <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -1544,6 +2063,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         </View>
       </Modal>
 
+      {/* مودال الاتصال */}
       <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
           <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -1561,6 +2081,7 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         </View>
       </Modal>
 
+      {/* القائمة الجانبية */}
       <Modal visible={isSidebarOpen} transparent={true} animationType="none" onRequestClose={closeSidebar}>
         <View style={styles.sidebarOverlay}>
           <TouchableOpacity style={styles.sidebarCloseArea} onPress={closeSidebar} activeOpacity={1} />
@@ -1570,19 +2091,15 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
               <Text style={styles.sidebarName}>{passengerProfile.name}</Text>
               <Text style={styles.sidebarPhone}>{passengerProfile.phone}</Text>
             </View>
-            <ScrollView style={styles.sidebarLinks}>
-              
-              {/* 1. سجل الرحلات */}
+            <ScrollView style={styles.sidebarLinks}>             
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-history'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text>
               </TouchableOpacity>
 
-              {/* 2. تقييماتي */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-ratings'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>تقييماتي</Text>
               </TouchableOpacity>
 
-              {/* 3. الإشعارات */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }, { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }]} onPress={() => { closeSidebar(); router.push('/passenger-notifications'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الإشعارات 🔔</Text>
                 {unreadNotifsCount > 0 && (
@@ -1592,27 +2109,23 @@ numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
                 )}
               </TouchableOpacity>
 
-              {/* 4. رقم الطوارئ والأمان */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/emergency-contacts'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>رقم الطوارئ والأمان</Text>
               </TouchableOpacity>
 
-              {/* 5. الدعم الفني */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text>
               </TouchableOpacity>
 
-              {/* 6. المقترحات والشكاوى */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-complaints'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى</Text>
               </TouchableOpacity>
 
-              {/* 7. السلامة */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-safety'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>السلامة 🛡️</Text>
               </TouchableOpacity>
-
-            </ScrollView>            <TouchableOpacity 
+            </ScrollView>            
+            <TouchableOpacity 
               style={{ 
                 backgroundColor: '#10b981', 
                 paddingVertical: 14, 
@@ -1711,8 +2224,10 @@ const styles = StyleSheet.create({
   offerNamePro: { fontSize: 16, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
   offerActionSide: { alignItems: 'flex-start', paddingRight: 15, borderRightWidth: 1, borderRightColor: '#f1f5f9' },
   offerPricePro: { fontSize: 22, fontWeight: 'bold', color: '#10b981', marginBottom: 5 },
-  acceptOfferBtnPro: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 22, borderRadius: 10, elevation: 2 },
-  acceptOfferBtnTextPro: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
+  acceptOfferBtnPro: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 10, elevation: 2 },
+  acceptOfferBtnTextPro: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  rejectOfferBtnPro: { backgroundColor: '#fee2e2', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 10, elevation: 1 },
+  rejectOfferBtnTextPro: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
   offerBottomRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#eff6ff', paddingVertical: 12, paddingHorizontal: 15, borderTopWidth: 1, borderTopColor: '#bfdbfe' },
   offerFullVehicleText: { flex: 1, fontSize: 14, color: '#1e3a8a', fontWeight: 'bold', textAlign: 'right', marginLeft: 10, lineHeight: 22 },
   offerVehicleIcon: { fontSize: 24 },
@@ -1763,33 +2278,31 @@ const styles = StyleSheet.create({
   sidebarOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', flexDirection: 'row-reverse' },
   sidebarCloseArea: { flex: 1 },
   sidebarPanel: { width: '75%', backgroundColor: '#ffffff', height: '100%', elevation: 15 },
-  // --- ستايلات القائمة الجانبية (Sidebar) بعد التعديل ---
   sidebarHeader: { 
     backgroundColor: '#1e293b', 
-    padding: 15, // قللنا المسافة من 20 لـ 15
-    paddingTop: 30, // ده كان 50، قللناه عشان نرفع الصورة لفوق
+    padding: 15,
+    paddingTop: 30,
     alignItems: 'center', 
     borderBottomWidth: 3, 
     borderColor: '#eab308' 
   },
   sidebarAvatar: { 
-    width: 70, // صغرنا حجم الصورة شوية لتناسق أفضل (كانت 80)
+    width: 70,
     height: 70, 
     borderRadius: 35, 
     borderWidth: 2, 
     borderColor: '#eab308', 
-    marginBottom: 8 // مسافة أقل تحت الصورة
+    marginBottom: 8
   },
-  sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#ffffff' }, // صغرنا الخط سنة
+  sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#ffffff' },
   sidebarPhone: { fontSize: 13, color: '#94a3b8', marginTop: 3 },
-  sidebarLinks: { padding: 15 }, // قللنا الحواف الجانبية للزراير
+  sidebarLinks: { padding: 15 },
   sidebarLink: { 
-    paddingVertical: 12, // دي أهم مسافة! قللناها من 18 لـ 12 عشان الزراير تقرب
+    paddingVertical: 12,
     borderBottomWidth: 1, 
     borderColor: '#f1f5f9' 
   },
   sidebarLinkText: { fontSize: 15, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
-  // ----------------------------------------------------
   sidebarLogoutBtn: {backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
   sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },

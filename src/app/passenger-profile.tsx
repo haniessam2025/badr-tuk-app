@@ -3,10 +3,23 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 import { useApp } from './AppContext'; // 👈 استدعاء العقل المركزي للمظهر الداكن
+// تأكد من وجود useState و updateDoc من firebase
+const [hidePhoneNumber, setHidePhoneNumber] = useState(false);
 
+// جوه دالة جلب بيانات الراكب (لو موجودة):
+// setHidePhoneNumber(data.hidePhoneNumber || false);
+
+const togglePhonePrivacy = async () => {
+  const newValue = !hidePhoneNumber;
+  setHidePhoneNumber(newValue);
+  const passengerId = await AsyncStorage.getItem('currentPassengerId');
+  if (passengerId) {
+    await updateDoc(doc(db, 'passengers', passengerId), { hidePhoneNumber: newValue });
+  }
+};
 export default function PassengerProfile() {
   const router = useRouter();
   const { isDarkMode } = useApp(); // 👈 سحب حالة المظهر الداكن
@@ -208,7 +221,19 @@ export default function PassengerProfile() {
             placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'}
             textAlign="right"
           />
-
+        {/* زرار خصوصية الرقم */}
+          <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0', elevation: 1 }}>
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' }}>إخفاء رقم الهاتف 🛡️</Text>
+              <Text style={{ fontSize: 12, color: '#64748b', textAlign: 'right', marginTop: 4 }}>عند التفعيل، سيتواصل معك الكابتن عبر المكالمات المجانية أو المحادثة فقط.</Text>
+            </View>
+            <Switch
+              value={hidePhoneNumber}
+              onValueChange={togglePhonePrivacy}
+              trackColor={{ false: '#cbd5e1', true: '#10b981' }}
+              thumbColor={'#ffffff'}
+            />
+          </View>
           <View style={styles.phoneLabelRow}>
             <TouchableOpacity onPress={openPhoneEditModal}>
               <Text style={styles.editPhoneText}>تعديل الرقم</Text>

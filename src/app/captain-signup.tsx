@@ -116,25 +116,36 @@ export default function CaptainRegister() {
     }
   };
 
-  const validateName = () => {
+  const validateName = async () => {
     if (name.trim().length === 0) {
       setErrors(prev => ({ ...prev, name: 'برجاء إدخال الاسم' })); return false;
+    }
+    const nameQ = query(collection(db, 'captains'), where('name', '==', name.trim()));
+    if (!(await getDocs(nameQ)).empty) {
+      setErrors(prev => ({ ...prev, name: '❌ هذا الاسم مسجل من قبل' })); return false;
     }
     setErrors(prev => ({ ...prev, name: '' })); return true;
   };
 
-  const validateNationalId = () => {
+  const validateNationalId = async () => {
     if (nationalId.trim().length !== 14 || isNaN(Number(nationalId))) {
       setErrors(prev => ({ ...prev, nationalId: 'الرقم القومي يجب أن يتكون من 14 رقماً' })); return false;
+    }
+    const idQ = query(collection(db, 'captains'), where('nationalId', '==', nationalId.trim()), where('vehicleCategory', '==', vehicleCategory));
+    if (!(await getDocs(idQ)).empty) {
+      setErrors(prev => ({ ...prev, nationalId: '❌ مسجل من قبل على نفس نوع المركبة' })); return false;
     }
     setErrors(prev => ({ ...prev, nationalId: '' })); return true;
   };
 
-  const validatePhone = () => {
-    // 👈 فحص رقم الهاتف المصري المكون من 11 رقم
+  const validatePhone = async () => {
     const phoneRegex = /^01[0125][0-9]{8}$/;
     if (!phoneRegex.test(phone)) {
       setErrors(prev => ({ ...prev, phone: 'برجاء إدخال رقم هاتف مصري صحيح' })); return false;
+    }
+    const phoneQ = query(collection(db, 'captains'), where('phone', '==', phone.trim()), where('vehicleCategory', '==', vehicleCategory));
+    if (!(await getDocs(phoneQ)).empty) {
+      setErrors(prev => ({ ...prev, phone: '❌ رقم الموبايل مسجل من قبل على هذه المركبة' })); return false;
     }
     setErrors(prev => ({ ...prev, phone: '' })); return true;
   };
@@ -176,9 +187,15 @@ export default function CaptainRegister() {
     setErrors(prev => ({ ...prev, scooterModel: '' })); return true;
   };
 
-  const switchTab = (tab: 'basic' | 'vehicle') => {
+  const switchTab = async (tab: 'basic' | 'vehicle') => {
     if (tab === 'vehicle') {
-      if (!validateName() || !validateNationalId() || !validatePhone() || !validatePassword() || !validateConfirmPassword()) {
+      const isNameValid = await validateName();
+      const isIdValid = await validateNationalId();
+      const isPhoneValid = await validatePhone();
+      const isPassValid = validatePassword();
+      const isConfValid = validateConfirmPassword();
+
+      if (!isNameValid || !isIdValid || !isPhoneValid || !isPassValid || !isConfValid) {
         Alert.alert('تنبيه', 'برجاء تصحيح الأخطاء في البيانات الأساسية أولاً.');
         return;
       }
@@ -186,7 +203,6 @@ export default function CaptainRegister() {
     setActiveTab(tab);
     scrollViewRef.current?.scrollToPosition(0, 0, true);
   };
-
   const openDropdown = (target: 'carBrand' | 'carModel' | 'carYear' | 'carColor', title: string, data: string[]) => {
     setDropdownTarget(target); setDropdownTitle(title); setDropdownData(data); setIsDropdownVisible(true);
   };
@@ -267,16 +283,15 @@ export default function CaptainRegister() {
     </View>
   );
 
-  const handleRegister = async () => {
+const handleRegister = async () => {
     let missingFields = []; 
 
-    if (!validateName()) missingFields.push('الاسم الرباعي');
-    if (!validateNationalId()) missingFields.push('الرقم القومي (14 رقم)');
-    if (!validatePhone()) missingFields.push('رقم الهاتف الصحيح');
+    if (!(await validateName())) missingFields.push('الاسم الرباعي');
+    if (!(await validateNationalId())) missingFields.push('الرقم القومي (14 رقم)');
+    if (!(await validatePhone())) missingFields.push('رقم الهاتف الصحيح');
     if (!validatePassword()) missingFields.push('كلمة المرور');
     if (!validateConfirmPassword()) missingFields.push('تأكيد كلمة المرور');
     if (!images.profile) missingFields.push('صورتك الشخصية (سيلفي)');
-
     let finalBrand = carBrand === 'ماركة أخرى (غير مسجلة)' ? customCarBrand : carBrand;
     let finalModel = carModel === 'أخرى' ? customCarModel : carModel;
     let finalColor = carColor === 'أخرى' ? customCarColor : carColor;
@@ -373,7 +388,7 @@ export default function CaptainRegister() {
   return (
     <View style={{ flex: 1 }}>
       <View style={styles.container}>
-        <Text style={styles.mainTitle}>تسجيل كابتن بَرّاق ⚡</Text>
+        <Text style={styles.mainTitle}>تسجيل كابتن بُرَاق ⚡</Text>
 
         <View style={styles.tabsContainer}>
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'basic' && styles.tabBtnActive]} onPress={() => switchTab('basic')}><Text style={[styles.tabText, activeTab === 'basic' && styles.tabTextActive]}>البيانات الأساسية</Text></TouchableOpacity>

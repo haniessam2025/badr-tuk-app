@@ -158,10 +158,14 @@ export default function CaptainLogin() {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.registerRedirect} onPress={() => router.push('/captain-register' as any)}>
-          <Text style={styles.registerRedirectText}>ليس لديك حساب؟ <Text style={styles.registerLink}>سجل ككابتن جديد</Text></Text>
-        </TouchableOpacity>
-
+<TouchableOpacity 
+  style={{ marginTop: 20, alignItems: 'center' }} 
+  onPress={() => router.push('/captain-signup')} 
+>
+  <Text style={{ color: '#64748b', fontSize: 15 }}>
+    ليس لديك حساب؟ <Text style={{ color: '#10b981', fontWeight: 'bold' }}>سجل ككابتن جديد</Text>
+  </Text>
+</TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );

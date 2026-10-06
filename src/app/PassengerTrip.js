@@ -30,7 +30,7 @@ export default function PassengerTrip() {
 
       // 3. تجهيز رسالة الواتساب بالرابط
       const mapLink = `https://www.google.com/maps/?q=${latitude},${longitude}`;
-      const message = `أنا حالياً في رحلة مع تطبيق بَرّاق ⚡.\nأشارك معك موقعي الحالي لأسباب الأمان:\n${mapLink}`;
+      const message = `أنا حالياً في رحلة مع تطبيق بٌرَاق ⚡.\nأشارك معك موقعي الحالي لأسباب الأمان:\n${mapLink}`;
       
       const whatsappUrl = `whatsapp://send?phone=${trustedPhoneNumber}&text=${encodeURIComponent(message)}`;
 
