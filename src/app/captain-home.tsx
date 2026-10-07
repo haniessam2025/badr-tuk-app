@@ -36,11 +36,11 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
   const progressAnim = useRef(new Animated.Value(100)).current; 
   const [activePrice, setActivePrice] = useState(item.price);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [hasAutoExpanded, setHasAutoExpanded] = useState(false); // 👈 متغير لمنع التكرار المزعج
+  const [hasAutoExpanded, setHasAutoExpanded] = useState(false); 
   
   const basePrice = parseInt(item.price) || 0;
   useEffect(() => { setActivePrice(item.price); }, [item.price]);
-
+  
   useEffect(() => {
     if (hasSentOffer) {
       setIsExpanded(true);
@@ -62,8 +62,7 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
     ? calculateDistance(captainLocation.latitude, captainLocation.longitude, item.pickupCoords.latitude, item.pickupCoords.longitude)
     : null;
 
- // 🟢 تعريف أنيميشن الوميض الأخضر الفاتح
- const flashAnim = useRef(new Animated.Value(0)).current;
+  const flashAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (capToPickMeters !== null && capToPickMeters < 1000 && !hasAutoExpanded && !hasSentOffer) {
@@ -71,7 +70,6 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
       setHasAutoExpanded(true); 
       Vibration.vibrate([0, 500, 200, 500]); 
 
-      // تشغيل وميض أخضر فاتح مرتين ورا بعض
       Animated.sequence([
         Animated.timing(flashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
         Animated.timing(flashAnim, { toValue: 0, duration: 300, useNativeDriver: false }),
@@ -83,7 +81,7 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
 
   const cardBackgroundColor = flashAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['transparent', '#10b981'] // أخضر صريح وواضح للوميض
+    outputRange: ['transparent', '#10b981'] 
   });
 
   const capToPickDisplay = capToPickMeters !== null    ? (capToPickMeters < 1000 ? `${Math.round(capToPickMeters)} م` : `${(capToPickMeters / 1000).toFixed(1)} كم`)
@@ -119,16 +117,12 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
     <View style={styles.swipeContainer}>
       <View style={styles.hiddenBackground}><Text style={styles.hiddenText}>إخفاء الطلب</Text></View>
       
-      {/* الكارت الخارجي مسئول عن السحب فقط */}
-        
         <Animated.View style={[styles.newRequestCard, isDarkMode && { backgroundColor: '#1e293b' }, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
-        
-        {/* 🟢 طبقة الوميض الخلفية: لا تؤثر على الضغط أو اللمس نهائياً */}
+      
         <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: cardBackgroundColor, borderRadius: 12, zIndex: -1 }} />
 
         <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} activeOpacity={0.8}>
           <View style={styles.newCardRow}>
-             {/* ... باقي محتوى الكارت زي ما هو ... */}
             <View style={styles.newUserCol}>
               <TouchableOpacity onPress={() => onImagePress(getSafeAvatar(item.avatar))}>
                 <Image source={{ uri: getSafeAvatar(item.avatar) }} style={styles.newAvatar} />
@@ -142,15 +136,26 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
               <Text style={styles.newPickupText} numberOfLines={2}>{item.pickupLocation}</Text>
               <Text style={styles.newDropoffText} numberOfLines={2}>{destinationsList.join(' - ')}</Text>
             </View>
+            
+            {/* 👈 المكان الوحيد المخصص لشارة السعر العادل تحت السعر */}
             <View style={styles.newPriceCol}>
               <Text style={styles.newTripDistanceText}>{tripDistanceDisplay} ~</Text>
               <Text style={styles.newPriceText}>{activePrice} EGP</Text>
-              {item.isFairPrice && (
-                <View style={{backgroundColor: '#10b981', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2}}>
-                  <Text style={{color: '#ffffff', fontSize: 10, fontWeight: 'bold'}}>السعر العادل ⚖️</Text>
+             {/* 👈 شارة السعر العادل لو السعرين متطابقين */}
+              {item.calculatedBasePrice != null && Number(item.price) === Number(item.calculatedBasePrice) && (
+                <View style={{backgroundColor: '#dcfce7', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 1, borderWidth: 1, borderColor: '#86efac'}}>
+                  <Text style={{color: '#059669', fontSize: 10, fontWeight: 'bold'}}>السعر العادل ⚖️</Text>
+                </View>
+              )}
+
+              {/* 👈 شارة سعر عالي وبخط كبير وواضح لو الراكب مزود السعر */}
+              {item.calculatedBasePrice != null && Number(item.price) > Number(item.calculatedBasePrice) && (
+                <View style={{backgroundColor: '#fef3c7', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, marginTop: 5, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2, borderWidth: 1.5, borderColor: '#f59e0b', alignSelf: 'center'}}>
+                  <Text style={{color: '#d97706', fontSize: 12, fontWeight: '900'}}>سعر عالي 💰🔥</Text>
                 </View>
               )}
             </View>
+
             <View style={styles.newActionDotsCol}>
               <Text style={styles.newArrowIcon}>{isExpanded ? '▴' : '▾'}</Text>
             </View>
@@ -233,6 +238,10 @@ export default function CaptainHome() {
   const router = useRouter();
   const { isDarkMode, isVibrationEnabled } = useApp();
   const [refreshing, setRefreshing] = useState(false);
+  
+  // 👈 متغيرات فلتر الترتيب للكابتن
+  const [sortBy, setSortBy] = useState<'latest' | 'highest_price' | 'nearest' | 'longest_trip'>('latest');
+  const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -1004,12 +1013,26 @@ const notifyArrival = async () => {
     if (!dismissedInfo) return true;
     return req.price !== dismissedInfo.price || req.pickupLocation !== dismissedInfo.pickupLocation || req.destinationLocation !== dismissedInfo.destinationLocation;
   }).sort((a, b) => {
-    if (captainLocation && a.pickupCoords && b.pickupCoords) {
-      const distA = calculateDistance(captainLocation.latitude, captainLocation.longitude, a.pickupCoords.latitude, a.pickupCoords.longitude);
-      const distB = calculateDistance(captainLocation.latitude, captainLocation.longitude, b.pickupCoords.latitude, b.pickupCoords.longitude);
-      return distA - distB; 
+    if (sortBy === 'highest_price') {
+      // 💰 الأكثر سعراً
+      return (parseInt(b.price) || 0) - (parseInt(a.price) || 0);
+    } else if (sortBy === 'longest_trip') {
+      // 🛣️ الرحلات الأطول مسافة
+      const distA = parseFloat(a.distance || a.tripDistance || '0') || 0;
+      const distB = parseFloat(b.distance || b.tripDistance || '0') || 0;
+      return distB - distA;
+    } else if (sortBy === 'nearest') {
+      // 📍 الأقرب مسافة
+      if (captainLocation && a.pickupCoords && b.pickupCoords) {
+        const distA = calculateDistance(captainLocation.latitude, captainLocation.longitude, a.pickupCoords.latitude, a.pickupCoords.longitude);
+        const distB = calculateDistance(captainLocation.latitude, captainLocation.longitude, b.pickupCoords.latitude, b.pickupCoords.longitude);
+        return distA - distB; 
+      }
+      return (b.timestamp || 0) - (a.timestamp || 0);
+    } else {
+      // 🕒 الأحدث طلباً (الافتراضي)
+      return (b.timestamp || 0) - (a.timestamp || 0);
     }
-    return b.timestamp - a.timestamp;
   });
 
   const visibleRequests = displayRequests.filter((req) => {
@@ -1187,7 +1210,29 @@ const notifyArrival = async () => {
               )}
             </View>
           )}
-          <Text style={[styles.sectionTitle, isDarkMode && { color: '#e2e8f0' }]}>الطلبات المتاحة حالياً</Text>
+          {/* 👈 عنوان الطلبات وجنبه زرار القائمة المنسدلة للترتيب */}
+          <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+            <Text style={[styles.sectionTitle, isDarkMode && { color: '#e2e8f0' }, { marginBottom: 0 }]}>الطلبات المتاحة حالياً</Text>
+            
+            <TouchableOpacity 
+              style={{ 
+                backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', 
+                paddingVertical: 6, 
+                paddingHorizontal: 12, 
+                borderRadius: 10, 
+                borderWidth: 1, 
+                borderColor: isDarkMode ? '#334155' : '#cbd5e1',
+                flexDirection: 'row-reverse',
+                alignItems: 'center',
+                gap: 5
+              }}
+              onPress={() => setIsFilterModalVisible(true)}
+            >
+              <Text style={{ fontSize: 13, color: '#10b981', fontWeight: 'bold' }}>
+                {sortBy === 'latest' ? '🕒 الأحدث' : sortBy === 'highest_price' ? '💰 الأكثر سعراً' : sortBy === 'nearest' ? '📍 الأقرب مسافة' : '🛣️ الرحلات الأطول'} ▾
+              </Text>
+            </TouchableOpacity>
+          </View>
           {!isOnline ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>أنت الآن غير متصل</Text>
@@ -1253,7 +1298,7 @@ const notifyArrival = async () => {
               )}
             </View>
 
-            {/* كارت بيانات الراكب */}
+           {/* كارت بيانات الراكب */}
             <View style={[styles.passengerCard, isDarkMode && { backgroundColor: '#334155' }]}>
               <Image source={{ uri: activeRide.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.activeAvatar} />
               <View style={styles.detailsCol}>
@@ -1263,7 +1308,182 @@ const notifyArrival = async () => {
                 </View>
               </View>
             </View>
-            
+
+            {/* 🚨 إشعار تعديل الوجهة المدمج في الشاشة للكابتن 🚨 */}
+            {activeRide.pendingModification?.status === 'pending' && (
+              <View style={{ backgroundColor: isDarkMode ? '#451a03' : '#fffbeb', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 2, borderColor: '#f59e0b', elevation: 4 }}>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#fde68a' : '#d97706', textAlign: 'center', marginBottom: 12 }}>
+                  🗺️ الراكب يرغب في تغيير الوجهة!
+                </Text>
+                
+                <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', padding: 10, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#fde68a' }}>
+                  <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'right', fontWeight: 'bold' }}>الوجهة الجديدة المطلوبة:</Text>
+                  <Text style={{ color: isDarkMode ? '#ffffff' : '#0f172a', fontSize: 15, fontWeight: 'bold', textAlign: 'right', marginTop: 4 }}>
+                    {activeRide.pendingModification.newDestinationLocation}
+                  </Text>
+                </View>
+
+                <View style={{ backgroundColor: activeRide.pendingModification.isIncrease ? (isDarkMode ? '#064e3b' : '#ecfdf5') : (isDarkMode ? '#7f1d1d' : '#fee2e2'), padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: activeRide.pendingModification.isIncrease ? '#10b981' : '#ef4444' }}>
+                  <Text style={{ color: activeRide.pendingModification.isIncrease ? (isDarkMode ? '#a7f3d0' : '#064e3b') : (isDarkMode ? '#fecaca' : '#991b1b'), fontSize: 14, fontWeight: 'bold', textAlign: 'center' }}>
+                    {activeRide.pendingModification.isIncrease ? 'زيادة في الأجرة: ' : 'خصم من الأجرة: '}
+                    {activeRide.pendingModification.priceDiff} جنيه
+                  </Text>
+                  <Text style={{ color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 18, fontWeight: '900', textAlign: 'center', marginTop: 5 }}>
+                    السعر الجديد سيكون: {activeRide.pendingModification.newPrice} ج
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                  <TouchableOpacity 
+                    style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                    onPress={async () => {
+                      if (activeRide?.id) {
+                        await updateDoc(doc(db, 'rides', activeRide.id), {
+                          destinationsList: activeRide.pendingModification.newDestinationsList,
+                          destinationLocation: activeRide.pendingModification.newDestinationLocation,
+                          distance: activeRide.pendingModification.newDistance,
+                          price: activeRide.pendingModification.newPrice,
+                          calculatedBasePrice: activeRide.pendingModification.calculatedBasePrice,
+                          'pendingModification.status': 'accepted'
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>أوافق ✅</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={{ flex: 1, backgroundColor: '#ef4444', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                    onPress={async () => {
+                      if (activeRide?.id) {
+                        await updateDoc(doc(db, 'rides', activeRide.id), {
+                          'pendingModification.status': 'rejected'
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>أرفض ❌</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* 🚨 إشعار تعديل الوجهة المدمج في الشاشة للكابتن 🚨 */}
+            {activeRide.pendingModification?.status === 'pending' && (
+              <View style={{ backgroundColor: isDarkMode ? '#451a03' : '#fffbeb', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 2, borderColor: '#f59e0b', elevation: 4 }}>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#fde68a' : '#d97706', textAlign: 'center', marginBottom: 12 }}>
+                  🗺️ الراكب يرغب في تغيير الوجهة!
+                </Text>
+                
+                <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', padding: 10, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#fde68a' }}>
+                  <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'right', fontWeight: 'bold' }}>الوجهة الجديدة المطلوبة:</Text>
+                  <Text style={{ color: isDarkMode ? '#ffffff' : '#0f172a', fontSize: 15, fontWeight: 'bold', textAlign: 'right', marginTop: 4 }}>
+                    {activeRide.pendingModification.newDestinationLocation}
+                  </Text>
+                </View>
+
+                <View style={{ backgroundColor: activeRide.pendingModification.isIncrease ? (isDarkMode ? '#064e3b' : '#ecfdf5') : (isDarkMode ? '#7f1d1d' : '#fee2e2'), padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: activeRide.pendingModification.isIncrease ? '#10b981' : '#ef4444' }}>
+                  <Text style={{ color: activeRide.pendingModification.isIncrease ? (isDarkMode ? '#a7f3d0' : '#064e3b') : (isDarkMode ? '#fecaca' : '#991b1b'), fontSize: 14, fontWeight: 'bold', textAlign: 'center' }}>
+                    {activeRide.pendingModification.isIncrease ? 'زيادة في الأجرة: ' : 'خصم من الأجرة: '}
+                    {activeRide.pendingModification.priceDiff} جنيه
+                  </Text>
+                  <Text style={{ color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 18, fontWeight: '900', textAlign: 'center', marginTop: 5 }}>
+                    السعر الجديد سيكون: {activeRide.pendingModification.newPrice} ج
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                  <TouchableOpacity 
+                    style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                    onPress={async () => {
+                      if (activeRide?.id) {
+                        await updateDoc(doc(db, 'rides', activeRide.id), {
+                          destinationsList: activeRide.pendingModification.newDestinationsList,
+                          destinationLocation: activeRide.pendingModification.newDestinationLocation,
+                          distance: activeRide.pendingModification.newDistance,
+                          price: activeRide.pendingModification.newPrice,
+                          calculatedBasePrice: activeRide.pendingModification.calculatedBasePrice,
+                          'pendingModification.status': 'accepted'
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>أوافق ✅</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={{ flex: 1, backgroundColor: '#ef4444', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                    onPress={async () => {
+                      if (activeRide?.id) {
+                        await updateDoc(doc(db, 'rides', activeRide.id), {
+                          'pendingModification.status': 'rejected'
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>أرفض ❌</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* 🚨 إشعار تعديل الوجهة المدمج في الشاشة 🚨 */}
+            {activeRide.pendingModification?.status === 'pending' && (
+              <View style={{ backgroundColor: isDarkMode ? '#451a03' : '#fffbeb', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 2, borderColor: '#f59e0b', elevation: 4 }}>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#fde68a' : '#d97706', textAlign: 'center', marginBottom: 12 }}>
+                  🗺️ الراكب يطلب تحديث الوجهة!
+                </Text>
+                
+                <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', padding: 10, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#fde68a' }}>
+                  <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'right', fontWeight: 'bold' }}>الوجهة الجديدة للراكب:</Text>
+                  <Text style={{ color: isDarkMode ? '#ffffff' : '#0f172a', fontSize: 15, fontWeight: 'bold', textAlign: 'right', marginTop: 4 }}>
+                    {activeRide.pendingModification.newDestinationLocation}
+                  </Text>
+                </View>
+
+                <View style={{ backgroundColor: activeRide.pendingModification.isIncrease ? (isDarkMode ? '#064e3b' : '#ecfdf5') : (isDarkMode ? '#7f1d1d' : '#fee2e2'), padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: activeRide.pendingModification.isIncrease ? '#10b981' : '#ef4444' }}>
+                  <Text style={{ color: activeRide.pendingModification.isIncrease ? (isDarkMode ? '#a7f3d0' : '#064e3b') : (isDarkMode ? '#fecaca' : '#991b1b'), fontSize: 14, fontWeight: 'bold', textAlign: 'center' }}>
+                    {activeRide.pendingModification.isIncrease ? 'زيادة في الأجرة: ' : 'خصم من الأجرة: '}
+                    {activeRide.pendingModification.priceDiff} جنيه
+                  </Text>
+                  <Text style={{ color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 18, fontWeight: '900', textAlign: 'center', marginTop: 5 }}>
+                    السعر الجديد سيكون: {activeRide.pendingModification.newPrice} ج
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                  <TouchableOpacity 
+                    style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 10, alignItems: 'center' }}
+                    onPress={async () => {
+                      if (activeRide?.id) {
+                        await updateDoc(doc(db, 'rides', activeRide.id), {
+                          destinationsList: activeRide.pendingModification.newDestinationsList,
+                          destinationLocation: activeRide.pendingModification.newDestinationLocation,
+                          distance: activeRide.pendingModification.newDistance,
+                          price: activeRide.pendingModification.newPrice,
+                          'pendingModification.status': 'accepted'
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>أوافق ✅</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={{ flex: 1, backgroundColor: '#ef4444', paddingVertical: 12, borderRadius: 10, alignItems: 'center' }}
+                    onPress={async () => {
+                      if (activeRide?.id) {
+                        await updateDoc(doc(db, 'rides', activeRide.id), {
+                          'pendingModification.status': 'rejected'
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>لا أوافق ❌</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}            
             {/* التتبع والخريطة */}
             {activeRide.status !== 'in_progress' ? (
               <View style={[styles.navigationContainer, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#059669' }]}>
@@ -1722,6 +1942,49 @@ const notifyArrival = async () => {
           </View>
         </View>
       </Modal>
+
+      {/* 📋 مودال القائمة المنسدلة لترتيب المشاوير للكابتن */}
+      <Modal visible={isFilterModalVisible} transparent={true} animationType="fade">
+        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }} activeOpacity={1} onPress={() => setIsFilterModalVisible(false)}>
+          <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', width: '80%', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0', elevation: 5 }}>
+            <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#ffffff' : '#1e293b', textAlign: 'center', marginBottom: 15 }}>ترتيب المشاوير حسب</Text>
+            
+            {[
+              { key: 'latest', label: '🕒 الأحدث طلباً' },
+              { key: 'highest_price', label: '💰 الأكثر سعراً' },
+              { key: 'nearest', label: '📍 الأقرب مسافة للراكب' },
+              { key: 'longest_trip', label: '🛣️ الرحلات الأطول' },
+            ].map((item) => {
+              const isSelected = sortBy === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={{
+                    paddingVertical: 12,
+                    paddingHorizontal: 15,
+                    borderRadius: 10,
+                    backgroundColor: isSelected ? (isDarkMode ? '#064e3b' : '#ecfdf5') : 'transparent',
+                    marginBottom: 5,
+                    flexDirection: 'row-reverse',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onPress={() => {
+                    setSortBy(item.key as any);
+                    setIsFilterModalVisible(false);
+                  }}
+                >
+                  <Text style={{ color: isSelected ? '#10b981' : (isDarkMode ? '#cbd5e1' : '#334155'), fontSize: 15, fontWeight: isSelected ? 'bold' : 'normal' }}>
+                    {item.label}
+                  </Text>
+                  {isSelected && <Text style={{ color: '#10b981', fontWeight: 'bold' }}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }

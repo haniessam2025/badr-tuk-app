@@ -245,7 +245,7 @@ setSupportTickets(tickets);
         if (currentCaptain && (currentCaptain.vehicleCategory === 'tuktuk_alt' || currentCaptain.vehicle?.includes('كيوت') || currentCaptain.vehicle?.includes('جالاكسي'))) {
           
           // ندور في كل الكباتن على أعلى رقم مسلسل موجود حالياً
-          let maxNumber = 0;
+          let maxNumber = 99;
           captains.forEach(c => {
             const num = c.vehicleSequenceNumber || 0;
             if (num > maxNumber) maxNumber = num;
