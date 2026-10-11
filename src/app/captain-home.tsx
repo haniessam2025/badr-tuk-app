@@ -5,7 +5,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as ScreenCapture from 'expo-screen-capture';
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Linking, Modal, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
@@ -236,7 +237,34 @@ const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestinat
 
 export default function CaptainHome() {
   const router = useRouter();
+
+  // 🚨 مراقبة إعدادات الإدارة (وضع الصيانة وحد المديونية)
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [maxDebtLimit, setMaxDebtLimit] = useState(-50); // القيمة الافتراضية -50
+
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setIsMaintenanceMode(data.maintenanceMode || false);
+        // بنحول الرقم اللي جاي من الداشبورد لـ Number عشان نعرف نقارنه
+        setMaxDebtLimit(Number(data.maxNegativeBalance) || -50); 
+      }
+    });
+    return () => unsubSettings();
+  }, []);
   const { isDarkMode, isVibrationEnabled } = useApp();
+  
+
+  // 🚨 مراقبة وضع الصيانة من الإدارة لحظة بلحظة
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
+      if (docSnap.exists()) {
+        setIsMaintenanceMode(docSnap.data().maintenanceMode || false);
+      }
+    });
+    return () => unsubSettings();
+  }, []);
   const [refreshing, setRefreshing] = useState(false);
   
   // 👈 متغيرات فلتر الترتيب للكابتن
@@ -273,11 +301,13 @@ export default function CaptainHome() {
   const latestMsgTimer = useRef<any>(null);
   const isEndingRide = useRef(false);
   const chatPulseAnim = useRef(new Animated.Value(0)).current;
+  const activeRideScrollRef = useRef<ScrollView>(null); // 👈 المرجع للتحكم في رفع الشاشة
   const [adminMessage, setAdminMessage] = useState<any>(null);
   const [isAdminMsgVisible, setIsAdminMsgVisible] = useState(false);
   const [isCallModalVisible, setIsCallModalVisible] = useState(false);
   const [phoneToCall, setPhoneToCall] = useState('');
   const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
+  const [useInternalMap, setUseInternalMap] = useState(true); // 👈 متغير التحكم في عرض الخريطة الداخلية
   const [rating, setRating] = useState(0);
   const [ratingReason, setRatingReason] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
@@ -287,6 +317,9 @@ export default function CaptainHome() {
   const prevRequestsCountRef = useRef(0);
   
   const [enlargedAvatar, setEnlargedAvatar] = useState<string | null>(null);
+  // 💡 متغيرات فلاش تنبيه نزول الراكب
+  const passengerOnWayFlashAnim = useRef(new Animated.Value(0)).current;
+  const hasFlashedPassengerOnWayRef = useRef(false);
 
   const handleImagePress = (url: string) => {
     setEnlargedAvatar(url);
@@ -298,6 +331,32 @@ export default function CaptainHome() {
       ScreenCapture.allowScreenCaptureAsync();
     }
   }, [enlargedAvatar]); 
+
+  // 🚨 رادار تنبيه الكابتن بأن الراكب في الطريق (فلاش قوي 5 مرات)
+  useEffect(() => {
+    if (activeRide?.status === 'passenger_on_the_way' && !hasFlashedPassengerOnWayRef.current) {
+      hasFlashedPassengerOnWayRef.current = true;
+      
+      // الشاشة تنور وتطفي 5 مرات متتالية
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(passengerOnWayFlashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
+          Animated.timing(passengerOnWayFlashAnim, { toValue: 0, duration: 300, useNativeDriver: false })
+        ]),
+        { iterations: 5 } // 👈 التكرار 5 مرات بالظبط
+      ).start();
+
+      if (isVibrationEnabled) {
+        // اهتزاز قوي متقطع 5 مرات مع الفلاش
+        Vibration.vibrate([0, 300, 300, 300, 300, 300, 300, 300, 300, 300]);
+      }
+    }
+
+    // تصفير المؤشر لو الرحلة لسه بتبدأ أو اتلغت
+    if (!activeRide || activeRide.status === 'pending' || activeRide.status === 'accepted') {
+      hasFlashedPassengerOnWayRef.current = false;
+    }
+  }, [activeRide?.status, isVibrationEnabled]); 
   
   const [captainProfile, setCaptainProfile] = useState({ id: '', name: '...', phone: '', vehicle: 'توكتوك', vehicleCategory: 'tuktuk_alt', tuktukAltType: '', avatar: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', walletBalance: 0, averageRating: 5, ratingCount: 0 });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -371,6 +430,19 @@ export default function CaptainHome() {
   const closeSidebar = () => { Animated.timing(sidebarAnim, { toValue: SCREEN_WIDTH, duration: 300, useNativeDriver: true }).start(() => setIsSidebarOpen(false)); };
 
   const toggleOnlineStatus = async () => {
+    // 🛑 قفل المديونية: لو الكابتن بيحاول يفتح الأبلكيشن ورصيده عدى الحد المسموح
+    const currentBalance = (captainProfile as any)?.walletBalance || 0; 
+    
+    // لو هو حالياً "غير متصل" وبيحاول يبقى "متصل"
+    if ((captainProfile as any)?.status !== 'active') { 
+      if (currentBalance <= maxDebtLimit) {
+        Alert.alert(
+          'إيقاف تلقائي 🛑',
+          `عفواً، لقد تجاوزت الحد الأقصى للمديونية (${maxDebtLimit} ج). رصيدك الحالي (${currentBalance} ج).\n\nبرجاء شحن محفظتك أو تسديد العمولة لتتمكن من استقبال الرحلات مجدداً.`
+        );
+        return; // 👈 الـ return دي هي اللي بتمنع الكود يكمل وتمنعه يبقى متصل!
+      }
+    }
     if (!isOnline && captainProfile.vehicleCategory === 'tuktuk_alt' && !captainProfile.tuktukAltType) {
       setIsTuktukTypeModalVisible(true);
       return;
@@ -909,6 +981,8 @@ const notifyArrival = async () => {
         status: 'captain_arrived',
         arrivedAt: new Date().getTime() // ⏳ حفظ وقت الوصول الفعلي بالسيرفر
       }); 
+      // 🚀 رفع الشاشة لأعلى فوراً وبنعومة لإظهار العداد
+      activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
     }
   };
 
@@ -1267,9 +1341,19 @@ const notifyArrival = async () => {
           )}
         </>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-          <View style={[styles.activeRideContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#3b82f6' }, (activeRide.status === 'passenger_on_the_way' || activeRide.status === 'in_progress') && styles.activeRidePulseContainer]}>            
-            {latestMessage ? (
+            <ScrollView ref={activeRideScrollRef} contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+              <Animated.View style={[
+                styles.activeRideContainer, 
+                isDarkMode && { backgroundColor: '#1e293b', borderColor: '#3b82f6' }, 
+                (activeRide.status === 'passenger_on_the_way' || activeRide.status === 'in_progress') && styles.activeRidePulseContainer,
+                activeRide.status === 'passenger_on_the_way' && {
+                  backgroundColor: passengerOnWayFlashAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [isDarkMode ? '#1e293b' : '#ecfdf5', '#064e3b'] // من اللون الطبيعي إلى أخضر غامق جداً
+                  })
+                }
+              ]}>            
+                {latestMessage ? (
               <View style={{ backgroundColor: isDarkMode ? '#334155' : '#1e293b', padding: 15, borderRadius: 12, marginBottom: 15, flexDirection: 'row-reverse', alignItems: 'center' }}>
                 <Text style={{ fontSize: 22, marginLeft: 10 }}>💬</Text>
                 <View style={{ flex: 1 }}>
@@ -1280,21 +1364,34 @@ const notifyArrival = async () => {
             ) : null}
             
             {/* ⏱️ عنوان الرحلة ومربع العداد بالأعلى */}
-            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, width: '100%' }}>
-              <Text style={[styles.activeRideTitle, { marginBottom: 0, flex: 1, textAlign: 'right', paddingLeft: 10 }]}>
-                {activeRide.status === 'accepted' ? 'أنت الآن في طريقك للراكب' : activeRide.status === 'passenger_on_the_way' ? 'الراكب نازل الآن' : activeRide.status === 'captain_arrived' ? 'لقد وصلت للراكب' : activeRide.status === 'waiting_for_scan' ? 'بانتظار مسح الـ QR' : 'الرحلة جارية الآن'}
-              </Text>
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'center', alignItems: 'center', marginBottom: 15, width: '100%' }}>
+              
+              {/* لو العداد وصل لصفر -> نشيل العداد تماماً ونخلي النص في النص */}
+              {waitingTimeLeft === 0 && ['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status) ? (
+                <Text style={[styles.activeRideTitle, { marginBottom: 0, textAlign: 'center', color: '#ef4444', fontSize: 18, paddingVertical: 5 }]}>
+                  يحق لك الآن إلغاء الرحلة ⚠️
+                </Text>
+              ) : (
+                /* لو العداد لسه شغال -> نعرض النص والعداد طبيعي جداً */
+                <>
+                  <Text style={[styles.activeRideTitle, { marginBottom: 0, flex: 1, textAlign: 'right', paddingLeft: 10 }]}>
+                    {activeRide.status === 'accepted' ? 'أنت الآن في طريقك للراكب' : 
+                     activeRide.status === 'passenger_on_the_way' ? 'الراكب في طريقه إليك ...' : 
+                     activeRide.status === 'captain_arrived' ? 'لقد وصلت للراكب' : 
+                     activeRide.status === 'waiting_for_scan' ? 'بانتظار مسح الـ QR' : 'الرحلة جارية الآن'}
+                  </Text>
 
-            {/* ظهور العداد المربع مرة واحدة فقط */}
-              {['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status) && (
-                <View style={{ backgroundColor: waitingTimeLeft === 0 ? '#dcfce7' : '#fee2e2', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1.5, borderColor: waitingTimeLeft === 0 ? '#22c55e' : '#ef4444', alignItems: 'center', elevation: 2 }}>
-                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: waitingTimeLeft === 0 ? '#166534' : '#991b1b', marginBottom: 2 }}>
-                    {waitingTimeLeft === 0 ? 'إلغاء آمن' : 'وقت'}
-                  </Text>
-                  <Text style={{ fontSize: 18, fontWeight: '900', color: waitingTimeLeft === 0 ? '#166534' : '#b91c1c' }}>
-                    {formatTimer(waitingTimeLeft)}
-                  </Text>
-                </View>
+                  {['captain_arrived', 'passenger_on_the_way', 'waiting_for_scan'].includes(activeRide.status) && waitingTimeLeft > 0 && (
+                    <View style={{ backgroundColor: '#fee2e2', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1.5, borderColor: '#ef4444', alignItems: 'center', elevation: 2 }}>
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#991b1b', marginBottom: 2 }}>
+                        وقت الانتظار
+                      </Text>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#b91c1c' }}>
+                        {formatTimer(waitingTimeLeft)}
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
             </View>
 
@@ -1484,29 +1581,113 @@ const notifyArrival = async () => {
                 </View>
               </View>
             )}            
-            {/* التتبع والخريطة */}
+            {/* التتبع والخريطة المدمجة */}
             {activeRide.status !== 'in_progress' ? (
               <View style={[styles.navigationContainer, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#059669' }]}>
-                <Text style={[styles.navigationHeader, isDarkMode && { color: '#a7f3d0' }]}>نقطة التقابل (مكان الراكب):</Text>
-                <TouchableOpacity style={[styles.navButton, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#34d399' }]} onPress={() => {
-                  if (activeRide.pickupCoords && activeRide.pickupCoords.latitude) {
-                    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${activeRide.pickupCoords.latitude},${activeRide.pickupCoords.longitude}`);
-                  } else {
-                    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeRide.pickupLocation)}`);
-                  }
-                }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.navButtonTitle, isDarkMode && { color: '#34d399' }]}>اضغط لفتح خريطة جوجل</Text>
-                    <Text style={[styles.navButtonText, isDarkMode && { color: '#e2e8f0' }]} numberOfLines={2}>{activeRide.pickupLocation}</Text>
+                
+                {/* 👈 زرار اختيار الخريطة (داخلي / خارجي) */}
+                <View style={{ marginBottom: 15, paddingBottom: 15, borderBottomWidth: 1, borderColor: isDarkMode ? '#34d399' : '#bbf7d0', alignItems: 'center' }}>
+                  <Text style={[styles.navigationHeader, { width: '100%', textAlign: 'right', marginBottom: 15 }, isDarkMode && { color: '#a7f3d0' }]}>نقطة التقابل (مكان الراكب):</Text>
+                  
+                  <TouchableOpacity 
+                    style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: isDarkMode ? '#0f172a' : '#ffffff', borderRadius: 25, borderWidth: 1, borderColor: '#34d399', overflow: 'hidden', elevation: 2 }}
+                    onPress={() => setUseInternalMap(!useInternalMap)}
+                  >
+                    <View style={{ paddingVertical: 8, paddingHorizontal: 25, backgroundColor: useInternalMap ? '#10b981' : 'transparent' }}>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: useInternalMap ? '#ffffff' : (isDarkMode ? '#cbd5e1' : '#64748b') }}>🗺️ تطبيق بُرَاق</Text>
+                    </View>
+                    <View style={{ paddingVertical: 8, paddingHorizontal: 25, backgroundColor: !useInternalMap ? '#3b82f6' : 'transparent' }}>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: !useInternalMap ? '#ffffff' : (isDarkMode ? '#cbd5e1' : '#64748b') }}>📍 جوجل ماب</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 🗺️ عرض الخريطة الداخلية لو الزرار مفعل وموقع الراكب موجود */}
+                {useInternalMap && captainLocation && activeRide.pickupCoords && activeRide.pickupCoords.latitude ? (
+                  <View style={{ width: '100%', height: 200, borderRadius: 12, overflow: 'hidden', marginBottom: 15, borderWidth: 2, borderColor: '#10b981' }}>
+                    <MapView
+                      provider={PROVIDER_GOOGLE}
+                      style={{ width: '100%', height: '100%' }}
+                      scrollEnabled={false} // 👈 يمنع الخريطة من سرقة التاتش (عشان الشاشة تترفع لفوق)
+                      pitchEnabled={false}
+                      zoomEnabled={true}
+                      initialRegion={{
+                        latitude: (captainLocation.latitude + activeRide.pickupCoords.latitude) / 2,
+                        longitude: (captainLocation.longitude + activeRide.pickupCoords.longitude) / 2,
+                        latitudeDelta: Math.abs(captainLocation.latitude - activeRide.pickupCoords.latitude) * 2 || 0.01,
+                        longitudeDelta: Math.abs(captainLocation.longitude - activeRide.pickupCoords.longitude) * 2 || 0.01,
+                      }}
+                    >
+                      <Marker coordinate={{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }} title="موقعك الحالي" pinColor="blue" />
+                      <Marker coordinate={{ latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }} title="نقطة الركوب" pinColor="red" />
+                      <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }]} strokeColor="#10b981" strokeWidth={4} />
+                    </MapView>
                   </View>
-                  <Text style={[styles.navIcon, {backgroundColor: '#3b82f6'}]}>📍 تتبع</Text>
-                </TouchableOpacity>
+                ) : null}
+
+                {/* 📍 زرار فتح جوجل ماب (في حالة اختياره) */}
+                {!useInternalMap && (
+                  <TouchableOpacity style={[styles.navButton, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#34d399' }]} onPress={() => {
+                    if (activeRide.pickupCoords && activeRide.pickupCoords.latitude) {
+                      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${activeRide.pickupCoords.latitude},${activeRide.pickupCoords.longitude}`);
+                    } else {
+                      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeRide.pickupLocation)}`);
+                    }
+                  }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.navButtonTitle, isDarkMode && { color: '#34d399' }]}>اضغط لفتح تطبيق خرائط جوجل</Text>
+                      <Text style={[styles.navButtonText, isDarkMode && { color: '#e2e8f0' }]} numberOfLines={2}>{activeRide.pickupLocation}</Text>
+                    </View>
+                    <Text style={[styles.navIcon, {backgroundColor: '#3b82f6'}]}>📍 تتبع</Text>
+                  </TouchableOpacity>
+                )}
+                
                 <Text style={[styles.priceTagActive, {marginTop: 10}]}>الأجرة المتفق عليها: {activeRide.price} جنيه</Text>
               </View>
             ) : (
               <View style={[styles.navigationContainer, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#059669' }]}>
-                <Text style={[styles.navigationHeader, isDarkMode && { color: '#a7f3d0' }]}>خط سير الرحلة بالكامل:</Text>
                 
+                {/* 👈 زرار اختيار الخريطة (داخلي / خارجي) */}
+                <View style={{ marginBottom: 15, paddingBottom: 15, borderBottomWidth: 1, borderColor: isDarkMode ? '#34d399' : '#bbf7d0', alignItems: 'center' }}>
+                  <Text style={[styles.navigationHeader, { width: '100%', textAlign: 'right', marginBottom: 15 }, isDarkMode && { color: '#a7f3d0' }]}>خط سير الرحلة:</Text>
+                  
+                  <TouchableOpacity 
+                    style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: isDarkMode ? '#0f172a' : '#ffffff', borderRadius: 25, borderWidth: 1, borderColor: '#34d399', overflow: 'hidden', elevation: 2 }}
+                    onPress={() => setUseInternalMap(!useInternalMap)}
+                  >
+                    <View style={{ paddingVertical: 8, paddingHorizontal: 25, backgroundColor: useInternalMap ? '#10b981' : 'transparent' }}>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: useInternalMap ? '#ffffff' : (isDarkMode ? '#cbd5e1' : '#64748b') }}>🗺️ تطبيق بُرَاق</Text>
+                    </View>
+                    <View style={{ paddingVertical: 8, paddingHorizontal: 25, backgroundColor: !useInternalMap ? '#3b82f6' : 'transparent' }}>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: !useInternalMap ? '#ffffff' : (isDarkMode ? '#cbd5e1' : '#64748b') }}>📍 جوجل ماب</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 🗺️ عرض الخريطة الداخلية لو الزرار مفعل وموقع الراكب موجود */}
+                {useInternalMap && captainLocation && activeRide.liveCoords && activeRide.liveCoords.latitude ? (
+                  <View style={{ width: '100%', height: 250, borderRadius: 12, overflow: 'hidden', marginBottom: 15, borderWidth: 2, borderColor: '#10b981' }}>
+                    <MapView
+                      provider={PROVIDER_GOOGLE}
+                      style={{ width: '100%', height: '100%' }}
+                      scrollEnabled={false} // 👈 يمنع الخريطة من سرقة التاتش (عشان الشاشة تترفع لفوق)
+                      pitchEnabled={false}
+                      zoomEnabled={true}
+                      initialRegion={{
+                        latitude: (captainLocation.latitude + activeRide.liveCoords.latitude) / 2,
+                        longitude: (captainLocation.longitude + activeRide.liveCoords.longitude) / 2,
+                        latitudeDelta: Math.abs(captainLocation.latitude - activeRide.liveCoords.latitude) * 2 || 0.02,
+                        longitudeDelta: Math.abs(captainLocation.longitude - activeRide.liveCoords.longitude) * 2 || 0.02,
+                      }}
+                      showsUserLocation={true}
+                      followsUserLocation={true}
+                    >
+                      <Marker coordinate={{ latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }} title="نقطة الوصول النهائية" pinColor="red" />
+                      <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }]} strokeColor="#10b981" strokeWidth={5} />
+                    </MapView>
+                  </View>
+                ) : null}
+
                 {/* 🟢 نقطة الانطلاق */}
                 <View style={styles.timelineRow}>
                   <View style={styles.timelineIconContainer}>
@@ -1526,13 +1707,16 @@ const notifyArrival = async () => {
                     <TouchableOpacity key={i} style={[styles.navButton, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#34d399' }]} onPress={() => openGoogleMaps(d)}>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.navButtonTitle, isDarkMode && { color: '#34d399' }]}>{isLast ? 'الوجهة النهائية 🔴' : `محطة ${i + 1} 🟡`}</Text>
-                        <Text style={[styles.navButtonText, isDarkMode && { color: '#e2e8f0' }]} numberOfLines={2}>{d}
-                        </Text>                      
-                        </View>
-                      <View style={{ backgroundColor: isLast ? '#ef4444' : '#f59e0b', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, flexDirection: 'row-reverse', alignItems: 'center' }}>
-                        <Ionicons name="map" size={20} color="#ffffff" />
-                        <Text style={{color: '#ffffff', fontWeight: 'bold', marginRight: 4, fontSize: 13}}>تتبع</Text>
+                        <Text style={[styles.navButtonText, isDarkMode && { color: '#e2e8f0' }]} numberOfLines={2}>{d}</Text>                      
                       </View>
+                      
+                      {/* لو هو مش مستخدم الخريطة الداخلية، نعرض زرار التتبع الخارجي */}
+                      {!useInternalMap && (
+                        <View style={{ backgroundColor: isLast ? '#ef4444' : '#f59e0b', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, flexDirection: 'row-reverse', alignItems: 'center' }}>
+                          <Ionicons name="map" size={20} color="#ffffff" />
+                          <Text style={{color: '#ffffff', fontWeight: 'bold', marginRight: 4, fontSize: 13}}>تتبع</Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -1602,11 +1786,11 @@ const notifyArrival = async () => {
                         : 'التراجع عن الرحلة'}
                   </Text>
                 </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </ScrollView>
-      )}
+                  </View>
+                )}
+              </Animated.View>
+            </ScrollView>
+          )}
 
       {/* 🚀 شريط التنقل السفلي السريع للكابتن 🚀 */}
       <View style={[styles.bottomNavContainer, isDarkMode && { backgroundColor: '#1e293b', borderTopColor: '#334155' }]}>
@@ -1983,13 +2167,25 @@ const notifyArrival = async () => {
             })}
           </View>
         </TouchableOpacity>
-      </Modal>
+</Modal>
 
-    </View>
-  );
-}
+          {/* 🚨 شاشة وضع الصيانة الإجبارية 🚨 */}
+          {isMaintenanceMode && (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', zIndex: 100000, padding: 20 }}>
+              <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
+              <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
+              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 30 }}>
+                نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
+              </Text>
+              <ActivityIndicator size="large" color="#eab308" />
+            </View>
+          )}
 
-const styles = StyleSheet.create({
+        </View>
+      );
+    }
+
+    const styles = StyleSheet.create({
   // تنسيقات التايم لاين (خط السير المضاف حديثاً)
   timelineRow: { flexDirection: 'row-reverse', alignItems: 'flex-start', minHeight: 50 },
   timelineIconContainer: { width: 30, alignItems: 'center', height: '100%' },

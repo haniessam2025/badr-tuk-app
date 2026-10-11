@@ -133,9 +133,23 @@ const sendPushNotification = async (expoPushToken: string, passengerName: string
 
 export default function PassengerHome() {
   const router = useRouter();
+
+  // 🚨 مراقبة وضع الصيانة من الإدارة لحظة بلحظة
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
+      if (docSnap.exists()) {
+        setIsMaintenanceMode(docSnap.data().maintenanceMode || false);
+      }
+    });
+    return () => unsubSettings();
+  }, []);
   const { isDarkMode, isVibrationEnabled } = useApp();
   const pathname = usePathname();
-  
+
+    // 💡 متغيرات تنبيه اقتراب الكابتن
+  const flashAnim = useRef(new Animated.Value(0)).current;
+  const hasShownAlmostArrivedRef = useRef(false);
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number, longitude: number } | null>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
@@ -156,6 +170,7 @@ export default function PassengerHome() {
   const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const debounceTimer = useRef<any>(null);
 
+  const activeRideScrollRef = useRef<ScrollView>(null); // 👈 المرجع للتحكم في رفع الشاشة
   const [notes, setNotes] = useState('');
   const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'captain_arrived' | 'passenger_on_the_way' | 'waiting_for_scan' | 'in_progress'>('idle');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
@@ -195,6 +210,7 @@ export default function PassengerHome() {
       getLocalPrice();
     }, [])
   );
+  
 // 👈 مراقب السعر الذكي: أي تغيير في السعر عند الراكب هيتبعت فوراً للكابتن
   useEffect(() => {
     if (currentRideId && rideStatus === 'searching' && price) {
@@ -520,6 +536,46 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     return () => unsubscribe();
   }, [passengerProfile]);
   
+  // 🚨 رادار تنبيه الراكب باقتراب الكابتن (قبل الوصول بـ 500 متر)
+  useEffect(() => {
+    if (rideStatus === 'accepted' && captainLiveCoords && pickupCoords) {
+      
+      const dist = calculateDistance(
+        captainLiveCoords.latitude, 
+        captainLiveCoords.longitude,
+        pickupCoords.latitude, 
+        pickupCoords.longitude
+      );
+
+      // لو المسافة أقل من 500 متر والتنبيه لسه مظهرش
+      if (dist <= 500 && !hasShownAlmostArrivedRef.current) {
+        hasShownAlmostArrivedRef.current = true; // عشان ميظهرش تاني
+
+        // 1. الشاشة تنور وتطفي مرة واحدة
+        Animated.sequence([
+          Animated.timing(flashAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
+          Animated.timing(flashAnim, { toValue: 0, duration: 500, useNativeDriver: false })
+        ]).start();
+
+        // 2. اهتزاز للموبايل
+        if (isVibrationEnabled) {
+          Vibration.vibrate([0, 500, 200, 500]);
+        }
+
+        // 3. ظهور رسالة التنبيه
+        Alert.alert(
+          "تنبيه 🔔",
+          "الكابتن على وشك الوصول برجاء التوجه إلى نقطة الإقلال"
+        );
+      }
+    }
+
+    // تصفير الرادار لو الرحلة خلصت أو اتلغت
+    if (rideStatus === 'idle' || rideStatus === 'searching') {
+      hasShownAlmostArrivedRef.current = false;
+    }
+  }, [rideStatus, captainLiveCoords, pickupCoords, isVibrationEnabled]);
+
   useFocusEffect(useCallback(() => { loadPassengerProfile(); loadEmergencyPhone(); }, []));
 
   const loadEmergencyPhone = async () => {
@@ -652,6 +708,7 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       }
     } catch (error) {}
   };
+  
   useEffect(() => {
     let unsubscribeNotif: any;
     
@@ -1075,18 +1132,32 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
              setCalculatedDistance(totalDistanceKm.toFixed(1));
 
              let calculatedPrice = 0;
+             
+             // 💡 جلب الإعدادات المحفوظة من الإدارة (أو استخدام القيم الافتراضية كاحتياطي)
+             let appSettings = {
+                car: { baseFare: 15, perKm: 4.4, minFare: 20 },
+                tuktuk: { baseFare: 10, perKm: 6.5, minFare: 15 },
+                scooter: { baseFare: 12, perKm: 3.75, minFare: 12 }
+             };
+             
+             try {
+                const settingsSnap = await getDoc(doc(db, 'app_settings', 'pricing'));
+                if (settingsSnap.exists()) {
+                  const data = settingsSnap.data();
+                  appSettings = {
+                    car: { baseFare: Number(data.car?.baseFare || 15), perKm: Number(data.car?.perKm || 4.4), minFare: Number(data.car?.minFare || 20) },
+                    tuktuk: { baseFare: Number(data.tuktuk?.baseFare || 10), perKm: Number(data.tuktuk?.perKm || 6.5), minFare: Number(data.tuktuk?.minFare || 15) },
+                    scooter: { baseFare: Number(data.scooter?.baseFare || 12), perKm: Number(data.scooter?.perKm || 3.75), minFare: Number(data.scooter?.minFare || 12) }
+                  };
+                }
+             } catch(e) { console.log("Failed to load settings, using defaults."); }
+
              if (vType === 'car') {
-               if (totalDistanceKm <= 15) {
-                 calculatedPrice = 15 + (totalDistanceKm * 4.4);
-               } else if (totalDistanceKm <= 45) {
-                 calculatedPrice = 91 + ((totalDistanceKm - 15) * 3.8);
-               } else {
-                 calculatedPrice = 205 + ((totalDistanceKm - 45) * 3.2);
-               }
+               calculatedPrice = Math.max(appSettings.car.minFare, appSettings.car.baseFare + (totalDistanceKm * appSettings.car.perKm));
              } else if (vType === 'scooter') {
-               calculatedPrice = Math.max(12, totalDistanceKm * 3.75);
+               calculatedPrice = Math.max(appSettings.scooter.minFare, appSettings.scooter.baseFare + (totalDistanceKm * appSettings.scooter.perKm));
              } else {
-               let basePriceForOne = Math.max(15, totalDistanceKm * 6.5);
+               let basePriceForOne = Math.max(appSettings.tuktuk.minFare, appSettings.tuktuk.baseFare + (totalDistanceKm * appSettings.tuktuk.perKm));
                const count = parseInt(passCountStr) || 1;
                const extraPassengers = count - 1;
                const passengerMultiplier = 1 + (extraPassengers * 0.25); 
@@ -1482,7 +1553,11 @@ const acceptCaptainOffer = async (offer: any) => {
 
   const notifyPassengerOnTheWay = async () => {
     if (!currentRideId) return;
-    try { await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); } catch (error) {}
+    try { 
+      await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); 
+      // 🚀 رفع الشاشة لأعلى فوراً وبنعومة لإظهار العداد
+      activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
+    } catch (error) {}
   };
 
 const handleCancelRide = async () => {
@@ -1904,33 +1979,45 @@ const handleCancelRide = async () => {
       {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'in_progress') && (
         <Animated.View style={[styles.cardActive, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#d97706' }, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }]}>
           
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+          <ScrollView ref={activeRideScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
             
             {/* ⏱️ عنوان الرحلة ومربع العداد بالأعلى */}
-            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, width: '100%' }}>
-              <View style={{ flex: 1 }}>
-                {rideStatus === 'captain_arrived' ? (
-                  <>
-                    <Text style={[styles.superArrivalTitle, { textAlign: 'right', marginBottom: 4 }]}>براقك وصل !</Text>
-                    <Text style={[styles.statusArrivalAlert, { textAlign: 'right', marginBottom: 0, fontSize: 13 }]}>الكابتن في الخارج بانتظارك.</Text>
-                  </>
-                ) : (
-                  <Text style={[styles.statusAlertTitle, rideStatus === 'waiting_for_scan' && { color: '#ffffff' }, { textAlign: 'right', marginBottom: 0, fontSize: 16 }]}>
-                    {rideStatus === 'accepted' ? 'الكابتن في طريقه إليك ...' : rideStatus === 'passenger_on_the_way' ? 'الكابتن في انتظارك' : rideStatus === 'waiting_for_scan' ? 'يرجى مسح كود QR للبدء' : 'الرحلة جارية الآن'}
-                  </Text>
-                )}
-              </View>
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'center', alignItems: 'center', marginBottom: 15, width: '100%' }}>
+              
+              {/* لو العداد وصل لصفر -> نشيل العداد تماماً والنص ياخد الشاشة كلها بالعرض */}
+              {waitingTimeLeft === 0 && ['captain_arrived', 'waiting_for_scan', 'passenger_on_the_way'].includes(rideStatus) ? (
+                <Text style={[styles.statusAlertTitle, { marginBottom: 0, textAlign: 'center', color: '#ef4444', fontSize: 18, paddingVertical: 5 }]}>
+                  تنبيه: يحق للكابتن إلغاء الرحلة ⚠️
+                </Text>
+              ) : (
+                /* لو العداد لسه شغال نعرضه طبيعي */
+                <>
+                  <View style={{ flex: 1 }}>
+                    {rideStatus === 'captain_arrived' ? (
+                      <>
+                        <Text style={[styles.superArrivalTitle, { textAlign: 'right', marginBottom: 4 }]}>براقك وصل !</Text>
+                        <Text style={[styles.statusArrivalAlert, { textAlign: 'right', marginBottom: 0, fontSize: 13 }]}>الكابتن في الخارج بانتظارك.</Text>
+                      </>
+                    ) : (
+                      <Text style={[styles.statusAlertTitle, rideStatus === 'waiting_for_scan' && { color: '#ffffff' }, { textAlign: 'right', marginBottom: 0, fontSize: 16 }]}>
+                        {rideStatus === 'accepted' ? 'الكابتن في طريقه إليك ...' : 
+                         rideStatus === 'passenger_on_the_way' ? 'الكابتن في انتظارك' : 
+                         rideStatus === 'waiting_for_scan' ? 'يرجى مسح كود QR للبدء' : 'الرحلة جارية الآن'}
+                      </Text>
+                    )}
+                  </View>
 
-              {/* ظهور العداد المربع عند الراكب */}
-              {['captain_arrived', 'waiting_for_scan', 'passenger_on_the_way'].includes(rideStatus) && (
-                <View style={{ backgroundColor: waitingTimeLeft === 0 ? '#fee2e2' : '#eff6ff', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1.5, borderColor: waitingTimeLeft === 0 ? '#ef4444' : '#3b82f6', alignItems: 'center', elevation: 2, marginLeft: 10 }}>
-                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: waitingTimeLeft === 0 ? '#991b1b' : '#1e3a8a', marginBottom: 2 }}>
-                    {waitingTimeLeft === 0 ? 'انتهى الوقت!' : 'وقت الانتظار'}
-                  </Text>
-                  <Text style={{ fontSize: 18, fontWeight: '900', color: waitingTimeLeft === 0 ? '#b91c1c' : '#1d4ed8' }}>
-                    {formatTimer(waitingTimeLeft)}
-                  </Text>
-                </View>
+                  {['captain_arrived', 'waiting_for_scan', 'passenger_on_the_way'].includes(rideStatus) && waitingTimeLeft > 0 && (
+                    <View style={{ backgroundColor: '#eff6ff', paddingVertical: 6, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1.5, borderColor: '#3b82f6', alignItems: 'center', elevation: 2, marginLeft: 10 }}>
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#1e3a8a', marginBottom: 2 }}>
+                        وقت الانتظار
+                      </Text>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#1d4ed8' }}>
+                        {formatTimer(waitingTimeLeft)}
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
             </View>
 
@@ -2336,11 +2423,37 @@ const handleCancelRide = async () => {
           </Animated.View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
-  );
-}
 
-const styles = StyleSheet.create({
+      {/* 🌟 تأثير الفلاش الأصفر لما الكابتن يقرب */}
+      <Animated.View
+        pointerEvents="none" 
+        style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: flashAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: ['rgba(250, 204, 21, 0)', 'rgba(250, 204, 21, 0.4)'] 
+          }),
+          zIndex: 9999, 
+        }}
+      />
+    {/* 🚨 شاشة وضع الصيانة الإجبارية 🚨 */}
+          {isMaintenanceMode && (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', zIndex: 100000, padding: 20 }}>
+              <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
+              <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
+              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 30 }}>
+                نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
+              </Text>
+              <ActivityIndicator size="large" color="#eab308" />
+            </View>
+          )}
+
+        </KeyboardAvoidingView>
+      );
+    }
+
+    const styles = StyleSheet.create({
   userInfoCentered: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1, justifyContent: 'center' },
   profileTextContainer: { alignItems: 'center', marginRight: 10 },
   headerSettingsBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' },

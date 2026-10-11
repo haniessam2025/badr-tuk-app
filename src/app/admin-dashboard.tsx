@@ -2,7 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { db } from '../firebase'; // تأكد من مسار الفايربيز
+import { db } from '../firebase';
 
 export default function AdminDashboard() {
   const [sosCount, setSosCount] = useState(0);
@@ -13,7 +13,6 @@ export default function AdminDashboard() {
     const unsubscribe = onSnapshot(q, (snapshot: any) => {
       setSosCount(snapshot.size);
       
-      // 👈 التعديل هنا: نخلي الإشعار يظهر فقط للإنذارات "الجديدة" اللي لسه منضافة حالاً
       let hasNewAlert = false;
       snapshot.docChanges().forEach((change: any) => {
         if (change.type === 'added') {
@@ -34,14 +33,13 @@ export default function AdminDashboard() {
     });
     return () => unsubscribe();
   }, []);
-  // --- متغيرات الدعم الفني المباشر ---
+  
   const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
   const [supportTickets, setSupportTickets] = useState<any[]>([]);
   const [activeSupportChat, setActiveSupportChat] = useState<any>(null);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [adminReplyText, setAdminReplyText] = useState('');
   
-  // متغيرات مراقبة حالة الكتابة الذكية للحفاظ على الباقة
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCurrentlyTypingRef = useRef(false);
   
@@ -78,23 +76,27 @@ export default function AdminDashboard() {
   const [profileMsgText, setProfileMsgText] = useState('');
   const [sendingProfileMsg, setSendingProfileMsg] = useState(false);
 
-  const [complaintsCount, setComplaintsCount,] = useState(0);
+  const [complaintsCount, setComplaintsCount] = useState(0);
   const [passwordResetCount, setPasswordResetCount] = useState(0);
 
-  // --- دوال الدعم الفني المباشر (Firebase) ---
-  
+  // 📢 متغيرات الإشعارات الجماعية
+  const [broadcastModalVisible, setBroadcastModalVisible] = useState(false);
+  const [broadcastTarget, setBroadcastTarget] = useState<'all' | 'captains' | 'passengers'>('all');
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
+
   // جلب التذاكر المفتوحة فقط
   useEffect(() => {
     const q = query(collection(db, 'support_chats'), where('status', '==', 'open'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-tickets.sort((a: any, b: any) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));      
-setSupportTickets(tickets);
+      tickets.sort((a: any, b: any) => (b.lastMessageTime?.toMillis() || 0) - (a.lastMessageTime?.toMillis() || 0));      
+      setSupportTickets(tickets);
     });
     return () => unsubscribe();
   }, []);
 
-  // جلب رسايل المحادثة اللي الأدمن بيفتحها
   useEffect(() => {
     if (!activeSupportChat) return;
     const q = query(collection(db, 'support_chats', activeSupportChat.id, 'messages'), orderBy('timestamp', 'desc'), limit(30));
@@ -109,26 +111,17 @@ setSupportTickets(tickets);
     try { await updateDoc(doc(db, 'support_chats', ticket.id), { unreadAdminCount: 0 }); } catch (e) {}
   };
   
-  // الدالة الذكية لمراقبة كتابة الإدارة وتفعيل النقط
   const handleAdminTyping = async (text: string) => {
     setAdminReplyText(text);
-
     if (!activeSupportChat) return;
-
     if (!isCurrentlyTypingRef.current) {
       isCurrentlyTypingRef.current = true;
-      try {
-        await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { adminTyping: true });
-      } catch (error) {}
+      try { await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { adminTyping: true }); } catch (error) {}
     }
-
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    
     typingTimeoutRef.current = setTimeout(async () => {
       isCurrentlyTypingRef.current = false;
-      try {
-        await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { adminTyping: false });
-      } catch (error) {}
+      try { await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { adminTyping: false }); } catch (error) {}
     }, 2000);
   };
 
@@ -136,18 +129,15 @@ setSupportTickets(tickets);
     if (!adminReplyText.trim() || !activeSupportChat) return;
     const text = adminReplyText.trim();
     setAdminReplyText('');
-
-    // مسح علامة الكتابة فوراً بمجرد الضغط على إرسال
     isCurrentlyTypingRef.current = false;
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
     try {
       await addDoc(collection(db, 'support_chats', activeSupportChat.id, 'messages'), { text, sender: 'admin', timestamp: serverTimestamp() });
       await updateDoc(doc(db, 'support_chats', activeSupportChat.id), {
         lastMessage: text,
         lastMessageTime: serverTimestamp(),
         unreadUserCount: increment(1),
-        adminTyping: false // التأكيد على إخفاء النقط من الراكب/الكابتن
+        adminTyping: false 
       });
     } catch (error) {}
   };
@@ -159,8 +149,6 @@ setSupportTickets(tickets);
       setActiveSupportChat(null);
     } catch (error) {}
   };
-
-  // --- باقي دوال لوحة التحكم ---
 
   const fetchDashboardData = async () => {
     try {
@@ -175,7 +163,6 @@ setSupportTickets(tickets);
       pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setUpdateRequests(pendingUpdates);
 
-      // 1️⃣ عداد الشكاوى والمقترحات والمفقودات (مع استبعاد طلبات الباسورد)
       const compSnap = await getDocs(query(collection(db, 'support_tickets'), orderBy('timestamp', 'desc'), limit(100)));
       let unreadCount = 0;
       compSnap.docs.forEach(doc => {
@@ -188,12 +175,7 @@ setSupportTickets(tickets);
       });
       setComplaintsCount(unreadCount);
 
-      // 2️⃣ عداد طلبات استعادة كلمة المرور المعلقة لوحده تماماً
-      const pwdSnap = await getDocs(query(
-        collection(db, 'support_tickets'), 
-        where('type', '==', 'password_reset'), 
-        where('status', '==', 'pending')
-      ));
+      const pwdSnap = await getDocs(query(collection(db, 'support_tickets'), where('type', '==', 'password_reset'), where('status', '==', 'pending')));
       setPasswordResetCount(pwdSnap.size);
 
     } catch (error) {
@@ -204,15 +186,49 @@ setSupportTickets(tickets);
     }
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchDashboardData();
-    }, [])
-  );
+  useFocusEffect(useCallback(() => { fetchDashboardData(); }, []));
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchDashboardData();
+  };
+
+  // 📢 دالة إرسال الإشعارات الجماعية
+  const sendBroadcastMessage = async () => {
+    if (!broadcastTitle.trim() || !broadcastMessage.trim()) {
+      Alert.alert('تنبيه', 'يرجى إدخال عنوان ونص الإشعار.');
+      return;
+    }
+    setSendingBroadcast(true);
+    try {
+      const notificationsRef = collection(db, 'notifications');
+      const timeNow = serverTimestamp();
+
+      if (broadcastTarget === 'all' || broadcastTarget === 'passengers') {
+        passengers.forEach(p => {
+          if (p.status !== 'rejected') {
+            addDoc(notificationsRef, { userId: p.id, userType: 'passenger', title: broadcastTitle, message: broadcastMessage, timestamp: timeNow, read: false, sender: 'الإدارة' });
+          }
+        });
+      }
+      
+      if (broadcastTarget === 'all' || broadcastTarget === 'captains') {
+        captains.forEach(c => {
+          if (c.status !== 'rejected') {
+            addDoc(notificationsRef, { userId: c.id, userType: 'captain', title: broadcastTitle, message: broadcastMessage, timestamp: timeNow, read: false, sender: 'الإدارة' });
+          }
+        });
+      }
+
+      Alert.alert('نجاح 🚀', 'تم إرسال الإشعار الجماعي بنجاح.');
+      setBroadcastModalVisible(false);
+      setBroadcastTitle('');
+      setBroadcastMessage('');
+    } catch (error) {
+      Alert.alert('خطأ', 'تعذر إرسال الإشعارات الجماعية.');
+    } finally {
+      setSendingBroadcast(false);
+    }
   };
 
   const pendingCaptains = captains.filter(c => c.status === 'pending' || c.status === 'pending_approval');
@@ -232,17 +248,10 @@ setSupportTickets(tickets);
   const onlyActiveCaptains = captains.filter(c => c.status !== 'pending' && c.status !== 'pending_approval' && c.status !== 'rejected');
   const carCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سيارة') || c.vehicleCategory === 'car');
   const scooterCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سكوتر') || c.vehicleCategory === 'scooter');
-  
-  const galaxyCaptains = onlyActiveCaptains.filter(c => 
-    c.vehicle?.includes('جالاكسي') || 
-    c.vehicleDetails?.type?.includes('جالاكسي') || 
-    c.requestedTuktukType?.includes('جالاكسي')
-  );
-
+  const galaxyCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('جالاكسي') || c.vehicleDetails?.type?.includes('جالاكسي') || c.requestedTuktukType?.includes('جالاكسي'));
   const cuteCaptains = onlyActiveCaptains.filter(c => {
     const isGalaxy = c.vehicle?.includes('جالاكسي') || c.vehicleDetails?.type?.includes('جالاكسي') || c.requestedTuktukType?.includes('جالاكسي');
     if (isGalaxy) return false; 
-    
     return c.vehicleCategory === 'tuktuk_alt' || c.vehicle?.includes('كيوت') || c.vehicleDetails?.type?.includes('كيوت');
   });
 
@@ -260,42 +269,28 @@ setSupportTickets(tickets);
       let nextNumber = null;
       let notificationMessage = "تمت الموافقة على حسابك، يمكنك الآن بدء استقبال الرحلات.";
 
-    // 1️⃣ لو اللي بنوافق عليه كابتن، نفحصه هل هو بديل توكتوك ولا لأ
       if (type === 'captain') {
         const currentCaptain = captains.find(c => c.id === id);
         if (currentCaptain && (currentCaptain.vehicleCategory === 'tuktuk_alt' || currentCaptain.vehicle?.includes('كيوت') || currentCaptain.vehicle?.includes('جالاكسي'))) {
-          
-          // ندور في كل الكباتن على أعلى رقم مسلسل موجود حالياً
           let maxNumber = 99;
           captains.forEach(c => {
             const num = c.vehicleSequenceNumber || 0;
             if (num > maxNumber) maxNumber = num;
           });
-          
-          nextNumber = maxNumber + 1; // الرقم الكودي الجديد للكابتن
+          nextNumber = maxNumber + 1;
           notificationMessage = `مبروووك لقد تم الموافقة على طلب تسجيلك بنجاح ورقمك الكودي هو (${nextNumber}) وسيتم التواصل معك في أقرب وقت لتسليمك شعار براق برقمك الكودي`;
         }
       }
 
-      // 2️⃣ تجهيز البيانات اللي هتتحدث في الفايربيز
       const updateData: any = { status: 'active' };
-      
       if (nextNumber !== null) {
         updateData.vehicleSequenceNumber = nextNumber;
-        updateData.vehicleNumber = `${nextNumber}`; // هيتخزن كرقم اللوحة عشان يظهر للركاب
+        updateData.vehicleNumber = `${nextNumber}`; 
       }
 
-      // تحديث حالة المستخدم
       await updateDoc(doc(db, collectionName, id), updateData); 
-
-      // 3️⃣ إرسال إشعار فوري للمستخدم (سواء كابتن أو راكب)
       await addDoc(collection(db, 'notifications'), {
-        userId: id,
-        userType: type,
-        title: 'مبروك! تمت الموافقة ✅',
-        message: notificationMessage,
-        read: false,
-        timestamp: new Date().getTime()
+        userId: id, userType: type, title: 'مبروك! تمت الموافقة ✅', message: notificationMessage, read: false, timestamp: new Date().getTime()
       });
 
       fetchDashboardData(); 
@@ -315,66 +310,27 @@ setSupportTickets(tickets);
   const handleApproveUpdate = async (req: any) => {
     try {
       if (req.userType === 'passenger') {
-        // 💡 تحديث بيانات الراكب (رقم الهاتف)
-        await updateDoc(doc(db, 'passengers', req.passengerId), {
-          phone: req.newData.phone
-        });
+        await updateDoc(doc(db, 'passengers', req.passengerId), { phone: req.newData.phone });
         await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
-        await addDoc(collection(db, 'notifications'), {
-          userId: req.passengerId,
-          userType: 'passenger',
-          title: 'تم تحديث الرقم ✅',
-          message: 'تمت الموافقة على طلب تغيير رقم الهاتف الخاص بك بنجاح.',
-          timestamp: serverTimestamp(),
-          read: false,
-          sender: 'الإدارة'
-        });
+        await addDoc(collection(db, 'notifications'), { userId: req.passengerId, userType: 'passenger', title: 'تم تحديث الرقم ✅', message: 'تمت الموافقة على طلب تغيير رقم الهاتف الخاص بك بنجاح.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
         Alert.alert('نجاح', 'تم تحديث رقم الراكب بنجاح.');
       } else {
-        // 💡 تحديث بيانات الكابتن القديمة
-        await updateDoc(doc(db, 'captains', req.captainId), {
-          name: req.newData.name,
-          vehicle: req.newData.vehicle,
-          vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt',
-          vehicleDetails: req.newData.vehicleDetails || null,
-          avatar: req.newData.avatar,
-          profileImage: req.newData.avatar
-        });
+        await updateDoc(doc(db, 'captains', req.captainId), { name: req.newData.name, vehicle: req.newData.vehicle, vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt', vehicleDetails: req.newData.vehicleDetails || null, avatar: req.newData.avatar, profileImage: req.newData.avatar });
         await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
-        await addDoc(collection(db, 'notifications'), {
-          userId: req.captainId,
-          userType: 'captain',
-          title: 'تحديث البيانات',
-          message: 'تمت الموافقة على طلب تعديل بياناتك بنجاح.',
-          timestamp: serverTimestamp(),
-          read: false,
-          sender: 'الإدارة'
-        });
+        await addDoc(collection(db, 'notifications'), { userId: req.captainId, userType: 'captain', title: 'تحديث البيانات', message: 'تمت الموافقة على طلب تعديل بياناتك بنجاح.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
         Alert.alert('نجاح', 'تم تحديث بيانات الكابتن بنجاح.');
       }
       fetchDashboardData();
-    } catch (e) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الموافقة على الطلب.');
-    }
+    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الموافقة على الطلب.'); }
   };
 
   const handleRejectUpdate = async (req: any) => {
     try {
       await updateDoc(doc(db, 'update_requests', req.id), { status: 'rejected' });
-      await addDoc(collection(db, 'notifications'), {
-        userId: req.passengerId || req.captainId,
-        userType: req.userType || 'captain',
-        title: 'رفض التعديل ❌',
-        message: 'تم رفض طلب التعديل الخاص بك من قبل الإدارة.',
-        timestamp: serverTimestamp(),
-        read: false,
-        sender: 'الإدارة'
-      });
+      await addDoc(collection(db, 'notifications'), { userId: req.passengerId || req.captainId, userType: req.userType || 'captain', title: 'رفض التعديل ❌', message: 'تم رفض طلب التعديل الخاص بك من قبل الإدارة.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
       fetchDashboardData();
       Alert.alert('تم', 'تم رفض طلب التعديل.');
-    } catch (e) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.');
-    }
+    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.'); }
   };
   
   const toggleBanUser = async (user: any, type: 'captain' | 'passenger') => {
@@ -395,42 +351,33 @@ setSupportTickets(tickets);
 
   const removeTemporaryBan = async () => {
     try {
-      await updateDoc(doc(db, 'captains', selectedUser.id), {
-        bannedUntil: null,
-        cancelStrikes: 0
-      });
+      await updateDoc(doc(db, 'captains', selectedUser.id), { bannedUntil: null, cancelStrikes: 0 });
       Alert.alert('تم ✅', 'تم فك الحظر المؤقت وتصفير عداد المخالفات للكابتن.');
       setSelectedUser({ ...selectedUser, bannedUntil: null, cancelStrikes: 0 });
       fetchDashboardData();
-    } catch (e) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء فك الحظر المؤقت.');
-    }
+    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء فك الحظر المؤقت.'); }
   };
 
   const deleteUserAccount = async (userId: string, type: 'captain' | 'passenger') => {
-    Alert.alert(
-      'مسح بيانات الحساب ⚠️',
-      'سيتم مسح بيانات هذا الحساب تماماً من قاعدة البيانات. هل أنت متأكد؟',
-      [{ text: 'إلغاء', style: 'cancel' },
-       { text: 'نعم، امسح البيانات', style: 'destructive', onPress: async () => {
-            const collectionName = type === 'captain' ? 'captains' : 'passengers';
-            try {
-              await deleteDoc(doc(db, collectionName, userId));
-              fetchDashboardData();
-              Alert.alert('تم الحذف 🗑️', 'تم مسح الحساب وبياناته بنجاح.');
-              if (selectedUser?.id === userId) { setProfileModalVisible(false); setSelectedUser(null); }
-            } catch (error) { Alert.alert('خطأ', 'فشلت عملية الحذف.'); }
-          }
-       }]
+    Alert.alert('مسح بيانات الحساب ⚠️', 'سيتم مسح بيانات هذا الحساب تماماً من قاعدة البيانات. هل أنت متأكد؟',
+      [{ text: 'إلغاء', style: 'cancel' }, { text: 'نعم، امسح البيانات', style: 'destructive', onPress: async () => {
+        const collectionName = type === 'captain' ? 'captains' : 'passengers';
+        try {
+          await deleteDoc(doc(db, collectionName, userId));
+          fetchDashboardData();
+          Alert.alert('تم الحذف 🗑️', 'تم مسح الحساب وبياناته بنجاح.');
+          if (selectedUser?.id === userId) { setProfileModalVisible(false); setSelectedUser(null); }
+        } catch (error) { Alert.alert('خطأ', 'فشلت عملية الحذف.'); }
+      }}]
     );
   };
 
   const openUserProfile = async (user: any, type: 'captain' | 'passenger') => {
     setSelectedUser(user); setSelectedUserType(type); setProfileModalVisible(true); setLoadingProfile(true);
     try {
-        const fieldName = type === 'captain' ? 'captainId' : 'passengerId';
-        const targetType = type === 'captain' ? 'passenger_rating_captain' : 'captain_rating_passenger';
-        const q = query(collection(db, 'ratings'), where(fieldName, '==', user.id), where('type', '==', targetType));
+      const fieldName = type === 'captain' ? 'captainId' : 'passengerId';
+      const targetType = type === 'captain' ? 'passenger_rating_captain' : 'captain_rating_passenger';
+      const q = query(collection(db, 'ratings'), where(fieldName, '==', user.id), where('type', '==', targetType));
       const snap = await getDocs(q);
       const fetchedRatings = snap.docs.map(d => d.data());
       fetchedRatings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -462,20 +409,11 @@ setSupportTickets(tickets);
     setSendingProfileMsg(true);
     try {
       await addDoc(collection(db, 'notifications'), {
-        userId: selectedUser.id,
-        userType: selectedUserType,
-        title: profileMsgTitle.trim(),
-        message: profileMsgText.trim(),
-        timestamp: serverTimestamp(),
-        read: false,
-        sender: 'الإدارة'
+        userId: selectedUser.id, userType: selectedUserType, title: profileMsgTitle.trim(), message: profileMsgText.trim(), timestamp: serverTimestamp(), read: false, sender: 'الإدارة'
       });
       Alert.alert('نجاح 📩', 'تم إرسال الإشعار فوراً للمستخدم.');
-      setProfileMsgModalVisible(false);
-      setProfileMsgTitle('');
-      setProfileMsgText('');
+      setProfileMsgModalVisible(false); setProfileMsgTitle(''); setProfileMsgText('');
     } catch (error) { Alert.alert('خطأ', 'تعذر إرسال الإشعار.'); } finally { setSendingProfileMsg(false); }
-    
   };
 
   const getAverageRating = () => {
@@ -487,298 +425,305 @@ setSupportTickets(tickets);
   
   return (
     <View style={styles.container}>
+      {/* 🚀 الهيدر */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.logoutBtn} onPress={() => router.replace('/captain-login')}><Text style={styles.logoutBtnText}>خروج</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>لوحة التحكم 👑</Text>
       </View>
 
-      {/* زرار تبويب الأمان والطوارئ للأدمن */}
-      <TouchableOpacity 
-        style={[styles.sidebarLink, { backgroundColor: sosCount > 0 ? '#fee2e2' : '#1e293b', marginBottom: 15, borderRadius: 12, borderWidth: 1, borderColor: sosCount > 0 ? '#ef4444' : '#334155' }]} 
-        onPress={() => router.push('/admin-safety')}
-      >
-        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-          <Text style={[styles.sidebarLinkText, sosCount > 0 && { color: '#ef4444', fontWeight: 'bold' }]}>
-            الأمان والطوارئ (SOS)
-          </Text>
+      {/* 🚀 قسم الوصول السريع (كروت بتتسحب بالعرض لتوفير المساحة) */}
+      <View style={{ marginBottom: 15 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 5, flexDirection: 'row-reverse' }}>
           
-          {sosCount > 0 && (
-            <View style={{ backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 }}>
-              <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 'bold' }}>{sosCount}</Text>
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
+          <TouchableOpacity style={[styles.quickCard, { borderColor: sosCount > 0 ? '#ef4444' : '#334155', backgroundColor: sosCount > 0 ? '#450a0a' : '#1e293b' }]} onPress={() => router.push('/admin-safety')}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>🚨</Text>
+            <Text style={[styles.quickCardText, sosCount > 0 && { color: '#fca5a5' }]}>طوارئ SOS</Text>
+            {sosCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{sosCount}</Text></View>}
+          </TouchableOpacity>
 
-      <TouchableOpacity style={styles.fullWidthHistoryBtn} onPress={() => router.push('/admin-rides')}>
-        <Text style={styles.fullWidthHistoryBtnText}>سجل الرحلات 📊</Text>
-      </TouchableOpacity>
+          <TouchableOpacity style={styles.quickCard} onPress={() => setIsSupportModalVisible(true)}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>🎧</Text>
+            <Text style={styles.quickCardText}>الدعم المباشر</Text>
+            {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0) > 0 && (
+              <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0)}</Text></View>
+            )}
+          </TouchableOpacity>
 
-      <View style={styles.tabsRow}>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
-          <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>تسجيل</Text>
-          {totalPending > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{totalPending}</Text></View>}
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'updates' && styles.tabBtnActive]} onPress={() => setActiveTab('updates')}>
-          <Text style={[styles.tabBtnText, activeTab === 'updates' && styles.tabBtnTextActive]}>تعديلات</Text>
-          {updateRequests.length > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{updateRequests.length}</Text></View>}
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'captains' && styles.tabBtnActive]} onPress={() => setActiveTab('captains')}><Text style={[styles.tabBtnText, activeTab === 'captains' && styles.tabBtnTextActive]}>كباتن</Text></TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'passengers' && styles.tabBtnActive]} onPress={() => setActiveTab('passengers')}><Text style={[styles.tabBtnText, activeTab === 'passengers' && styles.tabBtnTextActive]}>ركاب</Text></TouchableOpacity>
-        
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'vehicles' && styles.tabBtnActive]} onPress={() => { setActiveTab('vehicles'); setSelectedVehicleCategory(null); }}>
-          <Text style={[styles.tabBtnText, activeTab === 'vehicles' && styles.tabBtnTextActive]}>مركبات</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-complaints')}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>📬</Text>
+            <Text style={styles.quickCardText}>الشكاوى</Text>
+            {complaintsCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{complaintsCount}</Text></View>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-password-resets')}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>🔑</Text>
+            <Text style={styles.quickCardText}>استعادة المرور</Text>
+            {passwordResetCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{passwordResetCount}</Text></View>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.quickCard, { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' }]} onPress={() => setBroadcastModalVisible(true)}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>📢</Text>
+            <Text style={styles.quickCardText}>إرسال للجميع</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-settings')}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>⚙️</Text>
+            <Text style={styles.quickCardText}>الإعدادات والتسعير</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-rides')}>
+            <Text style={{ fontSize: 26, marginBottom: 5 }}>📊</Text>
+            <Text style={styles.quickCardText}>سجل الرحلات</Text>
+          </TouchableOpacity>
+
+        </ScrollView>
       </View>
 
-      {loading ? <View style={styles.centerContainer}><ActivityIndicator size="large" color="#eab308" /></View> : 
-      
-      activeTab === 'pending' ? (
-        <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-          {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
-            <>
-              {pendingCaptains.map(item => (
-                <View key={item.id} style={styles.userCard}>
-                  <View style={styles.cardHeader}>
-                    <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
-                    <View style={styles.cardInfo}>
-                      <Text style={styles.userTypeBadgeCard}>👨‍✈️ طلب كابتن جديد</Text>
-                      <Text style={styles.cardName}>{item.name}</Text>
-                      <Text style={styles.cardDetail}>📞 {item.phone}</Text>
-                      <Text style={styles.cardDetail}>🛺 {item.vehicle}</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs(item)}><Text style={styles.inspectDocsBtnText}>🔍 معاينة المستندات</Text></TouchableOpacity>
-                  <View style={styles.actionRow}>
-                    <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectRegistration(item.id, 'captain')}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
-                    <TouchableOpacity style={styles.approveBtn} onPress={() => approveRegistration(item.id, 'captain')}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
-                  </View>
-                </View>
-              ))}
+      {/* 📑 شريط التبويبات (ثابت بحجم مظبوط) */}
+      <View style={styles.tabsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 5, flexGrow: 1, justifyContent: 'space-evenly' }}>
+          
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
+            <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>التسجيلات</Text>
+            {totalPending > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{totalPending}</Text></View>}
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'updates' && styles.tabBtnActive]} onPress={() => setActiveTab('updates')}>
+            <Text style={[styles.tabBtnText, activeTab === 'updates' && styles.tabBtnTextActive]}>التعديلات</Text>
+            {updateRequests.length > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{updateRequests.length}</Text></View>}
+          </TouchableOpacity>
 
-              {pendingPassengers.map(item => (
-                <View key={item.id} style={styles.userCard}>
-                  <View style={styles.cardHeader}>
-                    <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
-                    <View style={styles.cardInfo}>
-                      <Text style={[styles.userTypeBadgeCard, {color: '#38bdf8'}]}>👤 طلب راكب جديد</Text>
-                      <Text style={styles.cardName}>{item.name}</Text>
-                      <Text style={styles.cardDetail}>📞 {item.phone}</Text>
-                      <Text style={styles.cardDetail}>🪪 {item.nationalId || 'لم يحدد'}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.actionRow}>
-                    <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectRegistration(item.id, 'passenger')}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
-                    <TouchableOpacity style={styles.approveBtn} onPress={() => approveRegistration(item.id, 'passenger')}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </>
-          )}
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'captains' && styles.tabBtnActive]} onPress={() => setActiveTab('captains')}>
+            <Text style={[styles.tabBtnText, activeTab === 'captains' && styles.tabBtnTextActive]}>الكباتن</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'passengers' && styles.tabBtnActive]} onPress={() => setActiveTab('passengers')}>
+            <Text style={[styles.tabBtnText, activeTab === 'passengers' && styles.tabBtnTextActive]}>الركاب</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'vehicles' && styles.tabBtnActive]} onPress={() => { setActiveTab('vehicles'); setSelectedVehicleCategory(null); }}>
+            <Text style={[styles.tabBtnText, activeTab === 'vehicles' && styles.tabBtnTextActive]}>المركبات</Text>
+          </TouchableOpacity>
+
         </ScrollView>
-     ) : activeTab === 'updates' ? (
-        <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-          {updateRequests.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات تعديل ✨</Text></View> : (
-            updateRequests.map(req => (
-              <View key={req.id} style={styles.userCard}>
-                
-                {/* 💡 التفرقة بين طلب الراكب وطلب الكابتن */}
-                {req.userType === 'passenger' ? (
-                  <>
-                    <Text style={[styles.updateRequestHeader, {color: '#38bdf8'}]}>طلب تعديل هاتف (راكب 👤)</Text>
-                    <Text style={styles.updateRequestPhone}>الاسم: {req.passengerName}</Text>
-                    
-                    <View style={styles.updateComparisonBox}>
-                      <View style={styles.updateCol}>
-                        <Text style={styles.updateColTitleNew}>الرقم الجديد</Text>
-                        <Text style={[styles.updateText, {fontSize: 18, fontWeight: 'bold', color: '#10b981'}]}>{req.newData.phone}</Text>
-                      </View>
-                      <View style={styles.updateDivider} />
-                      <View style={styles.updateCol}>
-                        <Text style={styles.updateColTitleOld}>الرقم القديم</Text>
-                        <Text style={[styles.updateText, {fontSize: 16}]}>{req.oldData.phone}</Text>
-                      </View>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.updateRequestHeader}>طلب تعديل بيانات (كابتن 🛺)</Text>
-                    <Text style={styles.updateRequestPhone}>رقم الكابتن: {req.captainPhone}</Text>
-                    
-                    <View style={styles.updateComparisonBox}>
-                      <View style={styles.updateCol}>
-                        <Text style={styles.updateColTitleNew}>البيانات الجديدة</Text>
-                        <Image source={{ uri: req.newData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
-                        <Text style={styles.updateText}>{req.newData.name}</Text>
-                        <Text style={styles.updateText}>{req.newData.vehicle}</Text>
-                      </View>
-                      <View style={styles.updateDivider} />
-                      <View style={styles.updateCol}>
-                        <Text style={styles.updateColTitleOld}>البيانات القديمة</Text>
-                        <Image source={{ uri: req.oldData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
-                        <Text style={styles.updateText}>{req.oldData.name}</Text>
-                        <Text style={styles.updateText}>{req.oldData.vehicle}</Text>
-                      </View>
-                    </View>
+      </View>
 
-                    {req.newData.vehicleCategory && req.newData.vehicleCategory !== 'car' && (
-                       <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs({ vehicleImage: req.newData.vehicleDetails?.image })}>
-                         <Text style={styles.inspectDocsBtnText}>🔍 معاينة صورة المركبة الجديدة</Text>
-                       </TouchableOpacity>
-                    )}
-                  </>
-                )}
-
-                <View style={styles.actionRow}>
-                  <TouchableOpacity style={styles.rejectBtn} onPress={() => handleRejectUpdate(req)}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
-                  <TouchableOpacity style={styles.approveBtn} onPress={() => handleApproveUpdate(req)}><Text style={styles.approveBtnText}>موافقة وتحديث ✔️</Text></TouchableOpacity>
-                </View>
-              </View>
-            ))
-          )}
-        </ScrollView>
-              ) : activeTab === 'captains' ? (
-        <View style={{ flex: 1 }}>
-          <TextInput style={styles.searchInput} placeholder="بحث عن كابتن (اسم، رقم، توكتوك)..." placeholderTextColor="#64748b" value={searchCaptain} onChangeText={setSearchCaptain} textAlign="right" />
+      {/* 📋 منطقة المحتوى (واخدة المساحة كلها flex: 1) */}
+      <View style={{ flex: 1 }}>
+        {loading ? <View style={styles.centerContainer}><ActivityIndicator size="large" color="#eab308" /></View> : 
+        
+        activeTab === 'pending' ? (
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-            {activeCaptainsFiltered.map(item => (
-              <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'captain')}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.balanceBadge}><Text style={styles.balanceLabelText}>الرصيد</Text><Text style={[styles.balanceNum, { color: (item.walletBalance || 0) < 0 ? '#ef4444' : '#10b981' }]}>{item.walletBalance ? item.walletBalance.toFixed(2) : '0'} ج</Text></View>
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardName}>{item.name}</Text>
-                    <Text style={styles.cardDetail}>📞 {item.phone}</Text>
-                    {/* إضافة نوع المركبة والرقم الكودي من الذاكرة مباشرة */}
-                    <Text style={styles.cardDetail}>
-                      {item.vehicleCategory === 'car' || item.vehicle?.includes('سيارة') ? '🚗 سيارة' : item.vehicleCategory === 'scooter' || item.vehicle?.includes('سكوتر') ? '🛵 سكوتر' : `🛺 ${item.vehicle || 'بديل توكتوك'}`}
-                      {item.vehicleSequenceNumber ? ` | (رقم بُرَاق: ${item.vehicleSequenceNumber})` : ''}
-                    </Text>
-                    <Text style={[styles.statusText, item.status === 'banned' && { color: '#ef4444' }]}>{item.status === 'banned' ? '🚫 رقم محظور' : '🟢 نشط'}</Text>
+            {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
+              <>
+                {pendingCaptains.map(item => (
+                  <View key={item.id} style={styles.userCard}>
+                    <View style={styles.cardHeader}>
+                      <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
+                      <View style={styles.cardInfo}>
+                        <Text style={styles.userTypeBadgeCard}>👨‍✈️ طلب كابتن جديد</Text>
+                        <Text style={styles.cardName}>{item.name}</Text>
+                        <Text style={styles.cardDetail}>📞 {item.phone}</Text>
+                        <Text style={styles.cardDetail}>🛺 {item.vehicle}</Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs(item)}><Text style={styles.inspectDocsBtnText}>🔍 معاينة المستندات</Text></TouchableOpacity>
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectRegistration(item.id, 'captain')}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
+                      <TouchableOpacity style={styles.approveBtn} onPress={() => approveRegistration(item.id, 'captain')}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
+                    </View>
                   </View>
-                  <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImgMini} />
-                </View>
-              </TouchableOpacity>
-            ))}
+                ))}
+
+                {pendingPassengers.map(item => (
+                  <View key={item.id} style={styles.userCard}>
+                    <View style={styles.cardHeader}>
+                      <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
+                      <View style={styles.cardInfo}>
+                        <Text style={[styles.userTypeBadgeCard, {color: '#38bdf8'}]}>👤 طلب راكب جديد</Text>
+                        <Text style={styles.cardName}>{item.name}</Text>
+                        <Text style={styles.cardDetail}>📞 {item.phone}</Text>
+                        <Text style={styles.cardDetail}>🪪 {item.nationalId || 'لم يحدد'}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectRegistration(item.id, 'passenger')}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
+                      <TouchableOpacity style={styles.approveBtn} onPress={() => approveRegistration(item.id, 'passenger')}><Text style={styles.approveBtnText}>موافقة وتفعيل ✔️</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
           </ScrollView>
-        </View>
-              ) : activeTab === 'passengers' ? (
-        <View style={{ flex: 1 }}>
-          <TextInput style={styles.searchInput} placeholder="بحث عن راكب (اسم أو رقم)..." placeholderTextColor="#64748b" value={searchPassenger} onChangeText={setSearchPassenger} textAlign="right" />
+        ) : activeTab === 'updates' ? (
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-            {activePassengersFiltered.map(item => (
-              <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'passenger')}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.balanceBadge}><Text style={styles.balanceLabelText}>المحفظة</Text><Text style={[styles.balanceNum, { color: '#10b981' }]}>{item.walletBalance ? item.walletBalance.toFixed(2) : '0'} ج</Text></View>
-                  <View style={styles.cardInfo}><Text style={styles.cardName}>{item.name}</Text><Text style={styles.cardDetail}>📞 {item.phone}</Text><Text style={[styles.statusText, item.status === 'banned' && { color: '#ef4444' }]}>{item.status === 'banned' ? '🚫 رقم محظور' : '🟢 نشط'}</Text></View>
-                  <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImgMini} />
+            {updateRequests.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات تعديل ✨</Text></View> : (
+              updateRequests.map(req => (
+                <View key={req.id} style={styles.userCard}>
+                  
+                  {req.userType === 'passenger' ? (
+                    <>
+                      <Text style={[styles.updateRequestHeader, {color: '#38bdf8'}]}>طلب تعديل هاتف (راكب 👤)</Text>
+                      <Text style={styles.updateRequestPhone}>الاسم: {req.passengerName}</Text>
+                      
+                      <View style={styles.updateComparisonBox}>
+                        <View style={styles.updateCol}>
+                          <Text style={styles.updateColTitleNew}>الرقم الجديد</Text>
+                          <Text style={[styles.updateText, {fontSize: 18, fontWeight: 'bold', color: '#10b981'}]}>{req.newData.phone}</Text>
+                        </View>
+                        <View style={styles.updateDivider} />
+                        <View style={styles.updateCol}>
+                          <Text style={styles.updateColTitleOld}>الرقم القديم</Text>
+                          <Text style={[styles.updateText, {fontSize: 16}]}>{req.oldData.phone}</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.updateRequestHeader}>طلب تعديل بيانات (كابتن 🛺)</Text>
+                      <Text style={styles.updateRequestPhone}>رقم الكابتن: {req.captainPhone}</Text>
+                      
+                      <View style={styles.updateComparisonBox}>
+                        <View style={styles.updateCol}>
+                          <Text style={styles.updateColTitleNew}>البيانات الجديدة</Text>
+                          <Image source={{ uri: req.newData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
+                          <Text style={styles.updateText}>{req.newData.name}</Text>
+                          <Text style={styles.updateText}>{req.newData.vehicle}</Text>
+                        </View>
+                        <View style={styles.updateDivider} />
+                        <View style={styles.updateCol}>
+                          <Text style={styles.updateColTitleOld}>البيانات القديمة</Text>
+                          <Image source={{ uri: req.oldData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
+                          <Text style={styles.updateText}>{req.oldData.name}</Text>
+                          <Text style={styles.updateText}>{req.oldData.vehicle}</Text>
+                        </View>
+                      </View>
+
+                      {req.newData.vehicleCategory && req.newData.vehicleCategory !== 'car' && (
+                         <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs({ vehicleImage: req.newData.vehicleDetails?.image })}>
+                           <Text style={styles.inspectDocsBtnText}>🔍 معاينة صورة المركبة الجديدة</Text>
+                         </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity style={styles.rejectBtn} onPress={() => handleRejectUpdate(req)}><Text style={styles.rejectBtnText}>رفض ❌</Text></TouchableOpacity>
+                    <TouchableOpacity style={styles.approveBtn} onPress={() => handleApproveUpdate(req)}><Text style={styles.approveBtnText}>موافقة وتحديث ✔️</Text></TouchableOpacity>
+                  </View>
                 </View>
-              </TouchableOpacity>
-            ))}
+              ))
+            )}
           </ScrollView>
-        </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          {!selectedVehicleCategory ? (
+        ) : activeTab === 'captains' ? (
+          <View style={{ flex: 1 }}>
+            <TextInput style={styles.searchInput} placeholder="بحث عن كابتن (اسم، رقم، توكتوك)..." placeholderTextColor="#64748b" value={searchCaptain} onChangeText={setSearchCaptain} textAlign="right" />
             <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-              <Text style={styles.vehiclesSectionTitle}>أسطول الكباتن حسب المركبة 🚖</Text>
-              <Text style={styles.vehiclesSectionHint}>اختر تصنيف لعرض الكباتن التابعين له</Text>
-
-              <View style={styles.vehiclesGrid}>
-                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#3b82f6' }]} onPress={() => setSelectedVehicleCategory('سيارات')}>
-                  <Text style={styles.vehicleCatIcon}>🚗</Text>
-                  <Text style={styles.vehicleCatTitle}>سيارات</Text>
-                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#3b82f6' }]}>{carCaptains.length} كابتن</Text></View>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#10b981' }]} onPress={() => setSelectedVehicleCategory('كيوت 3 راكب')}>
-                  <Text style={styles.vehicleCatIcon}>🛺</Text>
-                  <Text style={styles.vehicleCatTitle}>كيوت 3 راكب</Text>
-                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#10b981' }]}>{cuteCaptains.length} كابتن</Text></View>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#f59e0b' }]} onPress={() => setSelectedVehicleCategory('جالاكسي 7 راكب')}>
-                  <Text style={styles.vehicleCatIcon}>🛺</Text>
-                  <Text style={styles.vehicleCatTitle}>جالاكسي 7 راكب</Text>
-                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#f59e0b' }]}>{galaxyCaptains.length} كابتن</Text></View>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#8b5cf6' }]} onPress={() => setSelectedVehicleCategory('سكوتر')}>
-                  <Text style={styles.vehicleCatIcon}>🛵</Text>
-                  <Text style={styles.vehicleCatTitle}>سكوتر</Text>
-                  <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#8b5cf6' }]}>{scooterCaptains.length} كابتن</Text></View>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <View style={styles.vehicleListHeader}>
-                <TouchableOpacity onPress={() => setSelectedVehicleCategory(null)} style={styles.backBtnCategory}>
-                  <Text style={styles.backBtnCategoryText}>رجوع ✖</Text>
-                </TouchableOpacity>
-                <View>
-                   <Text style={styles.vehicleListTitle}>كباتن ({selectedVehicleCategory})</Text>
-                   <Text style={styles.vehicleListSub}>العدد الإجمالي: {getSelectedCaptainsList().length}</Text>
-                </View>
-              </View>
-
-              <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
-                {getSelectedCaptainsList().length === 0 ? (
-                  <Text style={styles.emptyText}>لا يوجد كباتن مسجلين بهذه المركبة حالياً.</Text>
-                ) : (
-                  getSelectedCaptainsList().map((cap, idx) => (
-                    <View key={idx} style={styles.capListCard}>
-                      <TouchableOpacity style={styles.capListProfileBtn} onPress={() => openUserProfile(cap, 'captain')}>
-                        <Text style={styles.capListProfileBtnText}>عرض الملف 👤</Text>
-                      </TouchableOpacity>
-                      <View style={styles.capListInfo}>
-                        <Text style={styles.capListName}>{cap.name}</Text>
-                        <Text style={styles.capListPhone}>📞 {cap.phone}</Text>
-                      </View>
+              {activeCaptainsFiltered.map(item => (
+                <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'captain')}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.balanceBadge}><Text style={styles.balanceLabelText}>الرصيد</Text><Text style={[styles.balanceNum, { color: (item.walletBalance || 0) < 0 ? '#ef4444' : '#10b981' }]}>{item.walletBalance ? item.walletBalance.toFixed(2) : '0'} ج</Text></View>
+                    <View style={styles.cardInfo}>
+                      <Text style={styles.cardName}>{item.name}</Text>
+                      <Text style={styles.cardDetail}>📞 {item.phone}</Text>
+                      <Text style={styles.cardDetail}>
+                        {item.vehicleCategory === 'car' || item.vehicle?.includes('سيارة') ? '🚗 سيارة' : item.vehicleCategory === 'scooter' || item.vehicle?.includes('سكوتر') ? '🛵 سكوتر' : `🛺 ${item.vehicle || 'بديل توكتوك'}`}
+                        {item.vehicleSequenceNumber ? ` | (رقم بُرَاق: ${item.vehicleSequenceNumber})` : ''}
+                      </Text>
+                      <Text style={[styles.statusText, item.status === 'banned' && { color: '#ef4444' }]}>{item.status === 'banned' ? '🚫 رقم محظور' : '🟢 نشط'}</Text>
                     </View>
-                  ))
-                )}
+                    <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImgMini} />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : activeTab === 'passengers' ? (
+          <View style={{ flex: 1 }}>
+            <TextInput style={styles.searchInput} placeholder="بحث عن راكب (اسم أو رقم)..." placeholderTextColor="#64748b" value={searchPassenger} onChangeText={setSearchPassenger} textAlign="right" />
+            <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
+              {activePassengersFiltered.map(item => (
+                <TouchableOpacity key={item.id} style={styles.userCard} onPress={() => openUserProfile(item, 'passenger')}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.balanceBadge}><Text style={styles.balanceLabelText}>المحفظة</Text><Text style={[styles.balanceNum, { color: '#10b981' }]}>{item.walletBalance ? item.walletBalance.toFixed(2) : '0'} ج</Text></View>
+                    <View style={styles.cardInfo}><Text style={styles.cardName}>{item.name}</Text><Text style={styles.cardDetail}>📞 {item.phone}</Text><Text style={[styles.statusText, item.status === 'banned' && { color: '#ef4444' }]}>{item.status === 'banned' ? '🚫 رقم محظور' : '🟢 نشط'}</Text></View>
+                    <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImgMini} />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            {!selectedVehicleCategory ? (
+              <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
+                <Text style={styles.vehiclesSectionTitle}>أسطول الكباتن حسب المركبة 🚖</Text>
+                <Text style={styles.vehiclesSectionHint}>اختر تصنيف لعرض الكباتن التابعين له</Text>
+
+                <View style={styles.vehiclesGrid}>
+                  <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#3b82f6' }]} onPress={() => setSelectedVehicleCategory('سيارات')}>
+                    <Text style={styles.vehicleCatIcon}>🚗</Text>
+                    <Text style={styles.vehicleCatTitle}>سيارات</Text>
+                    <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#3b82f6' }]}>{carCaptains.length} كابتن</Text></View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#10b981' }]} onPress={() => setSelectedVehicleCategory('كيوت 3 راكب')}>
+                    <Text style={styles.vehicleCatIcon}>🛺</Text>
+                    <Text style={styles.vehicleCatTitle}>كيوت 3 راكب</Text>
+                    <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#10b981' }]}>{cuteCaptains.length} كابتن</Text></View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#f59e0b' }]} onPress={() => setSelectedVehicleCategory('جالاكسي 7 راكب')}>
+                    <Text style={styles.vehicleCatIcon}>🛺</Text>
+                    <Text style={styles.vehicleCatTitle}>جالاكسي 7 راكب</Text>
+                    <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#f59e0b' }]}>{galaxyCaptains.length} كابتن</Text></View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.vehicleCatBox, { borderColor: '#8b5cf6' }]} onPress={() => setSelectedVehicleCategory('سكوتر')}>
+                    <Text style={styles.vehicleCatIcon}>🛵</Text>
+                    <Text style={styles.vehicleCatTitle}>سكوتر</Text>
+                    <View style={styles.vehicleCatBadge}><Text style={[styles.vehicleCatCount, { color: '#8b5cf6' }]}>{scooterCaptains.length} كابتن</Text></View>
+                  </TouchableOpacity>
+                </View>
               </ScrollView>
-            </View>
-          )}
-        </View>
-      )}
+            ) : (
+              <View style={{ flex: 1 }}>
+                <View style={styles.vehicleListHeader}>
+                  <TouchableOpacity onPress={() => setSelectedVehicleCategory(null)} style={styles.backBtnCategory}>
+                    <Text style={styles.backBtnCategoryText}>رجوع ✖</Text>
+                  </TouchableOpacity>
+                  <View>
+                     <Text style={styles.vehicleListTitle}>كباتن ({selectedVehicleCategory})</Text>
+                     <Text style={styles.vehicleListSub}>العدد الإجمالي: {getSelectedCaptainsList().length}</Text>
+                  </View>
+                </View>
 
-      {/* 👈 زر صندوق الدعم الفني المباشر */}
-      <TouchableOpacity 
-        style={styles.fullWidthSupportBtn} 
-        onPress={() => setIsSupportModalVisible(true)}
-      >
-        <Text style={styles.fullWidthSupportBtnText}>🎧 صندوق الدعم الفني المباشر</Text>
-        {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0) > 0 && (
-          <View style={styles.supportBadge}>
-            <Text style={styles.supportBadgeText}>
-              {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0)}
-            </Text>
+                <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
+                  {getSelectedCaptainsList().length === 0 ? (
+                    <Text style={styles.emptyText}>لا يوجد كباتن مسجلين بهذه المركبة حالياً.</Text>
+                  ) : (
+                    getSelectedCaptainsList().map((cap, idx) => (
+                      <View key={idx} style={styles.capListCard}>
+                        <TouchableOpacity style={styles.capListProfileBtn} onPress={() => openUserProfile(cap, 'captain')}>
+                          <Text style={styles.capListProfileBtnText}>عرض الملف 👤</Text>
+                        </TouchableOpacity>
+                        <View style={styles.capListInfo}>
+                          <Text style={styles.capListName}>{cap.name}</Text>
+                          <Text style={styles.capListPhone}>📞 {cap.phone}</Text>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            )}
           </View>
         )}
-      </TouchableOpacity>
+      </View>
 
-      <TouchableOpacity style={styles.fullWidthComplaintsBtn} onPress={() => router.push('/admin-complaints')}>
-        <Text style={styles.fullWidthComplaintsBtnText}>الشكاوى والمقترحات والمفقودات 📬</Text>
-        {complaintsCount > 0 && (
-          <View style={styles.complaintBadge}>
-            <Text style={styles.complaintBadgeText}>{complaintsCount}</Text>
-          </View>
-        )}
-        </TouchableOpacity>
-      {/* 🔑 زرار طلبات استعادة كلمة المرور الجديد */}
-      <TouchableOpacity 
-        style={[styles.fullWidthComplaintsBtn, { backgroundColor: '#d97706', marginTop: 15 }]} 
-        onPress={() => router.push('/admin-password-resets')}
-      >
-        <Text style={styles.fullWidthComplaintsBtnText}>طلبات استعادة كلمة المرور 🔑</Text>
-        {passwordResetCount > 0 && (
-          <View style={styles.complaintBadge}>
-            <Text style={styles.complaintBadgeText}>{passwordResetCount}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-      {/* مودال صندوق الدعم الفني (الشات المباشر) */}
+      {/* 🚀 المودالز والشاشات المنبثقة 🚀 */}
+      
+      {/* 1. الدعم الفني */}
       <Modal visible={isSupportModalVisible} animationType="slide" onRequestClose={() => setIsSupportModalVisible(false)}>
         <View style={{ flex: 1, backgroundColor: '#0f172a' }}>
           
@@ -849,7 +794,7 @@ setSupportTickets(tickets);
         </View>
       </Modal>
 
-      {/* مودال الملف الشخصي */}
+      {/* 2. الملف الشخصي */}
       <Modal visible={profileModalVisible} transparent={true} animationType="slide">
         <View style={styles.fullScreenModal}>
           <View style={styles.profileModalHeader}>
@@ -868,7 +813,6 @@ setSupportTickets(tickets);
                 </View>
               <Text style={styles.profileBigName}>{selectedUser.name}</Text>
                 <Text style={styles.profileBigPhone}>📞 {selectedUser.phone}</Text>
-                {/* عرض الرقم القومي */}
                 <Text style={styles.profileBigPhone}>🪪 الرقم القومي: {selectedUser.nationalId || 'غير مسجل'}</Text>
                 
                 {selectedUserType === 'captain' && (
@@ -882,7 +826,6 @@ setSupportTickets(tickets);
                        selectedUser.vehicle ? `🛺 ${selectedUser.vehicle}` : 
                        '⚠️ نوع المركبة غير مسجل بالدقة المطلوبة'}
                     </Text>
-                    {/* عرض الرقم الكودي إن وجد في شكل بارز */}
                     {selectedUser.vehicleSequenceNumber && (
                       <View style={{ backgroundColor: '#eff6ff', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#bfdbfe' }}>
                         <Text style={{ color: '#1d4ed8', fontWeight: 'bold', fontSize: 14 }}>رقم بُرَاق الكودي: {selectedUser.vehicleSequenceNumber}</Text>
@@ -955,6 +898,7 @@ setSupportTickets(tickets);
         </View>
       </Modal>
 
+      {/* 3. رسالة لملف شخصي */}
       <Modal visible={profileMsgModalVisible} transparent={true} animationType="fade">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlayCentered}>
           <View style={styles.walletModalContent}>
@@ -969,6 +913,7 @@ setSupportTickets(tickets);
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* 4. تعديل المحفظة */}
       <Modal visible={walletModalVisible} transparent={true} animationType="fade">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlayCentered}>
           <View style={styles.walletModalContent}>
@@ -987,6 +932,7 @@ setSupportTickets(tickets);
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* 5. عرض المستندات */}
       <Modal visible={!!selectedDocs} transparent={true} animationType="fade">
         <View style={styles.overlayCentered}>
           <View style={styles.docsModalContent}>
@@ -1000,6 +946,37 @@ setSupportTickets(tickets);
         </View>
       </Modal>
 
+      {/* 6. 📢 الإشعارات الجماعية للجميع */}
+      <Modal visible={broadcastModalVisible} transparent={true} animationType="fade">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlayCentered}>
+          <View style={styles.walletModalContent}>
+            <Text style={[styles.modalTitleText, { color: '#38bdf8', fontSize: 18 }]}>📢 رسالة جماعية (للكل)</Text>
+            
+            <View style={styles.typeSelectorRow}>
+              <TouchableOpacity style={[styles.typeOption, broadcastTarget === 'all' && { backgroundColor: '#3b82f6', borderColor: '#3b82f6' }]} onPress={() => setBroadcastTarget('all')}>
+                <Text style={[styles.typeOptionText, broadcastTarget === 'all' && { color: '#fff' }]}>للجميع</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.typeOption, broadcastTarget === 'captains' && { backgroundColor: '#3b82f6', borderColor: '#3b82f6' }]} onPress={() => setBroadcastTarget('captains')}>
+                <Text style={[styles.typeOptionText, broadcastTarget === 'captains' && { color: '#fff' }]}>للكباتن فقط</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.typeOption, broadcastTarget === 'passengers' && { backgroundColor: '#3b82f6', borderColor: '#3b82f6' }]} onPress={() => setBroadcastTarget('passengers')}>
+                <Text style={[styles.typeOptionText, broadcastTarget === 'passengers' && { color: '#fff' }]}>للركاب فقط</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput style={styles.inputModal} placeholder="عنوان الإشعار (مثال: بونص جديد 🎁)" placeholderTextColor="#64748b" value={broadcastTitle} onChangeText={setBroadcastTitle} textAlign="right" />
+            <TextInput style={[styles.inputModal, { minHeight: 100, textAlignVertical: 'top' }]} placeholder="اكتب التفاصيل اللي هتوصل لكل الناس..." placeholderTextColor="#64748b" multiline value={broadcastMessage} onChangeText={setBroadcastMessage} textAlign="right" />
+            
+            <View style={styles.actionRowModal}>
+              <TouchableOpacity style={[styles.confirmModalBtn, { backgroundColor: '#2563eb' }]} onPress={sendBroadcastMessage} disabled={sendingBroadcast}>
+                {sendingBroadcast ? <ActivityIndicator color="#fff" /> : <Text style={[styles.confirmModalBtnText, { color: '#fff' }]}>إرسال الآن 🚀</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelModalBtn} onPress={() => setBroadcastModalVisible(false)}><Text style={styles.cancelModalBtnText}>إلغاء</Text></TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </View>
   );
 }
@@ -1011,27 +988,20 @@ const styles = StyleSheet.create({
   logoutBtn: { backgroundColor: '#334155', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
   logoutBtnText: { color: '#f8fafc', fontSize: 13, fontWeight: 'bold' },
   
-  fullWidthHistoryBtn: { backgroundColor: '#2563eb', paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20, elevation: 3 },
-  fullWidthHistoryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
+  // 🚀 تنسيقات كروت الوصول السريع
+  quickCard: { width: 100, height: 95, backgroundColor: '#1e293b', borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155', position: 'relative' },
+  quickCardText: { color: '#cbd5e1', fontSize: 12, fontWeight: 'bold', textAlign: 'center' },
+  quickBadge: { position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', minWidth: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 5 },
+  quickBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: 'bold' },
 
-  fullWidthSupportBtn: { position: 'relative', backgroundColor: '#8b5cf6', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, elevation: 3 },
-  fullWidthSupportBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
-  supportBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 10, elevation: 4 },
-  supportBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
-
-  fullWidthComplaintsBtn: { position: 'relative', backgroundColor: '#be123c', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 15, elevation: 3 },
-  fullWidthComplaintsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
-  
-  complaintBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', minWidth: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 10, elevation: 4 },
-  complaintBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
-
-  tabsRow: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 12, padding: 4, marginBottom: 15 },
-  tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, position: 'relative' },
+  // 📑 تنسيقات التبويبات
+  tabsContainer: { backgroundColor: '#1e293b', borderRadius: 12, height: 55, marginBottom: 15, borderWidth: 1, borderColor: '#334155', justifyContent: 'center' },
+  tabBtn: { height: 40, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center', borderRadius: 8, marginHorizontal: 4, backgroundColor: 'transparent' },
   tabBtnActive: { backgroundColor: '#eab308' },
-  tabBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
+  tabBtnText: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold' },
   tabBtnTextActive: { color: '#000000' },
-  badge: { position: 'absolute', top: -5, right: 2, backgroundColor: '#ef4444', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  tabBadge: { position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#1e293b' },
+  tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
 
   searchInput: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -1150,18 +1120,5 @@ const styles = StyleSheet.create({
   confirmModalBtn: { flex: 2, backgroundColor: '#eab308', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   confirmModalBtnText: { color: '#000', fontWeight: 'bold' },
   cancelModalBtn: { flex: 1, backgroundColor: '#334155', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  cancelModalBtnText: { color: '#fff', fontWeight: 'bold' },
-  
-  sidebarLink: {
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  sidebarLinkText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#f8fafc',
-    textAlign: 'right'
-  }
+  cancelModalBtnText: { color: '#fff', fontWeight: 'bold' }
 });
