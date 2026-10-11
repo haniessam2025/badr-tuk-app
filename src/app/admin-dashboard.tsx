@@ -1,7 +1,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { addDoc, collection, deleteDoc, doc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 
 export default function AdminDashboard() {
@@ -12,22 +12,15 @@ export default function AdminDashboard() {
     const q = query(collection(db, 'sos_alerts'), where('status', '==', 'active'));
     const unsubscribe = onSnapshot(q, (snapshot: any) => {
       setSosCount(snapshot.size);
-      
       let hasNewAlert = false;
       snapshot.docChanges().forEach((change: any) => {
-        if (change.type === 'added') {
-          hasNewAlert = true;
-        }
+        if (change.type === 'added') hasNewAlert = true;
       });
-
       if (hasNewAlert) {
         Alert.alert(
           "🚨 إنذار طوارئ (SOS) 🚨",
           "يوجد راكب في خطر يطلب التدخل الفوري!",
-          [
-            { text: "تجاهل", style: "cancel" },
-            { text: "عرض التفاصيل", onPress: () => router.push('/admin-safety') }
-          ]
+          [{ text: "تجاهل", style: "cancel" }, { text: "عرض التفاصيل", onPress: () => router.push('/admin-safety') }]
         );
       }
     });
@@ -45,7 +38,8 @@ export default function AdminDashboard() {
   
   const router = useRouter();
   
-  const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'vehicles'>('pending');
+  // 💡 التبويبات (بما فيها تبويب الإعدادات)
+  const [activeTab, setActiveTab] = useState<'pending' | 'updates' | 'captains' | 'passengers' | 'vehicles' | 'settings'>('pending');
   
   const [captains, setCaptains] = useState<any[]>([]);
   const [passengers, setPassengers] = useState<any[]>([]);
@@ -55,27 +49,22 @@ export default function AdminDashboard() {
 
   const [searchCaptain, setSearchCaptain] = useState('');
   const [searchPassenger, setSearchPassenger] = useState('');
-
   const [selectedVehicleCategory, setSelectedVehicleCategory] = useState<string | null>(null);
-
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [selectedUserType, setSelectedUserType] = useState<'captain' | 'passenger'>('captain');
   const [userRatings, setUserRatings] = useState<any[]>([]);
   const [loadingProfile, setLoadingProfile] = useState(false);
-
   const [selectedDocs, setSelectedDocs] = useState<any>(null);
   const [walletModalVisible, setWalletModalVisible] = useState(false);
   const [walletAmount, setWalletAmount] = useState('');
   const [walletReason, setWalletReason] = useState('');
   const [transactionType, setTransactionType] = useState<'deposit' | 'deduction'>('deposit');
   const [processingWallet, setProcessingWallet] = useState(false);
-
   const [profileMsgModalVisible, setProfileMsgModalVisible] = useState(false);
   const [profileMsgTitle, setProfileMsgTitle] = useState('');
   const [profileMsgText, setProfileMsgText] = useState('');
   const [sendingProfileMsg, setSendingProfileMsg] = useState(false);
-
   const [complaintsCount, setComplaintsCount] = useState(0);
   const [passwordResetCount, setPasswordResetCount] = useState(0);
 
@@ -86,7 +75,55 @@ export default function AdminDashboard() {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
-  // جلب التذاكر المفتوحة فقط
+  // ⚙️ إعدادات النظام المدمجة
+  const [appSettings, setAppSettings] = useState({
+    car: { baseFare: '15', perKm: '4.4', minFare: '20' },
+    tuktuk: { baseFare: '10', perKm: '6.5', minFare: '15' },
+    scooter: { baseFare: '12', perKm: '3.75', minFare: '12' },
+    appCommission: '10',
+    waitingTimeMins: '5',
+    maxNegativeBalance: '-50',
+    maintenanceMode: false,
+  });
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // جلب إعدادات التسعير
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setAppSettings({
+          car: { baseFare: data.car?.baseFare || '15', perKm: data.car?.perKm || '4.4', minFare: data.car?.minFare || '20' },
+          tuktuk: { baseFare: data.tuktuk?.baseFare || '10', perKm: data.tuktuk?.perKm || '6.5', minFare: data.tuktuk?.minFare || '15' },
+          scooter: { baseFare: data.scooter?.baseFare || '12', perKm: data.scooter?.perKm || '3.75', minFare: data.scooter?.minFare || '12' },
+          appCommission: data.appCommission || '10',
+          waitingTimeMins: data.waitingTimeMins || '5',
+          maxNegativeBalance: data.maxNegativeBalance || '-50',
+          maintenanceMode: data.maintenanceMode || false,
+        });
+      }
+    });
+    return () => unsubSettings();
+  }, []);
+
+  // حفظ الإعدادات
+  const saveAppSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await setDoc(doc(db, 'app_settings', 'pricing'), appSettings);
+      Alert.alert('نجاح ✅', 'تم حفظ إعدادات النظام بنجاح.');
+    } catch (error) { Alert.alert('خطأ', 'تعذر حفظ الإعدادات.'); } finally { setSavingSettings(false); }
+  };
+
+  const toggleMaintenanceMode = async (val: boolean) => {
+    setAppSettings({ ...appSettings, maintenanceMode: val });
+    try {
+      await setDoc(doc(db, 'app_settings', 'pricing'), { maintenanceMode: val }, { merge: true });
+    } catch (error) {
+      setAppSettings({ ...appSettings, maintenanceMode: !val }); 
+    }
+  };
+
   useEffect(() => {
     const q = query(collection(db, 'support_chats'), where('status', '==', 'open'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -134,30 +171,22 @@ export default function AdminDashboard() {
     try {
       await addDoc(collection(db, 'support_chats', activeSupportChat.id, 'messages'), { text, sender: 'admin', timestamp: serverTimestamp() });
       await updateDoc(doc(db, 'support_chats', activeSupportChat.id), {
-        lastMessage: text,
-        lastMessageTime: serverTimestamp(),
-        unreadUserCount: increment(1),
-        adminTyping: false 
+        lastMessage: text, lastMessageTime: serverTimestamp(), unreadUserCount: increment(1), adminTyping: false 
       });
     } catch (error) {}
   };
 
   const closeSupportTicket = async () => {
     if (!activeSupportChat) return;
-    try {
-      await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { status: 'closed' });
-      setActiveSupportChat(null);
-    } catch (error) {}
+    try { await updateDoc(doc(db, 'support_chats', activeSupportChat.id), { status: 'closed' }); setActiveSupportChat(null); } catch (error) {}
   };
 
   const fetchDashboardData = async () => {
     try {
       const capSnap = await getDocs(query(collection(db, 'captains')));
       setCaptains(capSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-
       const passSnap = await getDocs(query(collection(db, 'passengers')));
       setPassengers(passSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-
       const updSnap = await getDocs(query(collection(db, 'update_requests'), where('status', '==', 'pending')));
       const pendingUpdates = updSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -167,83 +196,42 @@ export default function AdminDashboard() {
       let unreadCount = 0;
       compSnap.docs.forEach(doc => {
         const data = doc.data();
-        if (data.type !== 'password_reset') {
-          if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
-            unreadCount++;
-          }
-        }
+        if (data.type !== 'password_reset' && (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply)))) unreadCount++;
       });
       setComplaintsCount(unreadCount);
 
       const pwdSnap = await getDocs(query(collection(db, 'support_tickets'), where('type', '==', 'password_reset'), where('status', '==', 'pending')));
       setPasswordResetCount(pwdSnap.size);
-
-    } catch (error) {
-      console.log('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    } catch (error) {} finally { setLoading(false); setRefreshing(false); }
   };
 
   useFocusEffect(useCallback(() => { fetchDashboardData(); }, []));
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchDashboardData();
-  };
+  const onRefresh = () => { setRefreshing(true); fetchDashboardData(); };
 
-  // 📢 دالة إرسال الإشعارات الجماعية
   const sendBroadcastMessage = async () => {
-    if (!broadcastTitle.trim() || !broadcastMessage.trim()) {
-      Alert.alert('تنبيه', 'يرجى إدخال عنوان ونص الإشعار.');
-      return;
-    }
+    if (!broadcastTitle.trim() || !broadcastMessage.trim()) { Alert.alert('تنبيه', 'يرجى إدخال عنوان ونص الإشعار.'); return; }
     setSendingBroadcast(true);
     try {
       const notificationsRef = collection(db, 'notifications');
       const timeNow = serverTimestamp();
-
       if (broadcastTarget === 'all' || broadcastTarget === 'passengers') {
-        passengers.forEach(p => {
-          if (p.status !== 'rejected') {
-            addDoc(notificationsRef, { userId: p.id, userType: 'passenger', title: broadcastTitle, message: broadcastMessage, timestamp: timeNow, read: false, sender: 'الإدارة' });
-          }
-        });
+        passengers.forEach(p => { if (p.status !== 'rejected') addDoc(notificationsRef, { userId: p.id, userType: 'passenger', title: broadcastTitle, message: broadcastMessage, timestamp: timeNow, read: false, sender: 'الإدارة' }); });
       }
-      
       if (broadcastTarget === 'all' || broadcastTarget === 'captains') {
-        captains.forEach(c => {
-          if (c.status !== 'rejected') {
-            addDoc(notificationsRef, { userId: c.id, userType: 'captain', title: broadcastTitle, message: broadcastMessage, timestamp: timeNow, read: false, sender: 'الإدارة' });
-          }
-        });
+        captains.forEach(c => { if (c.status !== 'rejected') addDoc(notificationsRef, { userId: c.id, userType: 'captain', title: broadcastTitle, message: broadcastMessage, timestamp: timeNow, read: false, sender: 'الإدارة' }); });
       }
-
       Alert.alert('نجاح 🚀', 'تم إرسال الإشعار الجماعي بنجاح.');
-      setBroadcastModalVisible(false);
-      setBroadcastTitle('');
-      setBroadcastMessage('');
-    } catch (error) {
-      Alert.alert('خطأ', 'تعذر إرسال الإشعارات الجماعية.');
-    } finally {
-      setSendingBroadcast(false);
-    }
+      setBroadcastModalVisible(false); setBroadcastTitle(''); setBroadcastMessage('');
+    } catch (error) { Alert.alert('خطأ', 'تعذر إرسال الإشعارات الجماعية.'); } finally { setSendingBroadcast(false); }
   };
 
   const pendingCaptains = captains.filter(c => c.status === 'pending' || c.status === 'pending_approval');
   const pendingPassengers = passengers.filter(p => p.status === 'pending');
   const totalPending = pendingCaptains.length + pendingPassengers.length;
   
-  const activeCaptainsFiltered = captains.filter(c => 
-    c.status !== 'pending' && c.status !== 'pending_approval' && 
-    (c.name?.includes(searchCaptain) || c.phone?.includes(searchCaptain) || c.vehicle?.includes(searchCaptain))
-  );
-
-  const activePassengersFiltered = passengers.filter(p => 
-    p.status !== 'pending' &&
-    (p.name?.includes(searchPassenger) || p.phone?.includes(searchPassenger))
-  );
+  const activeCaptainsFiltered = captains.filter(c => c.status !== 'pending' && c.status !== 'pending_approval' && (c.name?.includes(searchCaptain) || c.phone?.includes(searchCaptain) || c.vehicle?.includes(searchCaptain)));
+  const activePassengersFiltered = passengers.filter(p => p.status !== 'pending' && (p.name?.includes(searchPassenger) || p.phone?.includes(searchPassenger)));
 
   const onlyActiveCaptains = captains.filter(c => c.status !== 'pending' && c.status !== 'pending_approval' && c.status !== 'rejected');
   const carCaptains = onlyActiveCaptains.filter(c => c.vehicle?.includes('سيارة') || c.vehicleCategory === 'car');
@@ -268,43 +256,25 @@ export default function AdminDashboard() {
     try { 
       let nextNumber = null;
       let notificationMessage = "تمت الموافقة على حسابك، يمكنك الآن بدء استقبال الرحلات.";
-
       if (type === 'captain') {
         const currentCaptain = captains.find(c => c.id === id);
         if (currentCaptain && (currentCaptain.vehicleCategory === 'tuktuk_alt' || currentCaptain.vehicle?.includes('كيوت') || currentCaptain.vehicle?.includes('جالاكسي'))) {
           let maxNumber = 99;
-          captains.forEach(c => {
-            const num = c.vehicleSequenceNumber || 0;
-            if (num > maxNumber) maxNumber = num;
-          });
+          captains.forEach(c => { if ((c.vehicleSequenceNumber || 0) > maxNumber) maxNumber = c.vehicleSequenceNumber || 0; });
           nextNumber = maxNumber + 1;
           notificationMessage = `مبروووك لقد تم الموافقة على طلب تسجيلك بنجاح ورقمك الكودي هو (${nextNumber}) وسيتم التواصل معك في أقرب وقت لتسليمك شعار براق برقمك الكودي`;
         }
       }
-
       const updateData: any = { status: 'active' };
-      if (nextNumber !== null) {
-        updateData.vehicleSequenceNumber = nextNumber;
-        updateData.vehicleNumber = `${nextNumber}`; 
-      }
-
+      if (nextNumber !== null) { updateData.vehicleSequenceNumber = nextNumber; updateData.vehicleNumber = `${nextNumber}`; }
       await updateDoc(doc(db, collectionName, id), updateData); 
-      await addDoc(collection(db, 'notifications'), {
-        userId: id, userType: type, title: 'مبروك! تمت الموافقة ✅', message: notificationMessage, read: false, timestamp: new Date().getTime()
-      });
-
-      fetchDashboardData(); 
-      Alert.alert('تم ✅', nextNumber ? `تم تفعيل الكابتن بنجاح ورقم مركبته (${nextNumber})` : 'تم تفعيل الحساب بنجاح.'); 
+      await addDoc(collection(db, 'notifications'), { userId: id, userType: type, title: 'مبروك! تمت الموافقة ✅', message: notificationMessage, read: false, timestamp: new Date().getTime() });
+      fetchDashboardData(); Alert.alert('تم ✅', nextNumber ? `تم تفعيل الكابتن بنجاح ورقم مركبته (${nextNumber})` : 'تم تفعيل الحساب بنجاح.'); 
     } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء التفعيل.'); }
   };
 
   const rejectRegistration = async (id: string, type: 'captain' | 'passenger') => {
-    const collectionName = type === 'captain' ? 'captains' : 'passengers';
-    try { 
-      await updateDoc(doc(db, collectionName, id), { status: 'rejected' }); 
-      fetchDashboardData();
-      Alert.alert('تم 🛑', 'تم رفض الطلب.'); 
-    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.'); }
+    try { await updateDoc(doc(db, type === 'captain' ? 'captains' : 'passengers', id), { status: 'rejected' }); fetchDashboardData(); Alert.alert('تم 🛑', 'تم رفض الطلب.'); } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة.'); }
   };
 
   const handleApproveUpdate = async (req: any) => {
@@ -313,71 +283,42 @@ export default function AdminDashboard() {
         await updateDoc(doc(db, 'passengers', req.passengerId), { phone: req.newData.phone });
         await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
         await addDoc(collection(db, 'notifications'), { userId: req.passengerId, userType: 'passenger', title: 'تم تحديث الرقم ✅', message: 'تمت الموافقة على طلب تغيير رقم الهاتف الخاص بك بنجاح.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
-        Alert.alert('نجاح', 'تم تحديث رقم الراكب بنجاح.');
       } else {
         await updateDoc(doc(db, 'captains', req.captainId), { name: req.newData.name, vehicle: req.newData.vehicle, vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt', vehicleDetails: req.newData.vehicleDetails || null, avatar: req.newData.avatar, profileImage: req.newData.avatar });
         await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
         await addDoc(collection(db, 'notifications'), { userId: req.captainId, userType: 'captain', title: 'تحديث البيانات', message: 'تمت الموافقة على طلب تعديل بياناتك بنجاح.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
-        Alert.alert('نجاح', 'تم تحديث بيانات الكابتن بنجاح.');
       }
-      fetchDashboardData();
-    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الموافقة على الطلب.'); }
+      fetchDashboardData(); Alert.alert('نجاح', 'تم تحديث البيانات بنجاح.');
+    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة.'); }
   };
 
   const handleRejectUpdate = async (req: any) => {
-    try {
-      await updateDoc(doc(db, 'update_requests', req.id), { status: 'rejected' });
-      await addDoc(collection(db, 'notifications'), { userId: req.passengerId || req.captainId, userType: req.userType || 'captain', title: 'رفض التعديل ❌', message: 'تم رفض طلب التعديل الخاص بك من قبل الإدارة.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' });
-      fetchDashboardData();
-      Alert.alert('تم', 'تم رفض طلب التعديل.');
-    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء الرفض.'); }
+    try { await updateDoc(doc(db, 'update_requests', req.id), { status: 'rejected' }); await addDoc(collection(db, 'notifications'), { userId: req.passengerId || req.captainId, userType: req.userType || 'captain', title: 'رفض التعديل ❌', message: 'تم رفض طلب التعديل الخاص بك من قبل الإدارة.', timestamp: serverTimestamp(), read: false, sender: 'الإدارة' }); fetchDashboardData(); Alert.alert('تم', 'تم رفض طلب التعديل.'); } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة.'); }
   };
   
   const toggleBanUser = async (user: any, type: 'captain' | 'passenger') => {
     const newStatus = user.status === 'banned' ? 'active' : 'banned';
-    const collectionName = type === 'captain' ? 'captains' : 'passengers';
     try { 
-      await updateDoc(doc(db, collectionName, user.id), { status: newStatus }); 
-      if (newStatus === 'banned') {
-        await setDoc(doc(db, 'banned_phones', user.phone), { phone: user.phone, userType: type, name: user.name, bannedAt: serverTimestamp() });
-      } else {
-        await deleteDoc(doc(db, 'banned_phones', user.phone));
-      }
-      fetchDashboardData();
-      Alert.alert('تم', `تم ${newStatus === 'banned' ? 'حظر الرقم نهائياً' : 'إلغاء حظر الرقم'}.`); 
+      await updateDoc(doc(db, type === 'captain' ? 'captains' : 'passengers', user.id), { status: newStatus }); 
+      if (newStatus === 'banned') await setDoc(doc(db, 'banned_phones', user.phone), { phone: user.phone, userType: type, name: user.name, bannedAt: serverTimestamp() });
+      else await deleteDoc(doc(db, 'banned_phones', user.phone));
+      fetchDashboardData(); Alert.alert('تم', `تم ${newStatus === 'banned' ? 'حظر الرقم' : 'إلغاء الحظر'}.`); 
       if (selectedUser?.id === user.id) setSelectedUser({ ...selectedUser, status: newStatus });
-    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الحظر.'); }
+    } catch (e) {}
   };
 
   const removeTemporaryBan = async () => {
-    try {
-      await updateDoc(doc(db, 'captains', selectedUser.id), { bannedUntil: null, cancelStrikes: 0 });
-      Alert.alert('تم ✅', 'تم فك الحظر المؤقت وتصفير عداد المخالفات للكابتن.');
-      setSelectedUser({ ...selectedUser, bannedUntil: null, cancelStrikes: 0 });
-      fetchDashboardData();
-    } catch (e) { Alert.alert('خطأ', 'حدثت مشكلة أثناء فك الحظر المؤقت.'); }
+    try { await updateDoc(doc(db, 'captains', selectedUser.id), { bannedUntil: null, cancelStrikes: 0 }); Alert.alert('تم ✅', 'تم فك الحظر وتصفير المخالفات.'); setSelectedUser({ ...selectedUser, bannedUntil: null, cancelStrikes: 0 }); fetchDashboardData(); } catch (e) {}
   };
 
   const deleteUserAccount = async (userId: string, type: 'captain' | 'passenger') => {
-    Alert.alert('مسح بيانات الحساب ⚠️', 'سيتم مسح بيانات هذا الحساب تماماً من قاعدة البيانات. هل أنت متأكد؟',
-      [{ text: 'إلغاء', style: 'cancel' }, { text: 'نعم، امسح البيانات', style: 'destructive', onPress: async () => {
-        const collectionName = type === 'captain' ? 'captains' : 'passengers';
-        try {
-          await deleteDoc(doc(db, collectionName, userId));
-          fetchDashboardData();
-          Alert.alert('تم الحذف 🗑️', 'تم مسح الحساب وبياناته بنجاح.');
-          if (selectedUser?.id === userId) { setProfileModalVisible(false); setSelectedUser(null); }
-        } catch (error) { Alert.alert('خطأ', 'فشلت عملية الحذف.'); }
-      }}]
-    );
+    Alert.alert('مسح بيانات الحساب ⚠️', 'سيتم مسح بيانات هذا الحساب تماماً من قاعدة البيانات. هل أنت متأكد؟', [{ text: 'إلغاء', style: 'cancel' }, { text: 'نعم، امسح البيانات', style: 'destructive', onPress: async () => { try { await deleteDoc(doc(db, type === 'captain' ? 'captains' : 'passengers', userId)); fetchDashboardData(); Alert.alert('تم الحذف', 'تم مسح الحساب بنجاح.'); if (selectedUser?.id === userId) { setProfileModalVisible(false); setSelectedUser(null); } } catch (error) {} } }]);
   };
 
   const openUserProfile = async (user: any, type: 'captain' | 'passenger') => {
     setSelectedUser(user); setSelectedUserType(type); setProfileModalVisible(true); setLoadingProfile(true);
     try {
-      const fieldName = type === 'captain' ? 'captainId' : 'passengerId';
-      const targetType = type === 'captain' ? 'passenger_rating_captain' : 'captain_rating_passenger';
-      const q = query(collection(db, 'ratings'), where(fieldName, '==', user.id), where('type', '==', targetType));
+      const q = query(collection(db, 'ratings'), where(type === 'captain' ? 'captainId' : 'passengerId', '==', user.id), where('type', '==', type === 'captain' ? 'passenger_rating_captain' : 'captain_rating_passenger'));
       const snap = await getDocs(q);
       const fetchedRatings = snap.docs.map(d => d.data());
       fetchedRatings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -387,132 +328,207 @@ export default function AdminDashboard() {
 
   const executeWalletAdjustment = async () => {
     const amt = parseFloat(walletAmount);
-    if (!amt || amt <= 0 || !walletReason.trim()) { Alert.alert('تنبيه', 'أدخل مبلغاً وسبباً صحيحاً.'); return; }
+    if (!amt || amt <= 0 || !walletReason.trim()) return;
     setProcessingWallet(true);
     const finalAmount = transactionType === 'deduction' ? -Math.abs(amt) : Math.abs(amt);
-    const collectionName = selectedUserType === 'captain' ? 'captains' : 'passengers';
     try {
-      await updateDoc(doc(db, collectionName, selectedUser.id), { walletBalance: increment(finalAmount) });
-      await addDoc(collection(db, 'wallet_transactions'), { 
-        userId: selectedUser.id, userName: selectedUser.name, userType: selectedUserType,
-        amount: finalAmount, type: transactionType, reason: walletReason.trim(), date: serverTimestamp(), performedBy: 'Admin' 
-      });
+      await updateDoc(doc(db, selectedUserType === 'captain' ? 'captains' : 'passengers', selectedUser.id), { walletBalance: increment(finalAmount) });
+      await addDoc(collection(db, 'wallet_transactions'), { userId: selectedUser.id, userName: selectedUser.name, userType: selectedUserType, amount: finalAmount, type: transactionType, reason: walletReason.trim(), date: serverTimestamp(), performedBy: 'Admin' });
       setSelectedUser({ ...selectedUser, walletBalance: (selectedUser.walletBalance || 0) + finalAmount });
-      fetchDashboardData();
-      setProcessingWallet(false); setWalletModalVisible(false); setWalletAmount(''); setWalletReason('');
-      Alert.alert('نجاح ✅', 'تم تحديث المحفظة.');
+      fetchDashboardData(); setProcessingWallet(false); setWalletModalVisible(false); setWalletAmount(''); setWalletReason(''); Alert.alert('نجاح', 'تم تحديث المحفظة.');
     } catch (e) { setProcessingWallet(false); }
   };
 
   const handleSendProfileMessage = async () => {
-    if (!profileMsgTitle.trim() || !profileMsgText.trim()) { Alert.alert('تنبيه', 'برجاء كتابة عنوان ونص الرسالة.'); return; }
+    if (!profileMsgTitle.trim() || !profileMsgText.trim()) return;
     setSendingProfileMsg(true);
-    try {
-      await addDoc(collection(db, 'notifications'), {
-        userId: selectedUser.id, userType: selectedUserType, title: profileMsgTitle.trim(), message: profileMsgText.trim(), timestamp: serverTimestamp(), read: false, sender: 'الإدارة'
-      });
-      Alert.alert('نجاح 📩', 'تم إرسال الإشعار فوراً للمستخدم.');
-      setProfileMsgModalVisible(false); setProfileMsgTitle(''); setProfileMsgText('');
-    } catch (error) { Alert.alert('خطأ', 'تعذر إرسال الإشعار.'); } finally { setSendingProfileMsg(false); }
+    try { await addDoc(collection(db, 'notifications'), { userId: selectedUser.id, userType: selectedUserType, title: profileMsgTitle.trim(), message: profileMsgText.trim(), timestamp: serverTimestamp(), read: false, sender: 'الإدارة' }); Alert.alert('نجاح', 'تم إرسال الإشعار.'); setProfileMsgModalVisible(false); setProfileMsgTitle(''); setProfileMsgText(''); } catch (error) {} finally { setSendingProfileMsg(false); }
   };
 
   const getAverageRating = () => {
     if (userRatings.length === 0) return 5;
-    const total = userRatings.reduce((sum, current) => sum + (current.rating || 0), 0);
-    return Math.round(total / userRatings.length);
+    return Math.round(userRatings.reduce((sum, current) => sum + (current.rating || 0), 0) / userRatings.length);
   };
   const averageRating = getAverageRating();
   
   return (
     <View style={styles.container}>
-      {/* 🚀 الهيدر */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.logoutBtn} onPress={() => router.replace('/captain-login')}><Text style={styles.logoutBtnText}>خروج</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>لوحة التحكم 👑</Text>
       </View>
 
-      {/* 🚀 قسم الوصول السريع (كروت بتتسحب بالعرض لتوفير المساحة) */}
-      <View style={{ marginBottom: 15 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 5, flexDirection: 'row-reverse' }}>
-          
-          <TouchableOpacity style={[styles.quickCard, { borderColor: sosCount > 0 ? '#ef4444' : '#334155', backgroundColor: sosCount > 0 ? '#450a0a' : '#1e293b' }]} onPress={() => router.push('/admin-safety')}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>🚨</Text>
-            <Text style={[styles.quickCardText, sosCount > 0 && { color: '#fca5a5' }]}>طوارئ SOS</Text>
-            {sosCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{sosCount}</Text></View>}
-          </TouchableOpacity>
+      {/* 🚀 قسم الوصول السريع (شبكة مرصوصة بدون سحب) */}
+      <View style={styles.quickGrid}>
+        <TouchableOpacity style={[styles.quickCard, { borderColor: sosCount > 0 ? '#ef4444' : '#334155', backgroundColor: sosCount > 0 ? '#450a0a' : '#1e293b' }]} onPress={() => router.push('/admin-safety')}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>🚨</Text>
+          <Text style={[styles.quickCardText, sosCount > 0 && { color: '#fca5a5' }]}>طوارئ SOS</Text>
+          {sosCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{sosCount}</Text></View>}
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickCard} onPress={() => setIsSupportModalVisible(true)}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>🎧</Text>
-            <Text style={styles.quickCardText}>الدعم المباشر</Text>
-            {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0) > 0 && (
-              <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0)}</Text></View>
-            )}
-          </TouchableOpacity>
+        <TouchableOpacity style={styles.quickCard} onPress={() => setIsSupportModalVisible(true)}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>🎧</Text>
+          <Text style={styles.quickCardText}>الدعم المباشر</Text>
+          {supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0) > 0 && (
+            <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{supportTickets.reduce((sum, t) => sum + (t.unreadAdminCount || 0), 0)}</Text></View>
+          )}
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-complaints')}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>📬</Text>
-            <Text style={styles.quickCardText}>الشكاوى</Text>
-            {complaintsCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{complaintsCount}</Text></View>}
-          </TouchableOpacity>
+        <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-complaints')}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>📬</Text>
+          <Text style={styles.quickCardText}>الشكاوى</Text>
+          {complaintsCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{complaintsCount}</Text></View>}
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-password-resets')}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>🔑</Text>
-            <Text style={styles.quickCardText}>استعادة المرور</Text>
-            {passwordResetCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{passwordResetCount}</Text></View>}
-          </TouchableOpacity>
+        <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-password-resets')}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>🔑</Text>
+          <Text style={styles.quickCardText}>استعادة المرور</Text>
+          {passwordResetCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{passwordResetCount}</Text></View>}
+        </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.quickCard, { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' }]} onPress={() => setBroadcastModalVisible(true)}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>📢</Text>
-            <Text style={styles.quickCardText}>إرسال للجميع</Text>
-          </TouchableOpacity>
+        <TouchableOpacity style={[styles.quickCard, { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' }]} onPress={() => setBroadcastModalVisible(true)}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>📢</Text>
+          <Text style={styles.quickCardText}>إرسال للجميع</Text>
+        </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-settings')}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>⚙️</Text>
-            <Text style={styles.quickCardText}>الإعدادات والتسعير</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-rides')}>
-            <Text style={{ fontSize: 26, marginBottom: 5 }}>📊</Text>
-            <Text style={styles.quickCardText}>سجل الرحلات</Text>
-          </TouchableOpacity>
-
-        </ScrollView>
+        <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/admin-rides')}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>📊</Text>
+          <Text style={styles.quickCardText}>سجل الرحلات</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* 📑 شريط التبويبات (ثابت بحجم مظبوط) */}
+      {/* 📑 شريط التبويبات (ثابت) ضفنا فيه زرار الإعدادات */}
       <View style={styles.tabsContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 5, flexGrow: 1, justifyContent: 'space-evenly' }}>
-          
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'settings' && styles.tabBtnActive]} onPress={() => setActiveTab('settings')}>
+            <Text style={[styles.tabBtnText, activeTab === 'settings' && styles.tabBtnTextActive]}>⚙️ الإعدادات</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]} onPress={() => setActiveTab('pending')}>
             <Text style={[styles.tabBtnText, activeTab === 'pending' && styles.tabBtnTextActive]}>التسجيلات</Text>
             {totalPending > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{totalPending}</Text></View>}
           </TouchableOpacity>
-          
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'updates' && styles.tabBtnActive]} onPress={() => setActiveTab('updates')}>
             <Text style={[styles.tabBtnText, activeTab === 'updates' && styles.tabBtnTextActive]}>التعديلات</Text>
             {updateRequests.length > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{updateRequests.length}</Text></View>}
           </TouchableOpacity>
-
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'captains' && styles.tabBtnActive]} onPress={() => setActiveTab('captains')}>
             <Text style={[styles.tabBtnText, activeTab === 'captains' && styles.tabBtnTextActive]}>الكباتن</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'passengers' && styles.tabBtnActive]} onPress={() => setActiveTab('passengers')}>
             <Text style={[styles.tabBtnText, activeTab === 'passengers' && styles.tabBtnTextActive]}>الركاب</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'vehicles' && styles.tabBtnActive]} onPress={() => { setActiveTab('vehicles'); setSelectedVehicleCategory(null); }}>
             <Text style={[styles.tabBtnText, activeTab === 'vehicles' && styles.tabBtnTextActive]}>المركبات</Text>
           </TouchableOpacity>
-
         </ScrollView>
       </View>
 
-      {/* 📋 منطقة المحتوى (واخدة المساحة كلها flex: 1) */}
+      {/* 📋 منطقة المحتوى */}
       <View style={{ flex: 1 }}>
         {loading ? <View style={styles.centerContainer}><ActivityIndicator size="large" color="#eab308" /></View> : 
         
-        activeTab === 'pending' ? (
+        activeTab === 'settings' ? (
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+              
+              {/* 🚨 قسم الطوارئ والصيانة */}
+              <View style={[styles.settingsSection, { borderColor: appSettings.maintenanceMode ? '#ef4444' : '#334155' }]}>
+                <Text style={[styles.settingsSectionTitle, appSettings.maintenanceMode && { color: '#ef4444' }]}>
+                  🚨 وضع الصيانة (إغلاق التطبيق)
+                </Text>
+                <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View style={{ flex: 1, marginLeft: 15 }}>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, textAlign: 'right', lineHeight: 18 }}>
+                      عند تفعيل هذا الخيار، سيتم منع جميع الكباتن والركاب من استخدام التطبيق وستظهر لهم شاشة "التطبيق تحت الصيانة". يُطبق فوراً!
+                    </Text>
+                  </View>
+                  <Switch trackColor={{ false: '#334155', true: '#fca5a5' }} thumbColor={appSettings.maintenanceMode ? '#ef4444' : '#94a3b8'} onValueChange={toggleMaintenanceMode} value={appSettings.maintenanceMode} />
+                </View>
+              </View>
+
+              {/* قسم السيارات */}
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionTitle}>🚗 السيارات</Text>
+                <View style={styles.settingsInputRow}>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>الحد الأدنى (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.car.minFare} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, minFare: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>سعر الكيلو (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.car.perKm} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, perKm: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>فتح العداد (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.car.baseFare} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, baseFare: t}})} textAlign="center" />
+                  </View>
+                </View>
+              </View>
+
+              {/* قسم التوكتوك */}
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionTitle}>🛺 بديل التوكتوك</Text>
+                <View style={styles.settingsInputRow}>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>الحد الأدنى (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.tuktuk.minFare} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, minFare: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>سعر الكيلو (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.tuktuk.perKm} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, perKm: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>الأساسي (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.tuktuk.baseFare} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, baseFare: t}})} textAlign="center" />
+                  </View>
+                </View>
+              </View>
+
+              {/* قسم السكوتر */}
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionTitle}>🛵 السكوتر</Text>
+                <View style={styles.settingsInputRow}>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>الحد الأدنى (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.scooter.minFare} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, minFare: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>سعر الكيلو (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.scooter.perKm} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, perKm: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>الأساسي (ج)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.scooter.baseFare} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, baseFare: t}})} textAlign="center" />
+                  </View>
+                </View>
+              </View>
+
+              {/* ⚙️ إعدادات عامة وحد المديونية */}
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionTitle}>⚙️ ضوابط النظام</Text>
+                <View style={styles.settingsInputRow}>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>حد المديونية (ج)</Text>
+                    <TextInput style={[styles.settingsInput, { color: '#ef4444' }]} keyboardType="numeric" value={appSettings.maxNegativeBalance} onChangeText={t => setAppSettings({...appSettings, maxNegativeBalance: t})} textAlign="center" placeholder="-50" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>عمولة التطبيق (%)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.appCommission} onChangeText={t => setAppSettings({...appSettings, appCommission: t})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>الانتظار (دقائق)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.waitingTimeMins} onChangeText={t => setAppSettings({...appSettings, waitingTimeMins: t})} textAlign="center" />
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.saveSettingsBtn} onPress={saveAppSettings} disabled={savingSettings}>
+                {savingSettings ? <ActivityIndicator color="#000" /> : <Text style={styles.saveSettingsBtnText}>حفظ وتطبيق الإعدادات 💾</Text>}
+              </TouchableOpacity>
+              
+            </ScrollView>
+          </KeyboardAvoidingView>
+        ) : activeTab === 'pending' ? (
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
             {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
               <>
@@ -565,7 +581,6 @@ export default function AdminDashboard() {
                     <>
                       <Text style={[styles.updateRequestHeader, {color: '#38bdf8'}]}>طلب تعديل هاتف (راكب 👤)</Text>
                       <Text style={styles.updateRequestPhone}>الاسم: {req.passengerName}</Text>
-                      
                       <View style={styles.updateComparisonBox}>
                         <View style={styles.updateCol}>
                           <Text style={styles.updateColTitleNew}>الرقم الجديد</Text>
@@ -582,7 +597,6 @@ export default function AdminDashboard() {
                     <>
                       <Text style={styles.updateRequestHeader}>طلب تعديل بيانات (كابتن 🛺)</Text>
                       <Text style={styles.updateRequestPhone}>رقم الكابتن: {req.captainPhone}</Text>
-                      
                       <View style={styles.updateComparisonBox}>
                         <View style={styles.updateCol}>
                           <Text style={styles.updateColTitleNew}>البيانات الجديدة</Text>
@@ -598,7 +612,6 @@ export default function AdminDashboard() {
                           <Text style={styles.updateText}>{req.oldData.vehicle}</Text>
                         </View>
                       </View>
-
                       {req.newData.vehicleCategory && req.newData.vehicleCategory !== 'car' && (
                          <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs({ vehicleImage: req.newData.vehicleDetails?.image })}>
                            <Text style={styles.inspectDocsBtnText}>🔍 معاينة صورة المركبة الجديدة</Text>
@@ -988,13 +1001,14 @@ const styles = StyleSheet.create({
   logoutBtn: { backgroundColor: '#334155', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
   logoutBtnText: { color: '#f8fafc', fontSize: 13, fontWeight: 'bold' },
   
-  // 🚀 تنسيقات كروت الوصول السريع
-  quickCard: { width: 100, height: 95, backgroundColor: '#1e293b', borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155', position: 'relative' },
+  // 🚀 تنسيقات شبكة الوصول السريع (مرصوصة بدون سحب)
+  quickGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 15 },
+  quickCard: { width: '31%', height: 95, backgroundColor: '#1e293b', borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155', position: 'relative' },
   quickCardText: { color: '#cbd5e1', fontSize: 12, fontWeight: 'bold', textAlign: 'center' },
   quickBadge: { position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', minWidth: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f172a', zIndex: 5 },
   quickBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: 'bold' },
 
-  // 📑 تنسيقات التبويبات
+  // 📑 تنسيقات التبويبات (Tabs)
   tabsContainer: { backgroundColor: '#1e293b', borderRadius: 12, height: 55, marginBottom: 15, borderWidth: 1, borderColor: '#334155', justifyContent: 'center' },
   tabBtn: { height: 40, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center', borderRadius: 8, marginHorizontal: 4, backgroundColor: 'transparent' },
   tabBtnActive: { backgroundColor: '#eab308' },
@@ -1002,6 +1016,16 @@ const styles = StyleSheet.create({
   tabBtnTextActive: { color: '#000000' },
   tabBadge: { position: 'absolute', top: -6, right: -6, backgroundColor: '#ef4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#1e293b' },
   tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+
+  // ⚙️ تنسيقات الإعدادات
+  settingsSection: { backgroundColor: '#1e293b', borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
+  settingsSectionTitle: { color: '#f8fafc', fontSize: 16, fontWeight: 'bold', textAlign: 'right', marginBottom: 15 },
+  settingsInputRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', gap: 10 },
+  settingsInputGroup: { flex: 1 },
+  settingsLabel: { color: '#94a3b8', fontSize: 11, textAlign: 'center', marginBottom: 5 },
+  settingsInput: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 8, padding: 10, fontSize: 15, borderWidth: 1, borderColor: '#475569', fontWeight: 'bold' },
+  saveSettingsBtn: { backgroundColor: '#10b981', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, marginBottom: 30, elevation: 3 },
+  saveSettingsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
 
   searchInput: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
