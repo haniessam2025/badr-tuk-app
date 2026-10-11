@@ -8,6 +8,11 @@ import { db } from '../firebase';
 
 export default function PassengerSignupScreen() {
   const [image, setImage] = useState<string | null>(null);
+  
+  // 💡 متغيرات التحكم في إظهار وإخفاء الباسوورد
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [name, setName] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [phone, setPhone] = useState('');
@@ -88,7 +93,6 @@ export default function PassengerSignupScreen() {
 
       setLoading(false);
       
-      // إظهار رسالة النجاح وتوجيه المستخدم لتسجيل الدخول
       Alert.alert(
         'نجاح', 
         'تم التسجيل بنجاح ستتم الموافقة بعد المراجعة خلال 24 ساعة على الأكثر', 
@@ -160,28 +164,42 @@ export default function PassengerSignupScreen() {
         {errors.phone ? <Text style={{color: '#ef4444', fontSize: 12, textAlign: 'right', marginTop: 4, fontWeight: 'bold'}}>{errors.phone}</Text> : null}
       </View>
 
+      {/* 💡 خانة كلمة السر المحدثة بعلامة العين */}
       <View style={styles.inputGroup}>
         <Text style={styles.label}>كلمة السر</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholder="اختر كلمة مرور قوية" 
-          placeholderTextColor="#9ca3af"
-          secureTextEntry 
-          value={password} 
-          onChangeText={setPassword} 
-        />
+        <View style={styles.passwordWrapper}>
+          <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+            <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={24} color="#9ca3af" />
+          </TouchableOpacity>
+          <TextInput 
+            style={styles.passwordInput} 
+            placeholder="اختر كلمة مرور قوية" 
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showPassword} 
+            value={password} 
+            onChangeText={setPassword} 
+            textAlign="right"
+          />
+        </View>
       </View>
 
+      {/* 💡 خانة تأكيد كلمة السر المحدثة بعلامة العين */}
       <View style={styles.inputGroup}>
         <Text style={styles.label}>تأكيد كلمة السر</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholder="أعد كتابة كلمة المرور" 
-          placeholderTextColor="#9ca3af"
-          secureTextEntry 
-          value={confirmPassword} 
-          onChangeText={setConfirmPassword} 
-        />
+        <View style={styles.passwordWrapper}>
+          <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeBtn}>
+            <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={24} color="#9ca3af" />
+          </TouchableOpacity>
+          <TextInput 
+            style={styles.passwordInput} 
+            placeholder="أعد كتابة كلمة المرور" 
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showConfirmPassword} 
+            value={confirmPassword} 
+            onChangeText={setConfirmPassword} 
+            textAlign="right"
+          />
+        </View>
       </View>
 
       {/* مربع الموافقة الإجباري وسياسة الخصوصية */}
@@ -238,7 +256,7 @@ export default function PassengerSignupScreen() {
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 15 }}>سياسة الخصوصية وشروط الاستخدام</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={{ fontSize: 14, color: '#334155', textAlign: 'right', lineHeight: 24, marginBottom: 10 }}>
-                <Text style={{ fontWeight: 'bold' }}>1. طبيعة الخدمة:</Text> التطبيق هو منصة إلكترونية (وسيط تقني) تهدف إلى تسهيل الربط بين الركاب والكباتن. التطبيق لا يمتلك أي مركبات ولا يقوم بتوظيف الكباتن.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>طبيعة الخدمة:</Text> التطبيق هو منصة إلكترونية (وسيط تقني) تهدف إلى تسهيل الربط بين الركاب والكباتن. التطبيق لا يمتلك أي مركبات ولا يقوم بتوظيف الكباتن.{"\n\n"}
                 <Text style={{ fontWeight: 'bold' }}>2. إخلاء المسؤولية التام:</Text>{"\n"}
                 • إدارة التطبيق ومالكه غير مسؤولين تماماً عن أي حوادث مرورية، أو إصابات جسدية، أو أضرار مادية تحدث أثناء الرحلة.{"\n"}
                 • التطبيق يخلي مسؤوليته القانونية عن أي نزاع، أو تعدي، أو فقدان للمتعلقات الشخصية يحدث بين الراكب والكابتن.{"\n"}
@@ -267,6 +285,12 @@ const styles = StyleSheet.create({
   inputGroup: { marginBottom: 15 },
   label: { fontSize: 14, fontWeight: '600', color: '#4b5563', marginBottom: 5, textAlign: 'right' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 12, fontSize: 16, textAlign: 'right', color: '#333' },
+  
+  // 💡 تنسيقات الباسوورد الجديد
+  passwordWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 10 },
+  passwordInput: { flex: 1, paddingVertical: 12, fontSize: 16, textAlign: 'right', color: '#333' },
+  eyeBtn: { padding: 5 },
+
   button: { backgroundColor: '#10b981', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 5 },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   linkButton: { marginTop: 20, marginBottom: 40, alignItems: 'center' },

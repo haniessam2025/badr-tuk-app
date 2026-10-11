@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, doc, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -12,12 +12,21 @@ export default function AdminSafety() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // مراقبة الاستغاثات الحية (Real-time)
-    const q = query(collection(db, 'sos_alerts'), where('status', '==', 'active'), orderBy('timestamp', 'desc'));
+    // مراقبة الاستغاثات الحية (Real-time) بدون التسبب في خطأ الفهرس (Index Error)
+    const q = query(collection(db, 'sos_alerts'), where('status', '==', 'active'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const alerts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let alerts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // ترتيب الاستغاثات برمجياً عشان أحدث استغاثة تظهر فوق
+      alerts.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+      
       setSosAlerts(alerts);
       setLoading(false);
+    }, (error) => {
+      // التقاط أي خطأ عشان شاشة التحميل متفضلش معلقة
+      console.log("SOS Fetch Error: ", error);
+      setLoading(false);
+      Alert.alert("خطأ", "حدثت مشكلة في جلب بيانات الطوارئ.");
     });
     return () => unsubscribe();
   }, []);

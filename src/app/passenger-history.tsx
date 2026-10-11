@@ -101,7 +101,7 @@ export default function PassengerHistory() {
     setIsLostItemModalVisible(true);
   };
 
-  // 👈 دالة إرسال البلاغ
+// 👈 دالة إرسال البلاغ المحسّنة (تسحب بيانات الراكب والكابتن بدقة)
   const submitLostItem = async () => {
     if (!lostItemText.trim()) {
       Alert.alert('تنبيه', 'برجاء كتابة تفاصيل المفقودات');
@@ -109,16 +109,58 @@ export default function PassengerHistory() {
     }
     setIsSubmittingLost(true);
     try {
-      await addDoc(collection(db, 'lost_items'), {
+      // 1. جلب بيانات الراكب من ذاكرة الهاتف لضمان وجودها
+      let pName = selectedRide.name || selectedRide.passengerName || '';
+      let pPhone = selectedRide.phone || selectedRide.passengerPhone || '';
+      
+      try {
+        const profileStr = await AsyncStorage.getItem('passenger_profile');
+        if (profileStr) {
+          const profile = JSON.parse(profileStr);
+          if (!pName) pName = profile.name || '';
+          if (!pPhone) pPhone = profile.phone || '';
+        }
+      } catch (e) {}
+
+      // 2. البحث عن بيانات الكابتن بكل الطرق الممكنة داخل الرحلة
+      let cPhone = selectedRide.captainPhone || selectedRide.driverPhone || selectedRide.captain_phone || '';
+      let cVehicle = selectedRide.captainVehicle || selectedRide.vehicle || '';
+      let cName = getCaptainName(selectedRide);
+
+      if (selectedRide.offers && selectedRide.captainId) {
+        const acceptedOffer = selectedRide.offers.find((o: any) => o.captainId === selectedRide.captainId);
+        if (acceptedOffer) {
+          if (!cPhone && acceptedOffer.captainPhone) cPhone = acceptedOffer.captainPhone;
+          if (!cVehicle && (acceptedOffer.captainVehicle || acceptedOffer.vehicle)) cVehicle = acceptedOffer.captainVehicle || acceptedOffer.vehicle;
+          if (cName === 'غير مسجل' && acceptedOffer.captainName) cName = acceptedOffer.captainName;
+        }
+      }
+
+      await addDoc(collection(db, 'support_tickets'), {
+        type: 'lost_item',
         rideId: selectedRide.id,
-        reporterId: selectedRide.passengerId,
-        reporterType: 'passenger',
+        // بيانات الراكب
+        passengerId: selectedRide.passengerId || 'unknown',
+        passengerName: pName || 'غير مسجل',
+        passengerPhone: pPhone || 'غير مسجل',
+        userType: 'passenger',
+        // بيانات الكابتن
         captainId: selectedRide.captainId || 'unknown',
-        details: lostItemText.trim(),
-        timestamp: new Date().getTime(),
-        status: 'pending' // pending يعني لسة الإدارة بتراجعه
+        captainName: cName,
+        captainPhone: cPhone || 'غير مسجل',
+        captainVehicle: cVehicle || 'مركبة',
+        // بيانات الرحلة
+        pickupLocation: selectedRide.pickupLocation || '',
+        destinationLocation: selectedRide.destinationLocation || selectedRide.destinationsList?.join(' - ') || '',
+        // تفاصيل البلاغ
+        message: lostItemText.trim(),
+        content: lostItemText.trim(),
+        status: 'pending',
+        isReadAdmin: false,
+        timestamp: new Date().getTime()
       });
-      Alert.alert('تم الإرسال ✅', 'تم إرسال بلاغ المفقودات للإدارة وسيتم التواصل معك قريباً.');
+      
+      Alert.alert('تم الإرسال ✅', 'تم إرسال بلاغ المفقودات للإدارة بنجاح.');
       setIsLostItemModalVisible(false);
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال البلاغ');
@@ -126,8 +168,7 @@ export default function PassengerHistory() {
       setIsSubmittingLost(false);
     }
   };
-
-  const renderItem = ({ item }: { item: any }) => (
+      const renderItem = ({ item }: { item: any }) => (
     <View style={[styles.rideCard, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
       <View style={[styles.rideHeader, isDarkMode && { borderBottomColor: '#334155' }]}>
         <Text style={[styles.dateText, isDarkMode && { color: '#94a3b8' }]}>

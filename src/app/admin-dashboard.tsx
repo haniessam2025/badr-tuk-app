@@ -12,7 +12,16 @@ export default function AdminDashboard() {
     const q = query(collection(db, 'sos_alerts'), where('status', '==', 'active'));
     const unsubscribe = onSnapshot(q, (snapshot: any) => {
       setSosCount(snapshot.size);
-      if (!snapshot.empty) {
+      
+      // 👈 التعديل هنا: نخلي الإشعار يظهر فقط للإنذارات "الجديدة" اللي لسه منضافة حالاً
+      let hasNewAlert = false;
+      snapshot.docChanges().forEach((change: any) => {
+        if (change.type === 'added') {
+          hasNewAlert = true;
+        }
+      });
+
+      if (hasNewAlert) {
         Alert.alert(
           "🚨 إنذار طوارئ (SOS) 🚨",
           "يوجد راكب في خطر يطلب التدخل الفوري!",
@@ -25,7 +34,6 @@ export default function AdminDashboard() {
     });
     return () => unsubscribe();
   }, []);
-
   // --- متغيرات الدعم الفني المباشر ---
   const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
   const [supportTickets, setSupportTickets] = useState<any[]>([]);
@@ -70,7 +78,8 @@ export default function AdminDashboard() {
   const [profileMsgText, setProfileMsgText] = useState('');
   const [sendingProfileMsg, setSendingProfileMsg] = useState(false);
 
-  const [complaintsCount, setComplaintsCount] = useState(0);
+  const [complaintsCount, setComplaintsCount,] = useState(0);
+  const [passwordResetCount, setPasswordResetCount] = useState(0);
 
   // --- دوال الدعم الفني المباشر (Firebase) ---
   
@@ -166,15 +175,27 @@ setSupportTickets(tickets);
       pendingUpdates.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
       setUpdateRequests(pendingUpdates);
 
+      // 1️⃣ عداد الشكاوى والمقترحات والمفقودات (مع استبعاد طلبات الباسورد)
       const compSnap = await getDocs(query(collection(db, 'support_tickets'), orderBy('timestamp', 'desc'), limit(100)));
       let unreadCount = 0;
       compSnap.docs.forEach(doc => {
         const data = doc.data();
-        if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
-          unreadCount++;
+        if (data.type !== 'password_reset') {
+          if (data.isReadAdmin === false || (!('isReadAdmin' in data) && (data.status === 'pending' || data.status === 'new' || !data.reply))) {
+            unreadCount++;
+          }
         }
       });
       setComplaintsCount(unreadCount);
+
+      // 2️⃣ عداد طلبات استعادة كلمة المرور المعلقة لوحده تماماً
+      const pwdSnap = await getDocs(query(
+        collection(db, 'support_tickets'), 
+        where('type', '==', 'password_reset'), 
+        where('status', '==', 'pending')
+      ));
+      setPasswordResetCount(pwdSnap.size);
+
     } catch (error) {
       console.log('Error fetching dashboard data:', error);
     } finally {
@@ -293,26 +314,45 @@ setSupportTickets(tickets);
 
   const handleApproveUpdate = async (req: any) => {
     try {
-      await updateDoc(doc(db, 'captains', req.captainId), {
-        name: req.newData.name,
-        vehicle: req.newData.vehicle,
-        vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt',
-        vehicleDetails: req.newData.vehicleDetails || null,
-        avatar: req.newData.avatar,
-        profileImage: req.newData.avatar
-      });
-      await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
-      await addDoc(collection(db, 'notifications'), {
-        userId: req.captainId,
-        userType: 'captain',
-        title: 'تحديث البيانات',
-        message: 'تمت الموافقة على طلب تعديل بياناتك بنجاح.',
-        timestamp: serverTimestamp(),
-        read: false,
-        sender: 'الإدارة'
-      });
+      if (req.userType === 'passenger') {
+        // 💡 تحديث بيانات الراكب (رقم الهاتف)
+        await updateDoc(doc(db, 'passengers', req.passengerId), {
+          phone: req.newData.phone
+        });
+        await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
+        await addDoc(collection(db, 'notifications'), {
+          userId: req.passengerId,
+          userType: 'passenger',
+          title: 'تم تحديث الرقم ✅',
+          message: 'تمت الموافقة على طلب تغيير رقم الهاتف الخاص بك بنجاح.',
+          timestamp: serverTimestamp(),
+          read: false,
+          sender: 'الإدارة'
+        });
+        Alert.alert('نجاح', 'تم تحديث رقم الراكب بنجاح.');
+      } else {
+        // 💡 تحديث بيانات الكابتن القديمة
+        await updateDoc(doc(db, 'captains', req.captainId), {
+          name: req.newData.name,
+          vehicle: req.newData.vehicle,
+          vehicleCategory: req.newData.vehicleCategory || 'tuktuk_alt',
+          vehicleDetails: req.newData.vehicleDetails || null,
+          avatar: req.newData.avatar,
+          profileImage: req.newData.avatar
+        });
+        await updateDoc(doc(db, 'update_requests', req.id), { status: 'approved' });
+        await addDoc(collection(db, 'notifications'), {
+          userId: req.captainId,
+          userType: 'captain',
+          title: 'تحديث البيانات',
+          message: 'تمت الموافقة على طلب تعديل بياناتك بنجاح.',
+          timestamp: serverTimestamp(),
+          read: false,
+          sender: 'الإدارة'
+        });
+        Alert.alert('نجاح', 'تم تحديث بيانات الكابتن بنجاح.');
+      }
       fetchDashboardData();
-      Alert.alert('نجاح', 'تمت الموافقة وتحديث بيانات الكابتن بنجاح.');
     } catch (e) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة الموافقة على الطلب.');
     }
@@ -322,10 +362,10 @@ setSupportTickets(tickets);
     try {
       await updateDoc(doc(db, 'update_requests', req.id), { status: 'rejected' });
       await addDoc(collection(db, 'notifications'), {
-        userId: req.captainId,
-        userType: 'captain',
-        title: 'تحديث البيانات',
-        message: 'تم رفض طلب تعديل بياناتك لمخالفته الشروط. تواصل مع الدعم للمزيد من التفاصيل.',
+        userId: req.passengerId || req.captainId,
+        userType: req.userType || 'captain',
+        title: 'رفض التعديل ❌',
+        message: 'تم رفض طلب التعديل الخاص بك من قبل الإدارة.',
         timestamp: serverTimestamp(),
         read: false,
         sender: 'الإدارة'
@@ -536,34 +576,57 @@ setSupportTickets(tickets);
             </>
           )}
         </ScrollView>
-      ) : activeTab === 'updates' ? (
+     ) : activeTab === 'updates' ? (
         <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
           {updateRequests.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات تعديل ✨</Text></View> : (
             updateRequests.map(req => (
               <View key={req.id} style={styles.userCard}>
-                <Text style={styles.updateRequestHeader}>طلب تعديل بيانات</Text>
-                <Text style={styles.updateRequestPhone}>رقم الكابتن: {req.captainPhone}</Text>
                 
-                <View style={styles.updateComparisonBox}>
-                  <View style={styles.updateCol}>
-                    <Text style={styles.updateColTitleNew}>البيانات الجديدة</Text>
-                    <Image source={{ uri: req.newData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
-                    <Text style={styles.updateText}>{req.newData.name}</Text>
-                    <Text style={styles.updateText}>{req.newData.vehicle}</Text>
-                  </View>
-                  <View style={styles.updateDivider} />
-                  <View style={styles.updateCol}>
-                    <Text style={styles.updateColTitleOld}>البيانات القديمة</Text>
-                    <Image source={{ uri: req.oldData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
-                    <Text style={styles.updateText}>{req.oldData.name}</Text>
-                    <Text style={styles.updateText}>{req.oldData.vehicle}</Text>
-                  </View>
-                </View>
+                {/* 💡 التفرقة بين طلب الراكب وطلب الكابتن */}
+                {req.userType === 'passenger' ? (
+                  <>
+                    <Text style={[styles.updateRequestHeader, {color: '#38bdf8'}]}>طلب تعديل هاتف (راكب 👤)</Text>
+                    <Text style={styles.updateRequestPhone}>الاسم: {req.passengerName}</Text>
+                    
+                    <View style={styles.updateComparisonBox}>
+                      <View style={styles.updateCol}>
+                        <Text style={styles.updateColTitleNew}>الرقم الجديد</Text>
+                        <Text style={[styles.updateText, {fontSize: 18, fontWeight: 'bold', color: '#10b981'}]}>{req.newData.phone}</Text>
+                      </View>
+                      <View style={styles.updateDivider} />
+                      <View style={styles.updateCol}>
+                        <Text style={styles.updateColTitleOld}>الرقم القديم</Text>
+                        <Text style={[styles.updateText, {fontSize: 16}]}>{req.oldData.phone}</Text>
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.updateRequestHeader}>طلب تعديل بيانات (كابتن 🛺)</Text>
+                    <Text style={styles.updateRequestPhone}>رقم الكابتن: {req.captainPhone}</Text>
+                    
+                    <View style={styles.updateComparisonBox}>
+                      <View style={styles.updateCol}>
+                        <Text style={styles.updateColTitleNew}>البيانات الجديدة</Text>
+                        <Image source={{ uri: req.newData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
+                        <Text style={styles.updateText}>{req.newData.name}</Text>
+                        <Text style={styles.updateText}>{req.newData.vehicle}</Text>
+                      </View>
+                      <View style={styles.updateDivider} />
+                      <View style={styles.updateCol}>
+                        <Text style={styles.updateColTitleOld}>البيانات القديمة</Text>
+                        <Image source={{ uri: req.oldData.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.updateAvatar} />
+                        <Text style={styles.updateText}>{req.oldData.name}</Text>
+                        <Text style={styles.updateText}>{req.oldData.vehicle}</Text>
+                      </View>
+                    </View>
 
-                {req.newData.vehicleCategory && req.newData.vehicleCategory !== 'car' && (
-                   <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs({ vehicleImage: req.newData.vehicleDetails?.image })}>
-                     <Text style={styles.inspectDocsBtnText}>🔍 معاينة صورة المركبة الجديدة</Text>
-                   </TouchableOpacity>
+                    {req.newData.vehicleCategory && req.newData.vehicleCategory !== 'car' && (
+                       <TouchableOpacity style={styles.inspectDocsBtn} onPress={() => setSelectedDocs({ vehicleImage: req.newData.vehicleDetails?.image })}>
+                         <Text style={styles.inspectDocsBtnText}>🔍 معاينة صورة المركبة الجديدة</Text>
+                       </TouchableOpacity>
+                    )}
+                  </>
                 )}
 
                 <View style={styles.actionRow}>
@@ -574,7 +637,7 @@ setSupportTickets(tickets);
             ))
           )}
         </ScrollView>
-      ) : activeTab === 'captains' ? (
+              ) : activeTab === 'captains' ? (
         <View style={{ flex: 1 }}>
           <TextInput style={styles.searchInput} placeholder="بحث عن كابتن (اسم، رقم، توكتوك)..." placeholderTextColor="#64748b" value={searchCaptain} onChangeText={setSearchCaptain} textAlign="right" />
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
@@ -702,8 +765,19 @@ setSupportTickets(tickets);
             <Text style={styles.complaintBadgeText}>{complaintsCount}</Text>
           </View>
         )}
+        </TouchableOpacity>
+      {/* 🔑 زرار طلبات استعادة كلمة المرور الجديد */}
+      <TouchableOpacity 
+        style={[styles.fullWidthComplaintsBtn, { backgroundColor: '#d97706', marginTop: 15 }]} 
+        onPress={() => router.push('/admin-password-resets')}
+      >
+        <Text style={styles.fullWidthComplaintsBtnText}>طلبات استعادة كلمة المرور 🔑</Text>
+        {passwordResetCount > 0 && (
+          <View style={styles.complaintBadge}>
+            <Text style={styles.complaintBadgeText}>{passwordResetCount}</Text>
+          </View>
+        )}
       </TouchableOpacity>
-
       {/* مودال صندوق الدعم الفني (الشات المباشر) */}
       <Modal visible={isSupportModalVisible} animationType="slide" onRequestClose={() => setIsSupportModalVisible(false)}>
         <View style={{ flex: 1, backgroundColor: '#0f172a' }}>
@@ -819,7 +893,7 @@ setSupportTickets(tickets);
 
                 <Text style={[styles.profileStatusBadge, selectedUser.status === 'banned' && { backgroundColor: '#ef4444' }]}>{selectedUser.status === 'banned' ? 'محظور من التسجيل 🚫' : 'حساب نشط 🟢'}</Text>
               </View>
-
+                  
               <TouchableOpacity style={styles.sendDirectMsgBtnProfile} onPress={() => setProfileMsgModalVisible(true)}>
                 <Text style={styles.sendDirectMsgBtnText}>إرسال رسالة مباشرة لهذا المستخدم 📩</Text>
               </TouchableOpacity>

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -74,22 +74,24 @@ export default function CaptainComplaints() {
     }
     setLoading(true);
     try {
+      // 💡 توحيد البيانات عشان الأدمن يقرأها بنفس طريقة الراكب بالظبط
       const newTicket = {
         captainId: captainData.id,
-        captainName: captainData.name || 'غير مسجل',
-        captainPhone: captainData.phone || 'غير مسجل',
-        userType: 'captain',
+        senderName: captainData.name || 'غير مسجل', 
+        senderPhone: captainData.phone || 'غير مسجل', 
+        userType: 'captain', 
         pushToken: captainData.pushToken || '',
         type: activeTab,
-        content: content.trim(),
+        message: content.trim(), // الحقل الموحد للنص
+        content: content.trim(), // للاحتياط
         status: 'pending',
-        reply: '',
-        timestamp: serverTimestamp()
+        isReadAdmin: false, // عشان تظهر كـ "جديد" عند الإدارة
+        adminReply: '', 
+        timestamp: new Date().getTime() // 🕒 استخدام الوقت الرقمي لتجنب أي أخطاء في الترتيب
       };
       
       const docRef = await addDoc(collection(db, 'support_tickets'), newTicket);
       
-      // 👈 إضافة التذكرة للشاشة محلياً لتوفير استهلاك إعادة الجلب من فايربيز
       setTickets(prev => [{ id: docRef.id, ...newTicket }, ...prev]);
       
       Alert.alert('نجاح ✅', 'تم إرسال رسالتك للإدارة بنجاح وسيتم التواصل معك قريباً.');
@@ -100,7 +102,6 @@ export default function CaptainComplaints() {
       setLoading(false);
     }
   };
-
   const renderTicket = ({ item }: { item: any }) => (
     <View style={styles.ticketCard}>
       <View style={styles.ticketHeader}>
@@ -110,16 +111,17 @@ export default function CaptainComplaints() {
         ]}>
           {item.type === 'lost_item' ? '🔍 مفقودات' : item.type === 'suggestion' ? '💡 مقترح' : '⚠️ شكوى'}
         </Text>
-        <Text style={[styles.ticketStatus, { color: item.status === 'replied' ? '#10b981' : '#f59e0b' }]}>
-          {item.status === 'replied' ? 'تم الرد' : 'قيد المراجعة'}
+        <Text style={[styles.ticketStatus, { color: (item.status === 'replied' || item.adminReply) ? '#10b981' : '#f59e0b' }]}>
+          {(item.status === 'replied' || item.adminReply) ? 'تم الرد ✔️' : 'قيد المراجعة ⏳'}
         </Text>
       </View>
-      <Text style={styles.ticketContent}>{item.content}</Text>
+      <Text style={styles.ticketContent}>{item.content || item.message}</Text>
       
-      {item.status === 'replied' && item.reply ? (
+      {/* 💡 قراءة رد الإدارة الجديد لخدمة العملاء */}
+      {(item.adminReply || item.reply) ? (
         <View style={styles.replyBox}>
-          <Text style={styles.replyTitle}>رد الإدارة:</Text>
-          <Text style={styles.replyContent}>{item.reply}</Text>
+          <Text style={styles.replyTitle}>رد الإدارة (خدمة العملاء):</Text>
+          <Text style={styles.replyContent}>{item.adminReply || item.reply}</Text>
         </View>
       ) : null}
     </View>

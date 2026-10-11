@@ -42,6 +42,10 @@ export default function CaptainRegister() {
   const [activeTab, setActiveTab] = useState<'basic' | 'vehicle'>('basic');
   const [vehicleCategory, setVehicleCategory] = useState<'car' | 'tuktuk_alt' | 'scooter'>('car');
 
+  // 💡 متغيرات التحكم في إظهار وإخفاء الباسوورد
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [name, setName] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [phone, setPhone] = useState('');
@@ -203,6 +207,7 @@ export default function CaptainRegister() {
     setActiveTab(tab);
     scrollViewRef.current?.scrollToPosition(0, 0, true);
   };
+
   const openDropdown = (target: 'carBrand' | 'carModel' | 'carYear' | 'carColor', title: string, data: string[]) => {
     setDropdownTarget(target); setDropdownTitle(title); setDropdownData(data); setIsDropdownVisible(true);
   };
@@ -283,7 +288,7 @@ export default function CaptainRegister() {
     </View>
   );
 
-const handleRegister = async () => {
+  const handleRegister = async () => {
     let missingFields = []; 
 
     if (!(await validateName())) missingFields.push('الاسم الرباعي');
@@ -295,7 +300,7 @@ const handleRegister = async () => {
     let finalBrand = carBrand === 'ماركة أخرى (غير مسجلة)' ? customCarBrand : carBrand;
     let finalModel = carModel === 'أخرى' ? customCarModel : carModel;
     let finalColor = carColor === 'أخرى' ? customCarColor : carColor;
-    let finalPlate = `${plateLetter1} ${plateLetter2} ${plateLetter3} - ${plateNumbers}`;
+    let finalPlate = `${plateLetter1} ${plateLetter2} ${plateLetter3} ${plateNumbers}`;
 
     if (vehicleCategory === 'car') {
       if (!carBrand) missingFields.push('ماركة السيارة');
@@ -314,7 +319,7 @@ const handleRegister = async () => {
     }
 
     if (missingFields.length > 0) {
-      Alert.alert('بيانات ناقصة ⚠️', 'برجاء إكمال البيانات التالية:\n\n- ' + missingFields.join('\n- '));
+      Alert.alert('بيانات ناقصة ⚠️', 'برجاء إكمال البيانات التالية:\n\n' + missingFields.join('\n'));
       return;
     }
 
@@ -423,12 +428,40 @@ const handleRegister = async () => {
               <TextInput style={[styles.input, errors.phone ? styles.inputError : null]} placeholder="مثال: 01012345678" value={phone} onChangeText={setPhone} onBlur={validatePhone} keyboardType="phone-pad" textAlign="right" maxLength={11} />
               {errors.phone ? <Text style={styles.errorText}>{errors.phone}</Text> : null}
 
+              {/* 💡 خانة كلمة السر المحدثة بعلامة العين */}
               <Text style={styles.label}>كلمة المرور</Text>
-              <TextInput style={[styles.input, errors.password ? styles.inputError : null]} placeholder="اكتب كلمة مرور" value={password} onChangeText={setPassword} onBlur={validatePassword} secureTextEntry textAlign="right" />
+              <View style={styles.passwordWrapper}>
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+                  <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={24} color="#94a3b8" />
+                </TouchableOpacity>
+                <TextInput 
+                  style={styles.passwordInput} 
+                  placeholder="اكتب كلمة مرور" 
+                  value={password} 
+                  onChangeText={setPassword} 
+                  onBlur={validatePassword} 
+                  secureTextEntry={!showPassword} 
+                  textAlign="right" 
+                />
+              </View>
               {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
 
+              {/* 💡 خانة تأكيد كلمة السر المحدثة بعلامة العين */}
               <Text style={styles.label}>تأكيد كلمة المرور</Text>
-              <TextInput style={[styles.input, errors.confirmPassword ? styles.inputError : null]} placeholder="أعد كتابة كلمة المرور" value={confirmPassword} onChangeText={setConfirmPassword} onBlur={validateConfirmPassword} secureTextEntry textAlign="right" />
+              <View style={styles.passwordWrapper}>
+                <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeBtn}>
+                  <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={24} color="#94a3b8" />
+                </TouchableOpacity>
+                <TextInput 
+                  style={styles.passwordInput} 
+                  placeholder="أعد كتابة كلمة المرور" 
+                  value={confirmPassword} 
+                  onChangeText={setConfirmPassword} 
+                  onBlur={validateConfirmPassword} 
+                  secureTextEntry={!showConfirmPassword} 
+                  textAlign="right" 
+                />
+              </View>
               {errors.confirmPassword ? <Text style={styles.errorText}>{errors.confirmPassword}</Text> : null}
 
               <Text style={styles.sectionSubtitle}>صور البطاقة الشخصية (اختياري مؤقتاً)</Text>
@@ -591,30 +624,7 @@ const handleRegister = async () => {
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 15 }}>شروط العمل وإخلاء المسؤولية</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={{ fontSize: 14, color: '#334155', textAlign: 'right', lineHeight: 24, marginBottom: 10 }}>
-                <Text style={{ fontWeight: 'bold' }}>1. طبيعة الخدمة:</Text> التطبيق هو منصة إلكترونية (وسيط تقني) تهدف إلى تسهيل الربط بين الركاب والكباتن. التطبيق لا يمتلك المركبة وأنت لست موظفاً لدينا بل مقاول مستقل.{"\n\n"}
-                <Text style={{ fontWeight: 'bold' }}>2. إخلاء المسؤولية التام:</Text>{"\n"}
-                • إدارة التطبيق ومالكه غير مسؤولين تماماً عن أي حوادث مرورية، أو إصابات جسدية، أو تلف لمركبتك يحدث أثناء استخدام التطبيق.{"\n"}
-                • التطبيق يخلي مسؤوليته القانونية عن أي نزاع، أو تعدي، أو فقدان للمتعلقات الشخصية.{"\n"}
-                • أنت تتحمل المسؤولية الشخصية والقانونية الكاملة عن سلامتك وسلامة الراكب والمركبة.{"\n\n"}
-                <Text style={{ fontWeight: 'bold' }}>3. صحة البيانات:</Text> تقر بأن جميع الأوراق والمستندات المرفوعة صحيحة وسارية المفعول، وتتحمل المسؤولية الجنائية في حال تزويرها.{"\n\n"}
-                <Text style={{ fontWeight: 'bold' }}>4. القبول بالشروط:</Text> استخدامك للتطبيق يعني موافقتك الصريحة والنهائية على جميع ما ورد في هذه الوثيقة، وتنازلك عن أي حق في مقاضاة مالك التطبيق.
-              </Text>
-            </ScrollView>
-            <TouchableOpacity onPress={() => setIsPolicyModalVisible(false)} style={{ backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 15 }}>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>إغلاق الشروط</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 👈 نافذة شروط العمل وإخلاء المسؤولية للكابتن */}
-      <Modal animationType="fade" transparent={true} visible={isPolicyModalVisible}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: '#fff', width: '100%', maxHeight: '80%', padding: 20, borderRadius: 16, elevation: 5 }}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 15 }}>شروط العمل وإخلاء المسؤولية</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={{ fontSize: 14, color: '#334155', textAlign: 'right', lineHeight: 24, marginBottom: 10 }}>
-                <Text style={{ fontWeight: 'bold' }}>1. طبيعة العمل:</Text> أنت تعمل كمقاول مستقل وتستخدم المنصة لتلقي طلبات الركاب. أنت لست موظفاً لدى التطبيق، والتطبيق لا يمتلك المركبة.{"\n\n"}
+                <Text style={{ fontWeight: 'bold' }}>طبيعة العمل:</Text> أنت تعمل كمقاول مستقل وتستخدم المنصة لتلقي طلبات الركاب. أنت لست موظفاً لدى التطبيق، والتطبيق لا يمتلك المركبة.{"\n\n"}
                 <Text style={{ fontWeight: 'bold' }}>2. إخلاء المسؤولية التام:</Text>{"\n"}
                 • إدارة التطبيق غير مسؤولة تماماً عن أي حوادث مرورية، أو تلف للمركبة، أو أضرار مادية تحدث أثناء استخدام التطبيق.{"\n"}
                 • التطبيق يخلي مسؤوليته القانونية عن أي نزاع أو تعدي بينك وبين الراكب.{"\n"}
@@ -649,6 +659,12 @@ const styles = StyleSheet.create({
   avatarPlaceholder: { alignItems: 'center' },
   label: { fontSize: 15, fontWeight: 'bold', color: '#475569', textAlign: 'right', marginBottom: 8, marginTop: 15 },
   input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 12, fontSize: 15, color: '#0f172a' },
+  
+  // 💡 تنسيقات الباسوورد والعين المضافة
+  passwordWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 10 },
+  passwordInput: { flex: 1, paddingVertical: 12, fontSize: 15, textAlign: 'right', color: '#0f172a' },
+  eyeBtn: { padding: 5 },
+
   inputError: { borderColor: '#ef4444', borderWidth: 1.5, backgroundColor: '#fef2f2' },
   errorText: { color: '#ef4444', fontSize: 12, fontWeight: 'bold', textAlign: 'right', marginTop: 4, marginLeft: 5 },
   plateRow: { flexDirection: 'row-reverse', gap: 8, marginTop: 5 },

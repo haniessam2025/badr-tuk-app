@@ -1,8 +1,9 @@
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 
 export default function CaptainHistory() {
@@ -13,34 +14,44 @@ export default function CaptainHistory() {
   const [totalRides, setTotalRides] = useState(0);
   const [totalEarnings, setTotalEarnings] = useState(0);
 
+  // متغيرات مودال بلاغ المفقودات
+  const [isLostModalVisible, setIsLostModalVisible] = useState(false);
+  const [selectedRide, setSelectedRide] = useState<any>(null);
+  const [lostText, setLostText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captainId, setCaptainId] = useState<string | null>(null);
+  const [captainProfile, setCaptainProfile] = useState<any>(null);
+
   useEffect(() => {
     fetchHistory();
   }, []);
 
   const fetchHistory = async () => {
     try {
-      let captainId = await AsyncStorage.getItem('currentCaptainId');
+      let capId = await AsyncStorage.getItem('currentCaptainId');
       let profileStr = await AsyncStorage.getItem('captain_profile');
       let profile = profileStr ? JSON.parse(profileStr) : null;
       
-      if (!captainId && profile) {
-        captainId = profile.id || profile.uid;
+      if (profile) setCaptainProfile(profile);
+
+      if (!capId && profile) {
+        capId = profile.id || profile.uid;
       }
 
-      if (!captainId) {
+      if (capId) setCaptainId(capId);
+
+      if (!capId) {
         setLoading(false);
         return;
       }
 
-      // 1. حساب وقت بداية "اليوم الحالي" (الساعة 12:00 صباحاً من اليوم)
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const cutoffTimestamp = startOfToday.getTime();
 
-      // 2. جلب رحلات "اليوم فقط" من الفايربيز (توفير هائل للباقة)
       const q = query(
         collection(db, 'rides'),
-        where('captainId', '==', captainId),
+        where('captainId', '==', capId),
         where('timestamp', '>=', cutoffTimestamp)
       );
       
@@ -51,26 +62,18 @@ export default function CaptainHistory() {
       
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        
-        // إضافة الرحلات المكتملة والملغية لقائمة العرض
         if (data.status === 'completed' || data.status === 'canceled') {
           dailyRides.push({ id: docSnap.id, ...data });
         }
-        
-        // حساب أرباح وعدد رحلات "اليوم فقط"
         if (data.status === 'completed') {
           dailyCompletedRides++;
           dailyEarnings += parseFloat(data.price) || 0;
         }
       });
 
-      // 3. تحديث الأرقام لعرضها في أعلى الشاشة
       setTotalEarnings(dailyEarnings);
       setTotalRides(dailyCompletedRides);
-
-      // ترتيب الرحلات (الأحدث أولاً)
       dailyRides.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
       setHistory(dailyRides);
     } catch (error: any) {
       console.log('Error fetching history:', error);
@@ -78,7 +81,48 @@ export default function CaptainHistory() {
     } finally {
       setLoading(false);
     }
-  };  
+  };
+
+  // دالة إرسال بلاغ المفقودات
+  const submitLostItem = async () => {
+    if (!lostText.trim()) {
+      Alert.alert('تنبيه', 'برجاء كتابة تفاصيل الأغراض التي عثرت عليها.');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, 'support_tickets'), {
+        type: 'lost_item',
+        rideId: selectedRide.id,
+        captainId: captainId || 'unknown',
+        captainName: captainProfile?.name || selectedRide.captainName || 'كابتن',
+        captainPhone: captainProfile?.phone || selectedRide.captainPhone || 'غير مسجل',
+        captainVehicle: captainProfile?.vehicle || selectedRide.vehicle || 'مركبة',
+        userType: 'captain',
+        senderName: captainProfile?.name || 'كابتن',
+        senderPhone: captainProfile?.phone || 'غير مسجل',
+        passengerId: selectedRide.passengerId || 'unknown',
+        passengerName: selectedRide.name || selectedRide.passengerName || 'غير مسجل',
+        passengerPhone: selectedRide.phone || selectedRide.passengerPhone || 'غير مسجل',
+        pickupLocation: selectedRide.pickupLocation || '',
+        destinationLocation: selectedRide.destinationLocation || '',
+        message: `عثرت على أغراض منسية: ${lostText.trim()}`,
+        content: `عثرت على أغراض منسية: ${lostText.trim()}`,
+        status: 'pending',
+        isReadAdmin: false,
+        timestamp: new Date().getTime()
+      });
+
+      Alert.alert('تم الإرسال ✅', 'تم إبلاغ الإدارة بالعثور على الأغراض بنجاح.');
+      setIsLostModalVisible(false);
+setLostText('');
+    } catch (error) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال البلاغ.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const formatDate = (timestamp: number) => {
     if (!timestamp) return 'غير محدد';
     const date = new Date(timestamp);
@@ -101,6 +145,21 @@ export default function CaptainHistory() {
         <Text style={styles.passengerText}>👤 الراكب: {item.name}</Text>
         <Text style={styles.priceText}>💰 {item.price} ج</Text>
       </View>
+
+      {/* 🎒 زرار إبلاغ الكابتن عن مفقودات عثر عليها في الرحلة */}
+      {item.status === 'completed' && (
+        <TouchableOpacity 
+          style={styles.lostBtn} 
+          onPress={() => {
+            setSelectedRide(item);
+            setLostText('');
+            setIsLostModalVisible(true);
+          }}
+        >
+          <Ionicons name="cube-outline" size={16} color="#d97706" />
+          <Text style={styles.lostBtnText}>عثرت على مفقودات في هذه الرحلة 🎒</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -138,6 +197,36 @@ export default function CaptainHistory() {
           contentContainerStyle={{ paddingBottom: 20 }}
         />
       )}
+
+      {/* 🎒 مودال إدخال تفاصيل المفقودات */}
+      <Modal visible={isLostModalVisible} transparent={true} animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>إبلاغ عن مفقودات عثرت عليها 🎒</Text>
+            <Text style={styles.modalSubtitle}>اكتب وصفاً للأغراض المنسية لتوصيلها لصاحبها عبر الإدارة.</Text>
+            
+            <TextInput
+              style={styles.modalInput}
+              placeholder="مثال: محفظة، هاتف، حقيبة..."
+              placeholderTextColor="#94a3b8"
+              multiline
+              value={lostText}
+              onChangeText={setLostText}
+              textAlign="right"
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalSendBtn} onPress={submitLostItem} disabled={isSubmitting}>
+                {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalSendBtnText}>إرسال للإدارة 🚀</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsLostModalVisible(false)}>
+                <Text style={styles.modalCancelBtnText}>إلغاء</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </View>
   );
 }
@@ -149,7 +238,7 @@ const styles = StyleSheet.create({
   backBtn: { backgroundColor: '#e2e8f0', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   backBtnText: { color: '#334155', fontWeight: 'bold' },
   
-  summaryCard: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 20, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+  summaryCard: { flexDirection: 'row-reverse', backgroundColor: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 20, elevation: 4 },
   summaryBox: { flex: 1, alignItems: 'center' },
   summaryDivider: { width: 1, backgroundColor: '#334155', marginHorizontal: 10 },
   summaryLabel: { fontSize: 13, color: '#94a3b8', marginBottom: 5, fontWeight: 'bold' },
@@ -165,7 +254,21 @@ const styles = StyleSheet.create({
   statusBadgeCanceled: { backgroundColor: '#fee2e2', color: '#ef4444' },
   routeContainer: { marginBottom: 10 },
   routeText: { fontSize: 14, color: '#334155', fontWeight: 'bold', marginBottom: 4, textAlign: 'right' },
-  cardFooter: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 },
+  cardFooter: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginTop: 5, marginBottom: 10 },
   passengerText: { fontSize: 13, color: '#475569' },
-  priceText: { fontSize: 16, fontWeight: 'bold', color: '#10b981' }
+  priceText: { fontSize: 16, fontWeight: 'bold', color: '#10b981' },
+
+  lostBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fef3c7', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#fde68a', gap: 6, marginTop: 5 },
+  lostBtnText: { color: '#d97706', fontSize: 12, fontWeight: 'bold' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#ffffff', width: '100%', padding: 20, borderRadius: 16, elevation: 5 },
+  modalTitle: { fontSize: 17, fontWeight: 'bold', color: '#1e293b', textAlign: 'center', marginBottom: 5 },
+  modalSubtitle: { fontSize: 12, color: '#64748b', textAlign: 'center', marginBottom: 15 },
+  modalInput: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, padding: 12, minHeight: 80, textAlignVertical: 'top', fontSize: 14, color: '#1e293b', marginBottom: 15 },
+  modalActions: { flexDirection: 'row-reverse', gap: 10 },
+  modalSendBtn: { flex: 2, backgroundColor: '#d97706', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  modalSendBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
+  modalCancelBtn: { flex: 1, backgroundColor: '#fee2e2', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  modalCancelBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
 });

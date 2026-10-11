@@ -29,7 +29,7 @@ export default function PassengerNotifications() {
       );
 
       const snap = await getDocs(q);
-      const notifs: any[] = [];
+      let notifs: any[] = [];
       
       snap.forEach((d) => {
         notifs.push({ id: d.id, ...d.data() });
@@ -37,6 +37,13 @@ export default function PassengerNotifications() {
         if (!d.data().read) {
           updateDoc(doc(db, 'notifications', d.id), { read: true });
         }
+      });
+
+      // 💡 الترتيب الذكي: من الأحدث للأقدم بناءً على الوقت (timestamp) لضمان ظهور الجديد فوق دائماً
+      notifs.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp || 0).getTime());
+        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp || 0).getTime());
+        return timeB - timeA; // الأحدث (القيمة الأكبر) يأتي في المقدمة
       });
 
       setNotifications(notifs);

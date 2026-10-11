@@ -211,116 +211,147 @@ const saveNewDestinations = async () => {
       return;
     }
 
-    // 🌟 لو الراكب في رحلة شغالة فعلاً (بيعدل أثناء الرحلة)
-    if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(rideStatus)) {
-      setIsEditDestModalVisible(false);
+    setIsEditDestModalVisible(false);
+    setIsCalculatingPrice(true); // تشغيل مؤشر التحميل
+
+    try {
+      let startCoords = pickupCoords;
+      let destsCoords: any[] = [];
+      for (let dest of validDests) {
+        const coords = await getCoordinatesFromText(dest);
+        if (coords) destsCoords.push(coords);
+      }
+
+      let totalDirectMeters = 0;
+      let currentPoint = startCoords;
+      if (startCoords && destsCoords.length === validDests.length) {
+        for (let dest of destsCoords) {
+          let d = calculateDistance(currentPoint!.latitude, currentPoint!.longitude, dest.latitude, dest.longitude);
+          totalDirectMeters += d;
+          currentPoint = dest;
+        }
+      }
+
+      let newDistanceKm = (totalDirectMeters / 1000) * 1.35; 
+      const savedRideStr = await AsyncStorage.getItem('active_ride');
+      const activeRide = savedRideStr ? JSON.parse(savedRideStr) : null;
+      const oldDistanceKm = parseFloat(activeRide?.distance || calculatedDistance || '0');
+      const oldPrice = parseInt(activeRide?.price || price || '0');
       
-      try {
-        let startCoords = pickupCoords;
-        let destsCoords: any[] = [];
-        for (let dest of validDests) {
-          const coords = await getCoordinatesFromText(dest);
-          if (coords) destsCoords.push(coords);
-        }
+      let calculatedNewBasePrice = oldPrice;
+      let priceDiff = 0;
+      let isIncrease = true;
 
-        let totalDirectMeters = 0;
-        let currentPoint = startCoords;
-        if (startCoords && destsCoords.length === validDests.length) {
-          for (let dest of destsCoords) {
-            let d = calculateDistance(currentPoint!.latitude, currentPoint!.longitude, dest.latitude, dest.longitude);
-            totalDirectMeters += d;
-            currentPoint = dest;
-          }
-        }
+      const isActiveRide = ['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(rideStatus);
 
-        let newDistanceKm = (totalDirectMeters / 1000) * 1.35; 
-        const savedRideStr = await AsyncStorage.getItem('active_ride');
-        const activeRide = savedRideStr ? JSON.parse(savedRideStr) : null;
-        const oldDistanceKm = parseFloat(activeRide?.distance || calculatedDistance || '0');
-        const oldPrice = parseInt(activeRide?.price || price || '0');
-        
-        let calculatedNewBasePrice = oldPrice;
-        let priceDiff = 0;
-
-        // 👈 تطبيق التسعيرة اللي طلبتها بالظبط
+      // 🌟 1. لو الراكب في رحلة نشطة
+      if (isActiveRide) {
         if (newDistanceKm > oldDistanceKm) {
           const extraKm = newDistanceKm - oldDistanceKm;
-          priceDiff = Math.ceil(extraKm * 6.5); // 6.5 جنيه لكل كيلو زيادة
+          priceDiff = Math.ceil(extraKm * 6.5); 
           calculatedNewBasePrice += priceDiff;
         } else if (newDistanceKm < oldDistanceKm) {
           const lessKm = oldDistanceKm - newDistanceKm;
-          priceDiff = Math.ceil(lessKm * 4); // 4 جنيه خصم لكل كيلو نقصان
+          priceDiff = Math.ceil(lessKm * 4); 
           calculatedNewBasePrice -= priceDiff;
-          if (calculatedNewBasePrice < 100) calculatedNewBasePrice = 100; // الحد الأدنى
+          if (calculatedNewBasePrice < 100) calculatedNewBasePrice = 100; 
+          isIncrease = false;
         }
+      } else {
+        // 🌟 2. لو الراكب لسه بيبحث
+         let calculatedPrice = 0;
+         if (requestedVehicleType === 'car') {
+           if (newDistanceKm <= 15) { calculatedPrice = 15 + (newDistanceKm * 4.4); }
+           else if (newDistanceKm <= 45) { calculatedPrice = 91 + ((newDistanceKm - 15) * 3.8); }
+           else { calculatedPrice = 205 + ((newDistanceKm - 45) * 3.2); }
+         } else if (requestedVehicleType === 'scooter') {
+           calculatedPrice = Math.max(12, newDistanceKm * 3.75);
+         } else {
+           let basePriceForOne = Math.max(15, newDistanceKm * 6.5);
+           const count = parseInt(passengersCount) || 1;
+           const passengerMultiplier = 1 + ((count - 1) * 0.25); 
+           calculatedPrice = basePriceForOne * passengerMultiplier;
+         }
+         calculatedNewBasePrice = Math.ceil(calculatedPrice);
+         if (calculatedNewBasePrice < 100) calculatedNewBasePrice = 100;
+         priceDiff = Math.abs(calculatedNewBasePrice - oldPrice);
+         isIncrease = calculatedNewBasePrice >= oldPrice;
+      }
 
-        const isIncrease = newDistanceKm >= oldDistanceKm;
-        const diffText = isIncrease ? `زيادة قدرها ${priceDiff} ج 🔺` : `خصم قدره ${priceDiff} ج 🔻`;
+      setIsCalculatingPrice(false);
+      const diffText = isIncrease ? `زيادة قدرها ${priceDiff} ج 🔺` : `خصم قدره ${priceDiff} ج 🔻`;
+      
+      // تجهيز بيانات التعديل
+      const modPayload = {
+        newDestinationsList: validDests,
+        newDestinationLocation: validDests.join(' - '),
+        newDistance: newDistanceKm.toFixed(1),
+        newPrice: calculatedNewBasePrice.toString(),
+        calculatedBasePrice: calculatedNewBasePrice,
+        priceDiff: priceDiff,
+        isIncrease: isIncrease,
+        status: 'pending',
+        timestamp: new Date().getTime(),
+        notifiedPassenger: false
+      };
 
-        // تجهيز بيانات التعديل
-        const modPayload = {
-          newDestinationsList: validDests,
-          newDestinationLocation: validDests.join(' - '),
-          newDistance: newDistanceKm.toFixed(1),
-          newPrice: calculatedNewBasePrice.toString(),
-          calculatedBasePrice: calculatedNewBasePrice,
-          priceDiff: priceDiff,
-          isIncrease: isIncrease,
-          status: 'pending',
-          timestamp: new Date().getTime(),
-          notifiedPassenger: false
-        };
+      const alertTitle = isActiveRide ? 'تأكيد تعديل الوجهة 🗺️' : 'تأكيد السعر الجديد 🗺️';
+      const alertMsg = isActiveRide 
+        ? `السعر العادل للمسار الجديد: ${calculatedNewBasePrice} ج\n(${diffText})\n\nتقدر تعدل السعر أو تبعته فوراً للكابتن للموافقة.`
+        : `السعر المقترح للوجهة الجديدة: ${calculatedNewBasePrice} ج\n\nتقدر تأكد السعر أو تعدله قبل إرسال الطلب للكباتن.`;
 
-        Alert.alert(
-          'تأكيد تعديل الوجهة 🗺️',
-          `السعر العادل للمسار الجديد: ${calculatedNewBasePrice} ج\n(${diffText})\n\nتقدر تعدل السعر أو تبعته فوراً للكابتن للموافقة.`,
-          [
-            { text: 'إلغاء وتراجع ❌', style: 'cancel' },
-            { 
-              text: 'تعديل السعر ✏️', 
-              onPress: async () => {
-                // حفظ التعديل مؤقتاً لفتح نافذة تعديل السعر للراكب
-                await AsyncStorage.setItem('temp_mod_payload', JSON.stringify(modPayload));
-                setTempPrice(calculatedNewBasePrice.toString());
+      Alert.alert(alertTitle, alertMsg, [
+        { text: 'إلغاء وتراجع ❌', style: 'cancel' },
+        { 
+          text: 'تعديل السعر ✏️', 
+          onPress: async () => {
+            await AsyncStorage.setItem('temp_mod_payload', JSON.stringify(modPayload));
+            setTempPrice(calculatedNewBasePrice.toString());
+            setCalculatedBasePrice(calculatedNewBasePrice);
+            setIsEditModalVisible(true);
+          } 
+        },
+        { 
+          text: isActiveRide ? 'إرسال للكابتن 🚀' : 'تأكيد ونشر 🚀', 
+          onPress: async () => {
+            if (currentRideId) {
+              if (isActiveRide) {
+                await updateDoc(doc(db, 'rides', currentRideId), { pendingModification: modPayload });
+                Alert.alert('تم الإرسال 📨', 'تم إرسال طلب تعديل الوجهة للسائق، في انتظار موافقته..');
+              } else {
+                setPrice(calculatedNewBasePrice.toString());
                 setCalculatedBasePrice(calculatedNewBasePrice);
-                setIsEditModalVisible(true);
-              } 
-            },
-            { 
-              text: 'إرسال للكابتن 🚀', 
-              onPress: async () => {
-                if (currentRideId) {
-                  await updateDoc(doc(db, 'rides', currentRideId), {
-                    pendingModification: modPayload
-                  });
-                  Alert.alert('تم الإرسال 📨', 'تم إرسال طلب تعديل الوجهة للسائق، في انتظار موافقته..');
+                setDestinations(validDests);
+                
+                await updateDoc(doc(db, 'rides', currentRideId), {
+                  destinationsList: validDests,
+                  destinationLocation: validDests.join(' - '),
+                  distance: newDistanceKm.toFixed(1),
+                  price: calculatedNewBasePrice.toString(),
+                  calculatedBasePrice: calculatedNewBasePrice,
+                  timestamp: new Date().getTime(),
+                  offers: [] 
+                });
+                
+                const savedRide = await AsyncStorage.getItem('active_ride');
+                if (savedRide) {
+                  const data = JSON.parse(savedRide);
+                  data.price = calculatedNewBasePrice.toString();
+                  data.destinationsList = validDests;
+                  data.destinationLocation = validDests.join(' - ');
+                  await AsyncStorage.setItem('active_ride', JSON.stringify(data));
                 }
+                Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر، وجاري استقبال عروض الكباتن.');
               }
             }
-          ]
-        );
+          }
+        }
+      ]);
 
-      } catch (e) {
-        Alert.alert('خطأ', 'فشل في حساب المسار الجديد تأكد من اتصالك بالإنترنت.');
-      }
-      return;
+    } catch (e) {
+      setIsCalculatingPrice(false);
+      Alert.alert('خطأ', 'فشل في حساب المسار الجديد تأكد من اتصالك بالإنترنت.');
     }
-
-    // --- اللوجيك العادي لو لسه بيبحث عن كابتن ---
-    setDestinations(validDests);
-    setIsEditDestModalVisible(false);
-    
-    try {
-      if (currentRideId) {
-        await updateDoc(doc(db, 'rides', currentRideId), { 
-          destinationsList: validDests,
-          destinationLocation: validDests.join(' - '),
-          timestamp: new Date().getTime(),
-          offers: [] 
-        });
-      }
-      updatePriceCalculation(pickup, validDests, requestedVehicleType, passengersCount, pickupCoords);
-    } catch (e) {}
   };
   const [offers, setOffers] = useState<any[]>([]);
   const [numericSecret, setNumericSecret] = useState('');
@@ -1231,22 +1262,32 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     setIsEditModalVisible(false);
     
     try {
-      // 👈 فحص لو الراكب بيعدل السعر أثناء تعديل وجهة في رحلة نشطة
       const tempModStr = await AsyncStorage.getItem('temp_mod_payload');
       if (tempModStr && currentRideId) {
         const modPayload = JSON.parse(tempModStr);
-        modPayload.newPrice = tempPrice.toString(); // نحدث السعر اللي الراكب اختاره بنفسه
+        modPayload.newPrice = tempPrice.toString();
         modPayload.timestamp = new Date().getTime();
         
-        await updateDoc(doc(db, 'rides', currentRideId), {
-          pendingModification: modPayload
-        });
-        await AsyncStorage.removeItem('temp_mod_payload'); // تنظيف
-        Alert.alert('تم الإرسال 📨', 'تم إرسال طلب تعديل الوجهة والسعر الجديد للكابتن للموافقة.');
-        return; // الخروج عشان ميكملش التحديث العادي بتاع البحث
+        if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(rideStatus)) {
+          await updateDoc(doc(db, 'rides', currentRideId), { pendingModification: modPayload });
+          Alert.alert('تم الإرسال 📨', 'تم إرسال طلب تعديل الوجهة والسعر الجديد للكابتن للموافقة.');
+        } else {
+          setDestinations(modPayload.newDestinationsList);
+          await updateDoc(doc(db, 'rides', currentRideId), {
+            destinationsList: modPayload.newDestinationsList,
+            destinationLocation: modPayload.newDestinationLocation,
+            distance: modPayload.newDistance,
+            price: tempPrice.toString(),
+            calculatedBasePrice: modPayload.calculatedBasePrice,
+            timestamp: new Date().getTime(),
+            offers: []
+          });
+          Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر وإرسالها للكباتن.');
+        }
+        await AsyncStorage.removeItem('temp_mod_payload');
+        return; 
       }
 
-      // 👈 اللوجيك الطبيعي لتعديل السعر لو لسه بيبحث عن كابتن
       const savedRide = await AsyncStorage.getItem('active_ride');
       if (savedRide) {
         const data = JSON.parse(savedRide);
