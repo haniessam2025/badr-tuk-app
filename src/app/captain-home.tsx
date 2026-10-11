@@ -238,17 +238,23 @@ const EmptySearchingState = ({ hasConfirmedDestination }: { hasConfirmedDestinat
 export default function CaptainHome() {
   const router = useRouter();
 
-  // 🚨 مراقبة إعدادات الإدارة (وضع الصيانة وحد المديونية)
+  // 🚨 مراقبة إعدادات الإدارة (الصيانة، المديونية، والعمولات المخصصة)
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
-  const [maxDebtLimit, setMaxDebtLimit] = useState(-50); // القيمة الافتراضية -50
+  const [maxDebtLimit, setMaxDebtLimit] = useState(-50); 
+  const [appCommissions, setAppCommissions] = useState({ car: 10, tuktuk: 5, scooter: 8 });
 
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setIsMaintenanceMode(data.maintenanceMode || false);
-        // بنحول الرقم اللي جاي من الداشبورد لـ Number عشان نعرف نقارنه
         setMaxDebtLimit(Number(data.maxNegativeBalance) || -50); 
+        // جلب العمولة المخصصة لكل مركبة
+        setAppCommissions({
+          car: Number(data.car?.commission || 10),
+          tuktuk: Number(data.tuktuk?.commission || 5),
+          scooter: Number(data.scooter?.commission || 8)
+        });
       }
     });
     return () => unsubSettings();
@@ -988,10 +994,21 @@ const notifyArrival = async () => {
 
   const completeRide = () => {
     if (!activeRide) return;
-    const finalPrice = activeRide.price || '0';
+    const finalPrice = parseInt(activeRide.price || '0');
+    
+    // تحديد نسبة العمولة بناءً على نوع مركبة الكابتن
+    const vType = captainProfile.vehicleCategory;
+    let commissionPercent = appCommissions.tuktuk;
+    if (vType === 'car') commissionPercent = appCommissions.car;
+    else if (vType === 'scooter') commissionPercent = appCommissions.scooter;
+
+    // حساب مبلغ العمولة وصافي الربح
+    const commissionAmount = Math.ceil((finalPrice * commissionPercent) / 100);
+    const netProfit = finalPrice - commissionAmount;
+
     Alert.alert(
       "تفاصيل الحساب وإنهاء الرحلة 💵",
-      `تم الوصول للوجهة بنجاح!\n\n💰 أجرة المشوار: ${finalPrice} جنيه\n🎁 عمولة تطبيق براق: 0%\n✅ صافي ربحك: ${finalPrice} جنيه (خالصين ليك!)\n\nهل تأكدت من تحصيل الكاش بالكامل من الراكب؟`,
+      `تم الوصول للوجهة بنجاح!\n\n💰 أجرة المشوار: ${finalPrice} جنيه\n🎁 عمولة التطبيق (${commissionPercent}%): -${commissionAmount} جنيه\n✅ صافي ربحك: ${netProfit} جنيه\n\nهل تأكدت من تحصيل الكاش بالكامل من الراكب؟`,
       [
         { text: 'تراجع', style: 'cancel' },
         { text: 'نعم، استلمت الكاش وأنهيت الرحلة', onPress: async () => { 
@@ -1000,7 +1017,22 @@ const notifyArrival = async () => {
             setRideToRate(currentRide); 
             setActiveRide(null); 
             setIsRatingModalVisible(true); 
-            await updateDoc(doc(db, 'rides', currentRide.id), { status: 'completed' }); 
+            
+// 1. تحديث حالة الرحلة وحفظ قيمة العمولة عشان تظهر في السجل صح
+            await updateDoc(doc(db, 'rides', currentRide.id), { 
+              status: 'completed',
+              commissionAmount: commissionAmount,
+              commissionPercent: commissionPercent
+            }); 
+
+            // 2. 👈 خصم العمولة من محفظة الكابتن الفعلية في الداتابيز
+            if (commissionAmount > 0) {
+              await updateDoc(doc(db, 'captains', captainProfile.id), {
+                walletBalance: (captainProfile.walletBalance || 0) - commissionAmount
+              });
+              // تحديث الرصيد في الواجهة فوراً قدام عين الكابتن
+              setCaptainProfile((prev: any) => ({ ...prev, walletBalance: prev.walletBalance - commissionAmount }));
+            }
           } 
         }
       ]

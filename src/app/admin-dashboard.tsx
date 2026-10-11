@@ -75,15 +75,19 @@ export default function AdminDashboard() {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
-  // ⚙️ إعدادات النظام المدمجة
+  // ⚙️ إعدادات النظام المدمجة (مع تواريخ البونص ونظام الشرائح)
   const [appSettings, setAppSettings] = useState({
-    car: { baseFare: '15', perKm: '4.4', minFare: '20' },
-    tuktuk: { baseFare: '10', perKm: '6.5', minFare: '15' },
-    scooter: { baseFare: '12', perKm: '3.75', minFare: '12' },
-    appCommission: '10',
+    car: { baseFare: '15', minFare: '20', commission: '10', tiers: [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
+    tuktuk: { baseFare: '10', minFare: '15', commission: '5', tiers: [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
+    scooter: { baseFare: '12', minFare: '12', commission: '8', tiers: [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] },
     waitingTimeMins: '5',
     maxNegativeBalance: '-50',
     maintenanceMode: false,
+bonusTargetRides: '10',
+    bonusAmount: '30',
+    bonusDuration: 'daily', // 👈 مدة احتساب البونص (يومي/أسبوعي/شهري)
+    bonusStartDate: '', // 👈 بداية مدة البونص
+    bonusEndDate: '',   // 👈 نهاية مدة البونص
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -92,19 +96,41 @@ export default function AdminDashboard() {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setAppSettings({
-          car: { baseFare: data.car?.baseFare || '15', perKm: data.car?.perKm || '4.4', minFare: data.car?.minFare || '20' },
-          tuktuk: { baseFare: data.tuktuk?.baseFare || '10', perKm: data.tuktuk?.perKm || '6.5', minFare: data.tuktuk?.minFare || '15' },
-          scooter: { baseFare: data.scooter?.baseFare || '12', perKm: data.scooter?.perKm || '3.75', minFare: data.scooter?.minFare || '12' },
-          appCommission: data.appCommission || '10',
+setAppSettings({
+          car: { baseFare: data.car?.baseFare || '15', minFare: data.car?.minFare || '20', commission: data.car?.commission || '10', tiers: data.car?.tiers || [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
+          tuktuk: { baseFare: data.tuktuk?.baseFare || '10', minFare: data.tuktuk?.minFare || '15', commission: data.tuktuk?.commission || '5', tiers: data.tuktuk?.tiers || [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
+          scooter: { baseFare: data.scooter?.baseFare || '12', minFare: data.scooter?.minFare || '12', commission: data.scooter?.commission || '8', tiers: data.scooter?.tiers || [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] },
           waitingTimeMins: data.waitingTimeMins || '5',
           maxNegativeBalance: data.maxNegativeBalance || '-50',
           maintenanceMode: data.maintenanceMode || false,
+bonusTargetRides: data.bonusTargetRides || '10',
+          bonusAmount: data.bonusAmount || '30',
+          bonusDuration: data.bonusDuration || 'daily',
+          bonusStartDate: data.bonusStartDate || '',
+          bonusEndDate: data.bonusEndDate || '',
         });
       }
     });
     return () => unsubSettings();
   }, []);
+
+// ⚙️ دوال التحكم في شرائح التسعير
+  const addTier = (vehicle: 'car' | 'tuktuk' | 'scooter') => {
+    const newTiers = [...appSettings[vehicle].tiers, { upToKm: '10', price: '0' }];
+    setAppSettings({ ...appSettings, [vehicle]: { ...appSettings[vehicle], tiers: newTiers } });
+  };
+
+  const removeTier = (vehicle: 'car' | 'tuktuk' | 'scooter', index: number) => {
+    const newTiers = appSettings[vehicle].tiers.filter((_, i) => i !== index);
+    setAppSettings({ ...appSettings, [vehicle]: { ...appSettings[vehicle], tiers: newTiers } });
+  };
+
+  const updateTier = (vehicle: 'car' | 'tuktuk' | 'scooter', index: number, field: 'upToKm' | 'price', value: string) => {
+    const newTiers = [...appSettings[vehicle].tiers];
+    newTiers[index] = newTiers[index] || {}; // لتفادي الأخطاء
+    newTiers[index][field as keyof typeof newTiers[0]] = value;
+    setAppSettings({ ...appSettings, [vehicle]: { ...appSettings[vehicle], tiers: newTiers } });
+  };
 
   // حفظ الإعدادات
   const saveAppSettings = async () => {
@@ -360,10 +386,9 @@ export default function AdminDashboard() {
 
       {/* 🚀 قسم الوصول السريع (شبكة مرصوصة بدون سحب) */}
       <View style={styles.quickGrid}>
-        <TouchableOpacity style={[styles.quickCard, { borderColor: sosCount > 0 ? '#ef4444' : '#334155', backgroundColor: sosCount > 0 ? '#450a0a' : '#1e293b' }]} onPress={() => router.push('/admin-safety')}>
-          <Text style={{ fontSize: 26, marginBottom: 5 }}>🚨</Text>
-          <Text style={[styles.quickCardText, sosCount > 0 && { color: '#fca5a5' }]}>طوارئ SOS</Text>
-          {sosCount > 0 && <View style={styles.quickBadge}><Text style={styles.quickBadgeText}>{sosCount}</Text></View>}
+        <TouchableOpacity style={styles.quickCard} onPress={() => setActiveTab('settings')}>
+          <Text style={{ fontSize: 26, marginBottom: 5 }}>⚙️</Text>
+          <Text style={styles.quickCardText}>الإعدادات والتسعير</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.quickCard} onPress={() => setIsSupportModalVisible(true)}>
@@ -397,7 +422,7 @@ export default function AdminDashboard() {
         </TouchableOpacity>
       </View>
 
-      {/* 📑 شريط التبويبات (ثابت) ضفنا فيه زرار الإعدادات */}
+      {/* 📑 شريط التبويبات (ثابت) */}
       <View style={styles.tabsContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 5, flexGrow: 1, justifyContent: 'space-evenly' }}>
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'settings' && styles.tabBtnActive]} onPress={() => setActiveTab('settings')}>
@@ -446,22 +471,38 @@ export default function AdminDashboard() {
                 </View>
               </View>
 
-              {/* قسم السيارات */}
+{/* قسم السيارات */}
               <View style={styles.settingsSection}>
                 <Text style={styles.settingsSectionTitle}>🚗 السيارات</Text>
                 <View style={styles.settingsInputRow}>
                   <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>الحد الأدنى (ج)</Text>
+                    <Text style={styles.settingsLabel}>الأدنى (ج)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.car.minFare} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, minFare: t}})} textAlign="center" />
                   </View>
                   <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>سعر الكيلو (ج)</Text>
-                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.car.perKm} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, perKm: t}})} textAlign="center" />
-                  </View>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>فتح العداد (ج)</Text>
+                    <Text style={styles.settingsLabel}>الأساسي (ج)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.car.baseFare} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, baseFare: t}})} textAlign="center" />
                   </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>العمولة (%)</Text>
+                    <TextInput style={[styles.settingsInput, { color: '#eab308' }]} keyboardType="numeric" value={appSettings.car.commission} onChangeText={t => setAppSettings({...appSettings, car: {...appSettings.car, commission: t}})} textAlign="center" />
+                  </View>
+                </View>
+                {/* 👈 نظام شرائح السيارات */}
+                <View style={styles.tiersContainer}>
+                  <Text style={styles.tiersTitle}>📊 تسعيرة الكيلو بالشرائح:</Text>
+                  {appSettings.car.tiers.map((tier, idx) => (
+                    <View key={idx} style={styles.tierRow}>
+                      <Text style={styles.tierLabel}>إلى</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={tier.upToKm} onChangeText={t => updateTier('car', idx, 'upToKm', t)} textAlign="center" placeholder="كم" />
+                      <Text style={styles.tierLabel}>كم، بسعر</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={tier.price} onChangeText={t => updateTier('car', idx, 'price', t)} textAlign="center" placeholder="ج" />
+                      <Text style={styles.tierLabel}>ج</Text>
+                      <TouchableOpacity onPress={() => removeTier('car', idx)} style={styles.removeTierBtn}><Text style={{color: '#fff'}}>✖</Text></TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.addTierBtn} onPress={() => addTier('car')}><Text style={styles.addTierBtnText}>➕ إضافة شريحة</Text></TouchableOpacity>
+                  <Text style={styles.tierHint}>* اكتب 999 في خانة المسافة للشريحة الأخيرة (المفتوحة)</Text>
                 </View>
               </View>
 
@@ -470,17 +511,33 @@ export default function AdminDashboard() {
                 <Text style={styles.settingsSectionTitle}>🛺 بديل التوكتوك</Text>
                 <View style={styles.settingsInputRow}>
                   <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>الحد الأدنى (ج)</Text>
+                    <Text style={styles.settingsLabel}>الأدنى (ج)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.tuktuk.minFare} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, minFare: t}})} textAlign="center" />
-                  </View>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>سعر الكيلو (ج)</Text>
-                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.tuktuk.perKm} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, perKm: t}})} textAlign="center" />
                   </View>
                   <View style={styles.settingsInputGroup}>
                     <Text style={styles.settingsLabel}>الأساسي (ج)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.tuktuk.baseFare} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, baseFare: t}})} textAlign="center" />
                   </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>العمولة (%)</Text>
+                    <TextInput style={[styles.settingsInput, { color: '#eab308' }]} keyboardType="numeric" value={appSettings.tuktuk.commission} onChangeText={t => setAppSettings({...appSettings, tuktuk: {...appSettings.tuktuk, commission: t}})} textAlign="center" />
+                  </View>
+                </View>
+                {/* 👈 نظام شرائح التوكتوك */}
+                <View style={styles.tiersContainer}>
+                  <Text style={styles.tiersTitle}>📊 تسعيرة الكيلو بالشرائح:</Text>
+                  {appSettings.tuktuk.tiers.map((tier, idx) => (
+                    <View key={idx} style={styles.tierRow}>
+                      <Text style={styles.tierLabel}>إلى</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={tier.upToKm} onChangeText={t => updateTier('tuktuk', idx, 'upToKm', t)} textAlign="center" placeholder="كم" />
+                      <Text style={styles.tierLabel}>كم، بسعر</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={tier.price} onChangeText={t => updateTier('tuktuk', idx, 'price', t)} textAlign="center" placeholder="ج" />
+                      <Text style={styles.tierLabel}>ج</Text>
+                      <TouchableOpacity onPress={() => removeTier('tuktuk', idx)} style={styles.removeTierBtn}><Text style={{color: '#fff'}}>✖</Text></TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.addTierBtn} onPress={() => addTier('tuktuk')}><Text style={styles.addTierBtnText}>➕ إضافة شريحة</Text></TouchableOpacity>
+                  <Text style={styles.tierHint}>* اكتب 999 في خانة المسافة للشريحة الأخيرة (المفتوحة)</Text>
                 </View>
               </View>
 
@@ -489,16 +546,72 @@ export default function AdminDashboard() {
                 <Text style={styles.settingsSectionTitle}>🛵 السكوتر</Text>
                 <View style={styles.settingsInputRow}>
                   <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>الحد الأدنى (ج)</Text>
+                    <Text style={styles.settingsLabel}>الأدنى (ج)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.scooter.minFare} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, minFare: t}})} textAlign="center" />
-                  </View>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>سعر الكيلو (ج)</Text>
-                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.scooter.perKm} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, perKm: t}})} textAlign="center" />
                   </View>
                   <View style={styles.settingsInputGroup}>
                     <Text style={styles.settingsLabel}>الأساسي (ج)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.scooter.baseFare} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, baseFare: t}})} textAlign="center" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>العمولة (%)</Text>
+                    <TextInput style={[styles.settingsInput, { color: '#eab308' }]} keyboardType="numeric" value={appSettings.scooter.commission} onChangeText={t => setAppSettings({...appSettings, scooter: {...appSettings.scooter, commission: t}})} textAlign="center" />
+                  </View>
+                </View>
+                {/* 👈 نظام شرائح السكوتر */}
+                <View style={styles.tiersContainer}>
+                  <Text style={styles.tiersTitle}>📊 تسعيرة الكيلو بالشرائح:</Text>
+                  {appSettings.scooter.tiers.map((tier, idx) => (
+                    <View key={idx} style={styles.tierRow}>
+                      <Text style={styles.tierLabel}>إلى</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={tier.upToKm} onChangeText={t => updateTier('scooter', idx, 'upToKm', t)} textAlign="center" placeholder="كم" />
+                      <Text style={styles.tierLabel}>كم، بسعر</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={tier.price} onChangeText={t => updateTier('scooter', idx, 'price', t)} textAlign="center" placeholder="ج" />
+                      <Text style={styles.tierLabel}>ج</Text>
+                      <TouchableOpacity onPress={() => removeTier('scooter', idx)} style={styles.removeTierBtn}><Text style={{color: '#fff'}}>✖</Text></TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.addTierBtn} onPress={() => addTier('scooter')}><Text style={styles.addTierBtnText}>➕ إضافة شريحة</Text></TouchableOpacity>
+                  <Text style={styles.tierHint}>* اكتب 999 في خانة المسافة للشريحة الأخيرة (المفتوحة)</Text>
+                </View>
+              </View>
+
+              {/* 🎁 قسم المكافآت والبونص التلقائي */}
+              <View style={[styles.settingsSection, { borderColor: '#38bdf8' }]}>
+                <Text style={[styles.settingsSectionTitle, { color: '#38bdf8' }]}>🎁 نظام المكافآت التلقائي للكباتن</Text>
+                
+                {/* 👈 أزرار اختيار مدة البونص */}
+                <Text style={styles.settingsLabel}>فترة احتساب الرحلات:</Text>
+                <View style={[styles.typeSelectorRow, { marginBottom: 15 }]}>
+                  <TouchableOpacity style={[styles.typeOption, appSettings.bonusDuration === 'monthly' && { backgroundColor: '#38bdf8', borderColor: '#38bdf8' }]} onPress={() => setAppSettings({...appSettings, bonusDuration: 'monthly'})}>
+                    <Text style={[styles.typeOptionText, appSettings.bonusDuration === 'monthly' && { color: '#fff' }]}>شهري</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.typeOption, appSettings.bonusDuration === 'weekly' && { backgroundColor: '#38bdf8', borderColor: '#38bdf8' }]} onPress={() => setAppSettings({...appSettings, bonusDuration: 'weekly'})}>
+                    <Text style={[styles.typeOptionText, appSettings.bonusDuration === 'weekly' && { color: '#fff' }]}>أسبوعي</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.typeOption, appSettings.bonusDuration === 'daily' && { backgroundColor: '#38bdf8', borderColor: '#38bdf8' }]} onPress={() => setAppSettings({...appSettings, bonusDuration: 'daily'})}>
+                    <Text style={[styles.typeOptionText, appSettings.bonusDuration === 'daily' && { color: '#fff' }]}>يومي</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 👈 خانات الأرقام والمبلغ */}
+                <View style={styles.settingsInputRow}>
+
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>مبلغ المكافأة (ج)</Text>
+                    <TextInput style={[styles.settingsInput, { color: '#10b981' }]} keyboardType="numeric" value={appSettings.bonusAmount} onChangeText={t => setAppSettings({...appSettings, bonusAmount: t})} textAlign="center" placeholder="مثال: 300" />
+                  </View>
+                </View>
+
+                {/* 👈 خانات التواريخ المخصصة */}
+                <View style={[styles.settingsInputRow, { marginTop: 15 }]}>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>ينتهي في (اختياري)</Text>
+                    <TextInput style={[styles.settingsInput, { fontSize: 13 }]} value={appSettings.bonusEndDate} onChangeText={t => setAppSettings({...appSettings, bonusEndDate: t})} textAlign="center" placeholder="مثال: 2026-11-07" placeholderTextColor="#64748b" />
+                  </View>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>يبدأ من (اختياري)</Text>
+                    <TextInput style={[styles.settingsInput, { fontSize: 13 }]} value={appSettings.bonusStartDate} onChangeText={t => setAppSettings({...appSettings, bonusStartDate: t})} textAlign="center" placeholder="مثال: 2026-11-01" placeholderTextColor="#64748b" />
                   </View>
                 </View>
               </View>
@@ -511,10 +624,7 @@ export default function AdminDashboard() {
                     <Text style={styles.settingsLabel}>حد المديونية (ج)</Text>
                     <TextInput style={[styles.settingsInput, { color: '#ef4444' }]} keyboardType="numeric" value={appSettings.maxNegativeBalance} onChangeText={t => setAppSettings({...appSettings, maxNegativeBalance: t})} textAlign="center" placeholder="-50" />
                   </View>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>عمولة التطبيق (%)</Text>
-                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.appCommission} onChangeText={t => setAppSettings({...appSettings, appCommission: t})} textAlign="center" />
-                  </View>
+                 
                   <View style={styles.settingsInputGroup}>
                     <Text style={styles.settingsLabel}>الانتظار (دقائق)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.waitingTimeMins} onChangeText={t => setAppSettings({...appSettings, waitingTimeMins: t})} textAlign="center" />
@@ -1025,7 +1135,18 @@ const styles = StyleSheet.create({
   settingsLabel: { color: '#94a3b8', fontSize: 11, textAlign: 'center', marginBottom: 5 },
   settingsInput: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 8, padding: 10, fontSize: 15, borderWidth: 1, borderColor: '#475569', fontWeight: 'bold' },
   saveSettingsBtn: { backgroundColor: '#10b981', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, marginBottom: 30, elevation: 3 },
-  saveSettingsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+saveSettingsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+
+  // 📊 تنسيقات الشرائح
+  tiersContainer: { marginTop: 15, padding: 12, backgroundColor: '#0f172a', borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
+  tiersTitle: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold', marginBottom: 10, textAlign: 'right' },
+  tierRow: { flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 8, gap: 5 },
+  tierLabel: { color: '#cbd5e1', fontSize: 12 },
+  tierInput: { flex: 1, backgroundColor: '#1e293b', color: '#fff', borderRadius: 6, padding: 6, fontSize: 13, borderWidth: 1, borderColor: '#475569', textAlign: 'center' },
+  removeTierBtn: { backgroundColor: '#ef4444', width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', marginRight: 5 },
+  addTierBtn: { backgroundColor: '#334155', padding: 8, borderRadius: 8, alignItems: 'center', marginTop: 10, alignSelf: 'flex-start' },
+  addTierBtnText: { color: '#38bdf8', fontSize: 12, fontWeight: 'bold' },
+  tierHint: { color: '#64748b', fontSize: 10, marginTop: 10, textAlign: 'right' },
 
   searchInput: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -1145,4 +1266,4 @@ const styles = StyleSheet.create({
   confirmModalBtnText: { color: '#000', fontWeight: 'bold' },
   cancelModalBtn: { flex: 1, backgroundColor: '#334155', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   cancelModalBtnText: { color: '#fff', fontWeight: 'bold' }
-});
+}); 

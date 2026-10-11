@@ -129,39 +129,82 @@ setLostText('');
     return date.toLocaleDateString('ar-EG') + ' - ' + date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const renderItem = ({ item }: { item: any }) => (
-    <View style={[styles.card, item.status === 'canceled' && styles.cardCanceled]}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.dateText}>{formatDate(item.timestamp)}</Text>
-        <Text style={[styles.statusBadge, item.status === 'canceled' && styles.statusBadgeCanceled]}>
-          {item.status === 'completed' ? '✅ مكتملة' : '❌ ملغية'}
-        </Text>
-      </View>
-      <View style={styles.routeContainer}>
-        <Text style={styles.routeText}>📍 من: {item.pickupLocation}</Text>
-        <Text style={styles.routeText}>🏁 إلى: {item.destinationLocation}</Text>
-      </View>
-      <View style={styles.cardFooter}>
-        <Text style={styles.passengerText}>👤 الراكب: {item.name}</Text>
-        <Text style={styles.priceText}>💰 {item.price} ج</Text>
-      </View>
+  // دالة رسم كارت الرحلة في السجل
+  const renderItem = ({ item }: { item: any }) => {
+    const isCanceled = item.status === 'canceled' || item.status === 'cancelled_by_passenger';
+    const finalPrice = parseInt(item.price || '0');
+    
+    // 👈 الصراحة والوضوح: لو العمولة مش متسجلة في الداتابيز تبقى صفر فوراً (بدون أي تخمين)
+    const commissionAmount = item.commissionAmount !== undefined ? Number(item.commissionAmount) : 0;
+    const commissionPercent = item.commissionPercent !== undefined ? Number(item.commissionPercent) : 0;
+    
+    const netProfit = finalPrice - commissionAmount;
 
-      {/* 🎒 زرار إبلاغ الكابتن عن مفقودات عثر عليها في الرحلة */}
-      {item.status === 'completed' && (
-        <TouchableOpacity 
-          style={styles.lostBtn} 
-          onPress={() => {
-            setSelectedRide(item);
-            setLostText('');
-            setIsLostModalVisible(true);
-          }}
-        >
-          <Ionicons name="cube-outline" size={16} color="#d97706" />
-          <Text style={styles.lostBtnText}>عثرت على مفقودات في هذه الرحلة 🎒</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+    // ضبط شكل الوجهة لو كانت متعددة
+    const dropoffText = item.destinationsList && item.destinationsList.length > 0 
+      ? item.destinationsList.join(' - ') 
+      : item.destinationLocation || 'غير محدد';
+
+    return (
+      <View style={[styles.card, isCanceled && styles.cardCanceled]}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.dateText}>{formatDate(item.timestamp)}</Text>
+          <Text style={[styles.statusBadge, isCanceled && styles.statusBadgeCanceled]}>
+            {isCanceled ? '❌ ملغية' : '✅ مكتملة'}
+          </Text>
+        </View>
+        
+        <View style={styles.routeContainer}>
+          <Text style={styles.routeText} numberOfLines={1}>📍 من: {item.pickupLocation}</Text>
+          <Text style={styles.routeText} numberOfLines={2}>🏁 إلى: {dropoffText}</Text>
+        </View>
+
+        {/* 🧾 الفاتورة المصغرة للرحلات المكتملة */}
+        {!isCanceled && (
+          <View style={styles.miniReceipt}>
+            <View style={styles.receiptRow}>
+              <Text style={styles.receiptLabel}>الإجمالي (من الراكب):</Text>
+              <Text style={styles.receiptValue}>{finalPrice} ج</Text>
+            </View>
+            <View style={styles.receiptRow}>
+              <Text style={[styles.receiptLabel, {color: commissionAmount > 0 ? '#ef4444' : '#64748b'}]}>
+                عمولة بُرَاق ({commissionPercent}%):
+              </Text>
+              <Text style={[styles.receiptValue, {color: commissionAmount > 0 ? '#ef4444' : '#64748b'}]}>
+                -{commissionAmount} ج
+              </Text>
+            </View>
+            <View style={styles.receiptDivider} />
+            <View style={styles.receiptRow}>
+              <Text style={[styles.receiptLabel, {color: '#10b981', fontWeight: 'bold'}]}>صافي ربحك:</Text>
+              <Text style={[styles.receiptValue, {color: '#10b981', fontWeight: 'bold', fontSize: 15}]}>{netProfit} ج</Text>
+            </View>
+          </View>
+        )}
+
+        {isCanceled && (
+          <View style={styles.cardFooter}>
+            <Text style={styles.passengerText}>👤 الراكب: {item.name}</Text>
+            <Text style={[styles.priceText, {color: '#ef4444'}]}>💰 {item.price} ج</Text>
+          </View>
+        )}
+
+        {!isCanceled && (
+          <TouchableOpacity 
+            style={styles.lostBtn} 
+            onPress={() => {
+              setSelectedRide(item);
+              setLostText('');
+              setIsLostModalVisible(true);
+            }}
+          >
+            <Ionicons name="cube-outline" size={16} color="#d97706" />
+            <Text style={styles.lostBtnText}>عثرت على مفقودات في هذه الرحلة 🎒</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -257,6 +300,13 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginTop: 5, marginBottom: 10 },
   passengerText: { fontSize: 13, color: '#475569' },
   priceText: { fontSize: 16, fontWeight: 'bold', color: '#10b981' },
+
+  // 🧾 تنسيقات الفاتورة المصغرة
+  miniReceipt: { backgroundColor: '#f8fafc', padding: 10, borderRadius: 10, marginTop: 5, marginBottom: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+  receiptRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  receiptLabel: { fontSize: 12, color: '#64748b', fontWeight: 'bold' },
+  receiptValue: { fontSize: 13, color: '#1e293b', fontWeight: 'bold' },
+  receiptDivider: { height: 1, backgroundColor: '#cbd5e1', marginVertical: 4 },
 
   lostBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fef3c7', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#fde68a', gap: 6, marginTop: 5 },
   lostBtnText: { color: '#d97706', fontSize: 12, fontWeight: 'bold' },

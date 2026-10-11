@@ -1046,6 +1046,34 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     return null;
   };
 
+  // 👈 دالة عبقرية لحساب السعر بنظام الشرائح
+  const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
+    if (!tiers || tiers.length === 0) return 0;
+    
+    // ترتيب الشرائح تصاعدياً حسب المسافة لضمان الحساب الصحيح
+    const sortedTiers = [...tiers].sort((a, b) => parseFloat(a.upToKm) - parseFloat(b.upToKm));
+    
+    let totalFare = 0;
+    let remainingDistance = distanceKm;
+    let previousTierLimit = 0;
+
+    for (let i = 0; i < sortedTiers.length; i++) {
+      const currentTierLimit = parseFloat(sortedTiers[i].upToKm);
+      const tierPricePerKm = parseFloat(sortedTiers[i].price);
+      
+      const distanceInThisTier = Math.min(remainingDistance, currentTierLimit - previousTierLimit);
+      
+      if (distanceInThisTier > 0) {
+        totalFare += distanceInThisTier * tierPricePerKm;
+        remainingDistance -= distanceInThisTier;
+      }
+      
+      previousTierLimit = currentTierLimit;
+      if (remainingDistance <= 0) break;
+    }
+    return totalFare;
+  };
+
   const fallbackCalculation = (validDests: string[], vType: string, passCountStr: string) => {
      let base = 0;
      if (vType === 'car') {
@@ -1059,7 +1087,7 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
         let basePriceForOne = 15 + ((validDests.length - 1) * 6.5);
         const count = parseInt(passCountStr) || 1;
         const extraPassengers = count - 1;
-        // زيادة 25% لكل راكب إضافي (عشان الـ 100 تبقى 125 و 150)
+        // زيادة 25% لكل راكب إضافي
         const passengerMultiplier = 1 + (extraPassengers * 0.25);
         base = basePriceForOne * passengerMultiplier;
      }
@@ -1133,11 +1161,11 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
 
              let calculatedPrice = 0;
              
-             // 💡 جلب الإعدادات المحفوظة من الإدارة (أو استخدام القيم الافتراضية كاحتياطي)
-             let appSettings = {
-                car: { baseFare: 15, perKm: 4.4, minFare: 20 },
-                tuktuk: { baseFare: 10, perKm: 6.5, minFare: 15 },
-                scooter: { baseFare: 12, perKm: 3.75, minFare: 12 }
+             // 💡 جلب الإعدادات المحفوظة من الإدارة بنظام الشرائح الجديد
+             let appSettings: any = {
+                car: { baseFare: 15, minFare: 20, tiers: [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
+                tuktuk: { baseFare: 10, minFare: 15, tiers: [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
+                scooter: { baseFare: 12, minFare: 12, tiers: [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] }
              };
              
              try {
@@ -1145,19 +1173,24 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
                 if (settingsSnap.exists()) {
                   const data = settingsSnap.data();
                   appSettings = {
-                    car: { baseFare: Number(data.car?.baseFare || 15), perKm: Number(data.car?.perKm || 4.4), minFare: Number(data.car?.minFare || 20) },
-                    tuktuk: { baseFare: Number(data.tuktuk?.baseFare || 10), perKm: Number(data.tuktuk?.perKm || 6.5), minFare: Number(data.tuktuk?.minFare || 15) },
-                    scooter: { baseFare: Number(data.scooter?.baseFare || 12), perKm: Number(data.scooter?.perKm || 3.75), minFare: Number(data.scooter?.minFare || 12) }
+                    car: { baseFare: Number(data.car?.baseFare || 15), minFare: Number(data.car?.minFare || 20), tiers: data.car?.tiers || appSettings.car.tiers },
+                    tuktuk: { baseFare: Number(data.tuktuk?.baseFare || 10), minFare: Number(data.tuktuk?.minFare || 15), tiers: data.tuktuk?.tiers || appSettings.tuktuk.tiers },
+                    scooter: { baseFare: Number(data.scooter?.baseFare || 12), minFare: Number(data.scooter?.minFare || 12), tiers: data.scooter?.tiers || appSettings.scooter.tiers }
                   };
                 }
              } catch(e) { console.log("Failed to load settings, using defaults."); }
 
+             // 👈 حساب السعر بنظام التشريح بدلاً من الضرب المباشر
              if (vType === 'car') {
-               calculatedPrice = Math.max(appSettings.car.minFare, appSettings.car.baseFare + (totalDistanceKm * appSettings.car.perKm));
+               const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.car.tiers);
+               calculatedPrice = Math.max(appSettings.car.minFare, appSettings.car.baseFare + distanceFare);
              } else if (vType === 'scooter') {
-               calculatedPrice = Math.max(appSettings.scooter.minFare, appSettings.scooter.baseFare + (totalDistanceKm * appSettings.scooter.perKm));
+               const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.scooter.tiers);
+               calculatedPrice = Math.max(appSettings.scooter.minFare, appSettings.scooter.baseFare + distanceFare);
              } else {
-               let basePriceForOne = Math.max(appSettings.tuktuk.minFare, appSettings.tuktuk.baseFare + (totalDistanceKm * appSettings.tuktuk.perKm));
+               const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
+               let basePriceForOne = Math.max(appSettings.tuktuk.minFare, appSettings.tuktuk.baseFare + distanceFare);
+               
                const count = parseInt(passCountStr) || 1;
                const extraPassengers = count - 1;
                const passengerMultiplier = 1 + (extraPassengers * 0.25); 
