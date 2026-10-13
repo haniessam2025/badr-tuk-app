@@ -319,6 +319,8 @@ export default function CaptainHome() {
   const [rating, setRating] = useState(0);
   const [ratingReason, setRatingReason] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [isEndRideModalVisible, setIsEndRideModalVisible] = useState(false);
+  const [rideCheckoutData, setRideCheckoutData] = useState<any>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const captainRatingTags = ['راكب محترم', 'دفع سريع', 'موقع دقيق', 'شخص مهذب'];
   const [rideToRate, setRideToRate] = useState<any>(null);
@@ -998,47 +1000,56 @@ const notifyArrival = async () => {
     if (!activeRide) return;
     const finalPrice = parseInt(activeRide.price || '0');
     
+    // 👈 حساب الخصم لو الراكب مستخدم برومو كود
+    const promoDiscount = parseFloat(activeRide.discountAmount || '0');
+    const cashToCollect = Math.max(0, finalPrice - promoDiscount);
+
     // تحديد نسبة العمولة بناءً على نوع مركبة الكابتن
     const vType = captainProfile.vehicleCategory;
     let commissionPercent = appCommissions.tuktuk;
     if (vType === 'car') commissionPercent = appCommissions.car;
     else if (vType === 'scooter') commissionPercent = appCommissions.scooter;
 
-    // حساب مبلغ العمولة وصافي الربح
+    // حساب مبلغ العمولة
     const commissionAmount = Math.ceil((finalPrice * commissionPercent) / 100);
-    const netProfit = finalPrice - commissionAmount;
+    
+    // تجهيز بيانات الدفع لعرضها في الشاشة المنبثقة
+    setRideCheckoutData({ finalPrice, promoDiscount, cashToCollect, commissionAmount, commissionPercent });
+    
+    // فتح شاشة الإنهاء الضخمة بدل الـ Alert الصغير
+    setIsEndRideModalVisible(true);
+  };
 
-    Alert.alert(
-      "تفاصيل الحساب وإنهاء الرحلة 💵",
-      `تم الوصول للوجهة بنجاح!\n\n💰 أجرة المشوار: ${finalPrice} جنيه\n🎁 عمولة التطبيق (${commissionPercent}%): -${commissionAmount} جنيه\n✅ صافي ربحك: ${netProfit} جنيه\n\nهل تأكدت من تحصيل الكاش بالكامل من الراكب؟`,
-      [
-        { text: 'تراجع', style: 'cancel' },
-        { text: 'نعم، استلمت الكاش وأنهيت الرحلة', onPress: async () => { 
-            isEndingRide.current = true;
-            const currentRide = activeRide;
-            setRideToRate(currentRide); 
-            setActiveRide(null); 
-            setIsRatingModalVisible(true); 
-            
-// 1. تحديث حالة الرحلة وحفظ قيمة العمولة عشان تظهر في السجل صح
-            await updateDoc(doc(db, 'rides', currentRide.id), { 
-              status: 'completed',
-              commissionAmount: commissionAmount,
-              commissionPercent: commissionPercent
-            }); 
+  // دالة التأكيد الفعلي بعد ما الكابتن يقرا الشاشة
+  const confirmEndRide = async () => {
+    if (!activeRide || !rideCheckoutData) return;
+    setIsEndRideModalVisible(false);
+    
+    isEndingRide.current = true;
+    const currentRide = activeRide;
+    setRideToRate(currentRide); 
+    setActiveRide(null); 
+    setIsRatingModalVisible(true); 
+    
+    const { commissionAmount, promoDiscount, commissionPercent } = rideCheckoutData;
 
-            // 2. 👈 خصم العمولة من محفظة الكابتن الفعلية في الداتابيز
-            if (commissionAmount > 0) {
-              await updateDoc(doc(db, 'captains', captainProfile.id), {
-                walletBalance: (captainProfile.walletBalance || 0) - commissionAmount
-              });
-              // تحديث الرصيد في الواجهة فوراً قدام عين الكابتن
-              setCaptainProfile((prev: any) => ({ ...prev, walletBalance: prev.walletBalance - commissionAmount }));
-            }
-          } 
-        }
-      ]
-    );
+    // 1. تحديث حالة الرحلة
+    await updateDoc(doc(db, 'rides', currentRide.id), { 
+      status: 'completed',
+      commissionAmount: commissionAmount,
+      commissionPercent: commissionPercent
+    }); 
+
+    // 2. تحديث محفظة الكابتن (خصم العمولة + إضافة تعويض كود الخصم إن وجد)
+    const netWalletChange = promoDiscount - commissionAmount; 
+    
+    if (netWalletChange !== 0) {
+      const currentBalance = captainProfile.walletBalance || 0;
+      await updateDoc(doc(db, 'captains', captainProfile.id), {
+        walletBalance: currentBalance + netWalletChange
+      });
+      setCaptainProfile((prev: any) => ({ ...prev, walletBalance: prev.walletBalance + netWalletChange }));
+    }
   };
 
   const openGoogleMaps = (locationName: string) => { 
@@ -2252,7 +2263,62 @@ const notifyArrival = async () => {
               <ActivityIndicator size="large" color="#eab308" />
             </View>
           )}
+{/* 🛑 شاشة إنهاء الرحلة الضخمة للكابتن */}
+      <Modal visible={isEndRideModalVisible} transparent={true} animationType="slide">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 15 }}>
+          <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', width: '100%', borderRadius: 20, padding: 25, elevation: 10, borderWidth: 2, borderColor: '#10b981' }}>
+            <Text style={{ fontSize: 22, fontWeight: 'bold', color: isDarkMode ? '#ffffff' : '#1e293b', textAlign: 'center', marginBottom: 20 }}>
+              🏁 تفاصيل الحساب
+            </Text>
 
+            {rideCheckoutData?.promoDiscount > 0 ? (
+              // 👈 شكل الشاشة لو الراكب مستخدم كود خصم
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: '#ef4444', fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>الراكب استخدم كود خصم!</Text>
+                <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, marginBottom: 15, textDecorationLine: 'line-through' }}>الأجرة الكلية: {rideCheckoutData.finalPrice} ج</Text>
+                
+                <View style={{ backgroundColor: '#dcfce7', width: '100%', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 15, borderWidth: 2, borderColor: '#22c55e' }}>
+                  <Text style={{ color: '#166534', fontSize: 20, fontWeight: 'bold', marginBottom: 5 }}>حصّل من الراكب كاش الآن:</Text>
+                  <Text style={{ color: '#16a34a', fontSize: 50, fontWeight: '900' }}>{rideCheckoutData.cashToCollect} ج</Text>
+                </View>
+
+                <View style={{ backgroundColor: '#eff6ff', width: '100%', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                  <Text style={{ color: '#1d4ed8', fontSize: 15, fontWeight: 'bold', textAlign: 'center', lineHeight: 22 }}>
+                    تم إيداع {rideCheckoutData.promoDiscount} ج في محفظتك الآن تعويضاً للخصم! 🎁
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              // 👈 شكل الشاشة لو رحلة عادية بدون خصم
+              <View style={{ alignItems: 'center' }}>
+                <View style={{ backgroundColor: '#f0fdf4', width: '100%', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderWidth: 2, borderColor: '#4ade80' }}>
+                  <Text style={{ color: '#166534', fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>حصّل من الراكب كاش:</Text>
+                  <Text style={{ color: '#16a34a', fontSize: 50, fontWeight: '900' }}>{rideCheckoutData?.finalPrice} ج</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', borderTopWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0', paddingTop: 15, marginBottom: 20 }}>
+              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#64748b', fontSize: 14 }}>عمولة التطبيق ({rideCheckoutData?.commissionPercent}%):</Text>
+              <Text style={{ color: '#ef4444', fontSize: 15, fontWeight: 'bold' }}>- {rideCheckoutData?.commissionAmount} ج</Text>
+            </View>
+
+            <TouchableOpacity 
+              style={{ backgroundColor: '#10b981', paddingVertical: 15, borderRadius: 12, alignItems: 'center', elevation: 3 }}
+              onPress={confirmEndRide}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: 'bold' }}>تأكيد التحصيل وإنهاء الرحلة ✅</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={{ paddingVertical: 12, marginTop: 10, alignItems: 'center' }}
+              onPress={() => setIsEndRideModalVisible(false)}
+            >
+              <Text style={{ color: '#ef4444', fontSize: 16, fontWeight: 'bold' }}>تراجع ❌</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
         </View>
       );
     }

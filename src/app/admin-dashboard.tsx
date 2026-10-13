@@ -75,8 +75,8 @@ export default function AdminDashboard() {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
-  // ⚙️ إعدادات النظام المدمجة (مع تواريخ البونص ونظام الشرائح)
- const [appSettings, setAppSettings] = useState({
+  // ⚙️ إعدادات النظام المدمجة (مع تواريخ البونص ونظام الشرائح والأكواد)
+  const [appSettings, setAppSettings] = useState({
     car: { baseFare: '15', minFare: '20', commission: '10', tiers: [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
     tuktuk: { baseFare: '10', minFare: '15', commission: '5', tiers: [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
     scooter: { baseFare: '12', minFare: '12', commission: '8', tiers: [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] },
@@ -86,7 +86,8 @@ export default function AdminDashboard() {
     captainCancelBanRules: [] as { cancels: string; banHours: string }[],
     passengerCancelBanRules: [] as { cancels: string; banHours: string }[],
     maintenanceMode: false,
-    surgeMultiplier: '1.0',
+    isSurgeActive: false,
+    surgeMultiplier: '1.5',
     captainBonus: { targetRides: '10', bonusAmount: '50', startDate: '', endDate: '' },
     passengerBonus: { targetRides: '5', bonusAmount: '20', startDate: '', endDate: '' },
     promoCodes: [] as any[],
@@ -103,16 +104,18 @@ export default function AdminDashboard() {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-setAppSettings({
+        setAppSettings({
           car: { baseFare: data.car?.baseFare || '15', minFare: data.car?.minFare || '20', commission: data.car?.commission || '10', tiers: data.car?.tiers || [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
           tuktuk: { baseFare: data.tuktuk?.baseFare || '10', minFare: data.tuktuk?.minFare || '15', commission: data.tuktuk?.commission || '5', tiers: data.tuktuk?.tiers || [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
           scooter: { baseFare: data.scooter?.baseFare || '12', minFare: data.scooter?.minFare || '12', commission: data.scooter?.commission || '8', tiers: data.scooter?.tiers || [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] },
           waitingTimeMins: data.waitingTimeMins || '5',
           maxNegativeBalance: data.maxNegativeBalance || '-50',
           searchRadiusKm: data.searchRadiusKm || '5',
-          cancelBanRules: data.cancelBanRules || [],
+          captainCancelBanRules: data.captainCancelBanRules || [],
+          passengerCancelBanRules: data.passengerCancelBanRules || [],
           maintenanceMode: data.maintenanceMode || false,
-          surgeMultiplier: data.surgeMultiplier || '1.0',
+isSurgeActive: data.isSurgeActive || false,
+          surgeMultiplier: data.surgeMultiplier || '1.5',
           captainBonus: data.captainBonus || { targetRides: '10', bonusAmount: '50', startDate: '', endDate: '' },
           passengerBonus: data.passengerBonus || { targetRides: '5', bonusAmount: '20', startDate: '', endDate: '' },
           promoCodes: data.promoCodes || [],
@@ -122,7 +125,7 @@ setAppSettings({
     return () => unsubSettings();
   }, []);
 
-// ⚙️ دوال التحكم في شرائح التسعير
+  // ⚙️ دوال التحكم في شرائح التسعير
   const addTier = (vehicle: 'car' | 'tuktuk' | 'scooter') => {
     const newTiers = [...appSettings[vehicle].tiers, { upToKm: '10', price: '0' }];
     setAppSettings({ ...appSettings, [vehicle]: { ...appSettings[vehicle], tiers: newTiers } });
@@ -135,7 +138,7 @@ setAppSettings({
 
   const updateTier = (vehicle: 'car' | 'tuktuk' | 'scooter', index: number, field: 'upToKm' | 'price', value: string) => {
     const newTiers = [...appSettings[vehicle].tiers];
-    newTiers[index] = newTiers[index] || {}; // لتفادي الأخطاء
+    newTiers[index] = newTiers[index] || {}; 
     newTiers[index][field as keyof typeof newTiers[0]] = value;
     setAppSettings({ ...appSettings, [vehicle]: { ...appSettings[vehicle], tiers: newTiers } });
   };
@@ -161,6 +164,16 @@ setAppSettings({
   };
 
   // 🎟️ دوال التحكم في أكواد الخصم الديناميكية
+  // 🎲 دالة توليد كود عشوائي مكون من 6 حروف وأرقام
+  const generateRandomCode = (idx: number) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let randomCode = '';
+    for (let i = 0; i < 6; i++) {
+      randomCode += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    updatePromoCode(idx, 'code', randomCode);
+  };
+
   const addPromoCode = () => {
     setAppSettings({ ...appSettings, promoCodes: [...(appSettings.promoCodes || []), { code: '', userType: 'passenger', scope: 'all', selectedUsers: [], discountValue: '', expiryDate: '' }] });
   };
@@ -188,6 +201,45 @@ setAppSettings({
     setActivePromoIndex(index);
     setPromoSearchQuery('');
     setIsPromoUsersModalVisible(true);
+  };
+
+  // 🚀 إرسال كود الخصم في إشعار للمستخدمين المحددين أو الكل
+  const sendPromoNotification = async (idx: number) => {
+    const promo = appSettings.promoCodes[idx];
+    if (!promo.code || !promo.discountValue) {
+      Alert.alert('تنبيه', 'يرجى التأكد من توليد الكود وإدخال قيمة الخصم/المكافأة قبل الإرسال.');
+      return;
+    }
+
+    const message = `🎉 مبروك! لديك كود ${promo.userType === 'captain' ? 'مكافأة' : 'خصم'} جديد بقيمة ${promo.discountValue} جنيه.\nاستخدم الكود: ${promo.code}`;
+    const title = 'هدية من بُرَاق 🎁';
+    const timeNow = serverTimestamp();
+    let count = 0;
+
+    try {
+      if (promo.scope === 'all') {
+        const targetList = promo.userType === 'captain' ? captains : passengers;
+        targetList.forEach(user => {
+          if (user.status !== 'rejected') {
+            addDoc(collection(db, 'notifications'), { userId: user.id, userType: promo.userType, title, message, timestamp: timeNow, read: false, sender: 'الإدارة' });
+            count++;
+          }
+        });
+      } else if (promo.scope === 'specific' && promo.selectedUsers) {
+        promo.selectedUsers.forEach((userId: string) => {
+          addDoc(collection(db, 'notifications'), { userId, userType: promo.userType, title, message, timestamp: timeNow, read: false, sender: 'الإدارة' });
+          count++;
+        });
+      }
+
+      if (count > 0) {
+        Alert.alert('نجاح 🚀', `تم إرسال الكود كإشعار لـ ${count} مستخدم بنجاح!`);
+      } else {
+        Alert.alert('تنبيه', 'لم يتم العثور على مستخدمين لإرسال الإشعار إليهم.');
+      }
+    } catch (error) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الإشعارات.');
+    }
   };
 
   // حفظ الإعدادات
@@ -442,7 +494,7 @@ setAppSettings({
         <Text style={styles.headerTitle}>لوحة التحكم 👑</Text>
       </View>
 
-      {/* 🚀 قسم الوصول السريع (شبكة مرصوصة بدون سحب) */}
+      {/* 🚀 قسم الوصول السريع */}
       <View style={styles.quickGrid}>
         <TouchableOpacity style={styles.quickCard} onPress={() => setActiveTab('settings')}>
           <Text style={{ fontSize: 26, marginBottom: 5 }}>⚙️</Text>
@@ -480,7 +532,7 @@ setAppSettings({
         </TouchableOpacity>
       </View>
 
-      {/* 📑 شريط التبويبات (ثابت) */}
+      {/* 📑 شريط التبويبات */}
       <View style={styles.tabsContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 5, flexGrow: 1, justifyContent: 'space-evenly' }}>
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'settings' && styles.tabBtnActive]} onPress={() => setActiveTab('settings')}>
@@ -529,7 +581,7 @@ setAppSettings({
                 </View>
               </View>
 
-{/* قسم السيارات */}
+              {/* قسم السيارات */}
               <View style={styles.settingsSection}>
                 <Text style={styles.settingsSectionTitle}>🚗 السيارات</Text>
                 <View style={styles.settingsInputRow}>
@@ -634,16 +686,34 @@ setAppSettings({
                 </View>
               </View>
 
-             {/* 📈 قسم أوقات الذروة (Surge Pricing) */}
-              <View style={[styles.settingsSection, { borderColor: '#f59e0b' }]}>
-                <Text style={[styles.settingsSectionTitle, { color: '#f59e0b' }]}>📈 أوقات الذروة ومضاعف السعر</Text>
-                <View style={styles.settingsInputRow}>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>مُعامل التسعير (الافتراضي 1.0)</Text>
-                    <TextInput style={[styles.settingsInput, { color: '#f59e0b', fontSize: 20, fontWeight: '900' }]} keyboardType="numeric" value={appSettings.surgeMultiplier} onChangeText={t => setAppSettings({...appSettings, surgeMultiplier: t})} textAlign="center" placeholder="1.0" />
-                  </View>
+{/* 📈 قسم أوقات الذروة (Surge Pricing) */}
+              <View style={[styles.settingsSection, { borderColor: appSettings.isSurgeActive ? '#f59e0b' : '#334155' }]}>
+                <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: appSettings.isSurgeActive ? 15 : 0 }}>
+                  <Text style={[styles.settingsSectionTitle, { color: appSettings.isSurgeActive ? '#f59e0b' : '#94a3b8', marginBottom: 0 }]}>
+                    📈 تفعيل أوقات الذروة
+                  </Text>
+                  <Switch 
+                    trackColor={{ false: '#334155', true: '#fcd34d' }} 
+                    thumbColor={appSettings.isSurgeActive ? '#f59e0b' : '#94a3b8'} 
+                    onValueChange={(val) => setAppSettings({...appSettings, isSurgeActive: val})} 
+                    value={appSettings.isSurgeActive || false} 
+                  />
                 </View>
-                <Text style={styles.tierHint}>* اكتب 1.5 لزيادة أجرة جميع الرحلات بنسبة 50% وقت الذروة أو المطر، واكتب 1.0 للعودة للسعر الطبيعي.</Text>
+
+                {appSettings.isSurgeActive && (
+                  <View style={{ backgroundColor: '#0f172a', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#f59e0b' }}>
+                    <Text style={styles.settingsLabel}>مُعامل التسعير وقت الذروة</Text>
+                    <TextInput 
+                      style={[styles.settingsInput, { color: '#f59e0b', fontSize: 22, fontWeight: '900', marginTop: 5 }]} 
+                      keyboardType="numeric" 
+                      value={appSettings.surgeMultiplier} 
+                      onChangeText={t => setAppSettings({...appSettings, surgeMultiplier: t})} 
+                      textAlign="center" 
+                      placeholder="مثال: 1.5" 
+                    />
+                    <Text style={styles.tierHint}>* إذا كانت القيمة 1.5، ستزيد أجرة الرحلات بنسبة 50% طالما أن الزر مفعل.</Text>
+                  </View>
+                )}
               </View>
 
               {/* 🎁 نظام البونص المتقدم (للكباتن والركاب) */}
@@ -705,10 +775,15 @@ setAppSettings({
               <View style={[styles.settingsSection, { borderColor: '#10b981' }]}>
                 <Text style={[styles.settingsSectionTitle, { color: '#10b981' }]}>🎟️ أكواد الخصم والمكافآت الترويجية</Text>
                 
-                {(appSettings.promoCodes || []).map((promo, idx) => (
+ {(appSettings.promoCodes || []).map((promo: any, idx: number) => (
                   <View key={idx} style={{ backgroundColor: '#0f172a', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#334155' }}>
                     <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
                       <TextInput style={[styles.settingsInput, { flex: 1, color: '#10b981', fontSize: 18, marginRight: 10, letterSpacing: 2 }]} value={promo.code} onChangeText={t => updatePromoCode(idx, 'code', t.toUpperCase())} placeholder="الكود (مثال: FREE20)" placeholderTextColor="#64748b" textAlign="center" />
+                      
+                      <TouchableOpacity onPress={() => generateRandomCode(idx)} style={{ backgroundColor: '#3b82f6', padding: 12, borderRadius: 8, marginRight: 10 }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>🎲 توليد</Text>
+                      </TouchableOpacity>
+
                       <TouchableOpacity onPress={() => removePromoCode(idx)} style={{ backgroundColor: '#ef4444', padding: 12, borderRadius: 8 }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold' }}>✖</Text>
                       </TouchableOpacity>
@@ -747,37 +822,24 @@ setAppSettings({
                       </View>
                       <View style={styles.settingsInputGroup}>
                         <Text style={styles.settingsLabel}>تاريخ الانتهاء</Text>
-                        <TextInput style={styles.settingsInput} value={promo.expiryDate} onChangeText={t => updatePromoCode(idx, 'expiryDate', t)} textAlign="center" placeholder="2026-11-01" placeholderTextColor="#64748b" />
+ <TextInput style={styles.settingsInput} value={promo.expiryDate} onChangeText={t => updatePromoCode(idx, 'expiryDate', t)} textAlign="center" placeholder="2026-11-01" placeholderTextColor="#64748b" />
                       </View>
                     </View>
+
+                    {/* 🚀 زر إرسال الكود للمستخدمين */}
+                    <TouchableOpacity 
+                      style={{ backgroundColor: '#2563eb', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 }} 
+                      onPress={() => sendPromoNotification(idx)}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>إرسال الكود في إشعار 🚀</Text>
+                    </TouchableOpacity>
+
                   </View>
                 ))}
 
                 <TouchableOpacity style={[styles.addTierBtn, { backgroundColor: '#10b98120', alignSelf: 'center', width: '100%', paddingVertical: 12 }]} onPress={addPromoCode}>
                   <Text style={[styles.addTierBtnText, { color: '#10b981', fontSize: 16, textAlign: 'center' }]}>➕ إضافة كود جديد</Text>
                 </TouchableOpacity>
-              </View>
-
-                {/* 👈 خانات الأرقام والمبلغ */}
-                <View style={styles.settingsInputRow}>
-
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>مبلغ المكافأة (ج)</Text>
-                    <TextInput style={[styles.settingsInput, { color: '#10b981' }]} keyboardType="numeric" value={appSettings.bonusAmount} onChangeText={t => setAppSettings({...appSettings, bonusAmount: t})} textAlign="center" placeholder="مثال: 300" />
-                  </View>
-                </View>
-
-                {/* 👈 خانات التواريخ المخصصة */}
-                <View style={[styles.settingsInputRow, { marginTop: 15 }]}>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>ينتهي في (اختياري)</Text>
-                    <TextInput style={[styles.settingsInput, { fontSize: 13 }]} value={appSettings.bonusEndDate} onChangeText={t => setAppSettings({...appSettings, bonusEndDate: t})} textAlign="center" placeholder="مثال: 2026-11-07" placeholderTextColor="#64748b" />
-                  </View>
-                  <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>يبدأ من (اختياري)</Text>
-                    <TextInput style={[styles.settingsInput, { fontSize: 13 }]} value={appSettings.bonusStartDate} onChangeText={t => setAppSettings({...appSettings, bonusStartDate: t})} textAlign="center" placeholder="مثال: 2026-11-01" placeholderTextColor="#64748b" />
-                  </View>
-                </View>
               </View>
 
               {/* ⚙️ ضوابط وحماية النظام */}
@@ -825,7 +887,7 @@ setAppSettings({
                 {/* 🛡️ نظام حظر الإلغاءات (للركاب) */}
                 <View style={[styles.tiersContainer, { marginTop: 15, borderColor: '#38bdf8' }]}>
                   <Text style={[styles.tiersTitle, { color: '#38bdf8' }]}>👤 نظام حظر الإلغاءات التلقائي (للركاب):</Text>
-                  {(appSettings.passengerCancelBanRules || []).map((rule, idx) => (
+                  {(appSettings.passengerCancelBanRules || []).map((rule: any, idx: number) => (
                     <View key={idx} style={styles.tierRow}>
                       <Text style={styles.tierLabel}>إلغاء</Text>
                       <TextInput style={styles.tierInput} keyboardType="numeric" value={rule.cancels} onChangeText={t => updateBanRule(idx, 'cancels', t, 'passenger')} textAlign="center" placeholder="مرات" />
@@ -853,7 +915,7 @@ setAppSettings({
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
             {totalPending === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات معلقة ✨</Text></View> : (
               <>
-                {pendingCaptains.map(item => (
+                {pendingCaptains.map((item: any) => (
                   <View key={item.id} style={styles.userCard}>
                     <View style={styles.cardHeader}>
                       <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
@@ -872,7 +934,7 @@ setAppSettings({
                   </View>
                 ))}
 
-                {pendingPassengers.map(item => (
+                {pendingPassengers.map((item: any) => (
                   <View key={item.id} style={styles.userCard}>
                     <View style={styles.cardHeader}>
                       <Image source={{ uri: item.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatarImg} />
@@ -895,7 +957,7 @@ setAppSettings({
         ) : activeTab === 'updates' ? (
           <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#eab308" />}>
             {updateRequests.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>لا توجد طلبات تعديل ✨</Text></View> : (
-              updateRequests.map(req => (
+              updateRequests.map((req: any) => (
                 <View key={req.id} style={styles.userCard}>
                   
                   {req.userType === 'passenger' ? (
@@ -1329,8 +1391,8 @@ setAppSettings({
             <ScrollView showsVerticalScrollIndicator={false}>
               {activePromoIndex !== null && appSettings.promoCodes[activePromoIndex] && (
                 (appSettings.promoCodes[activePromoIndex].userType === 'captain' ? captains : passengers)
-                .filter(u => u.name?.includes(promoSearchQuery) || u.phone?.includes(promoSearchQuery))
-                .map(user => {
+                .filter((u: any) => u.name?.includes(promoSearchQuery) || u.phone?.includes(promoSearchQuery))
+                .map((user: any) => {
                   const isSelected = appSettings.promoCodes[activePromoIndex].selectedUsers?.includes(user.id);
                   return (
                     <TouchableOpacity 
@@ -1396,7 +1458,7 @@ const styles = StyleSheet.create({
   settingsLabel: { color: '#94a3b8', fontSize: 11, textAlign: 'center', marginBottom: 5 },
   settingsInput: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 8, padding: 10, fontSize: 15, borderWidth: 1, borderColor: '#475569', fontWeight: 'bold' },
   saveSettingsBtn: { backgroundColor: '#10b981', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, marginBottom: 30, elevation: 3 },
-saveSettingsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  saveSettingsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
 
   // 📊 تنسيقات الشرائح
   tiersContainer: { marginTop: 15, padding: 12, backgroundColor: '#0f172a', borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
@@ -1527,4 +1589,4 @@ saveSettingsBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
   confirmModalBtnText: { color: '#000', fontWeight: 'bold' },
   cancelModalBtn: { flex: 1, backgroundColor: '#334155', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   cancelModalBtnText: { color: '#fff', fontWeight: 'bold' }
-}); 
+});

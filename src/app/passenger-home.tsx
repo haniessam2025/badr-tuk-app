@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { db } from '../firebase';
@@ -18,6 +19,7 @@ const getSafeAvatar = (imgStr: any) => {
   if (imgStr.length > 50) return `data:image/jpeg;base64,${imgStr}`;
   return 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
 };
+
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -27,8 +29,9 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
     Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c * 1000; // المسافة بالمتر
+  return R * c * 1000; 
 };
+
 const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, requestedPrice }: { offer: any, onAcceptOffer: (offer: any) => void, onRejectOffer: (offer: any) => void, isDarkMode: boolean, requestedPrice?: string }) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
@@ -67,7 +70,6 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, r
         <View style={[styles.offerActionSide, isDarkMode && { borderRightColor: '#334155' }, { alignItems: 'center' }]}>
           <Text style={styles.offerPricePro}>{offer.price} ج</Text>
           
-          {/* 👈 شارة السعر العادل تظهر للراكب لو الكابتن وافق على نفس السعر */}
           {requestedPrice && Number(offer.price) === Number(requestedPrice) && (
             <View style={{backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginBottom: 6, borderWidth: 1, borderColor: '#86efac'}}>
               <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#059669' }}>السعر العادل ⚖️</Text>
@@ -134,7 +136,6 @@ const sendPushNotification = async (expoPushToken: string, passengerName: string
 export default function PassengerHome() {
   const router = useRouter();
 
-  // 🚨 مراقبة وضع الصيانة من الإدارة لحظة بلحظة
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
@@ -144,10 +145,10 @@ export default function PassengerHome() {
     });
     return () => unsubSettings();
   }, []);
+  
   const { isDarkMode, isVibrationEnabled } = useApp();
   const pathname = usePathname();
 
-    // 💡 متغيرات تنبيه اقتراب الكابتن
   const flashAnim = useRef(new Animated.Value(0)).current;
   const hasShownAlmostArrivedRef = useRef(false);
   const [pickup, setPickup] = useState('');
@@ -166,17 +167,22 @@ export default function PassengerHome() {
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
   const [calculatedDistance, setCalculatedDistance] = useState('0');
-  const [destinationsPrices, setDestinationsPrices] = useState<number[]>([]); // 👈 مصفوفة الأسعار المجزأة
+  const [destinationsPrices, setDestinationsPrices] = useState<number[]>([]); 
   const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const debounceTimer = useRef<any>(null);
 
-  const activeRideScrollRef = useRef<ScrollView>(null); // 👈 المرجع للتحكم في رفع الشاشة
+  const activeRideScrollRef = useRef<ScrollView>(null); 
   const [notes, setNotes] = useState('');
   const [rideStatus, setRideStatus] = useState<'idle' | 'searching' | 'accepted' | 'captain_arrived' | 'passenger_on_the_way' | 'waiting_for_scan' | 'in_progress'>('idle');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
- const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
-  // 💾 مراقب التخزين التلقائي: أي تغيير في السعر بيتحفظ محلياً فوراً
+
+  // متغيرات كود الخصم
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<any>(null);
+  const [isVerifyingPromo, setIsVerifyingPromo] = useState(false);
+
   useEffect(() => {
     const savePriceLocally = async () => {
       if (price && price !== '0') {
@@ -193,7 +199,6 @@ export default function PassengerHome() {
     savePriceLocally();
   }, [price]);
 
-  // 📂 استرجاع السعر فور فتح الشاشة أو رجوع التطبيق للحياة
   useFocusEffect(
     useCallback(() => {
       const getLocalPrice = async () => {
@@ -211,16 +216,16 @@ export default function PassengerHome() {
     }, [])
   );
   
-// 👈 مراقب السعر الذكي: أي تغيير في السعر عند الراكب هيتبعت فوراً للكابتن
   useEffect(() => {
     if (currentRideId && rideStatus === 'searching' && price) {
       updateDoc(doc(db, 'rides', currentRideId), { 
         price: price.toString(),
-        timestamp: new Date().getTime() // تحديث الوقت لضمان إنعاش شاشة الكابتن
+        timestamp: new Date().getTime() 
       }).catch((e) => console.log('Price Sync Error:', e));
     }
   }, [price, currentRideId, rideStatus]);
-const saveNewDestinations = async () => {
+
+  const saveNewDestinations = async () => {
     const validDests = tempDestinations.filter(d => d.trim().length > 0);
     if (validDests.length === 0) {
       Alert.alert('تنبيه', 'يجب إدخال وجهة واحدة على الأقل');
@@ -228,7 +233,7 @@ const saveNewDestinations = async () => {
     }
 
     setIsEditDestModalVisible(false);
-    setIsCalculatingPrice(true); // تشغيل مؤشر التحميل
+    setIsCalculatingPrice(true); 
 
     try {
       let startCoords = pickupCoords;
@@ -260,7 +265,6 @@ const saveNewDestinations = async () => {
 
       const isActiveRide = ['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(rideStatus);
 
-      // 🌟 1. لو الراكب في رحلة نشطة
       if (isActiveRide) {
         if (newDistanceKm > oldDistanceKm) {
           const extraKm = newDistanceKm - oldDistanceKm;
@@ -274,7 +278,6 @@ const saveNewDestinations = async () => {
           isIncrease = false;
         }
       } else {
-        // 🌟 2. لو الراكب لسه بيبحث
          let calculatedPrice = 0;
          if (requestedVehicleType === 'car') {
            if (newDistanceKm <= 15) { calculatedPrice = 15 + (newDistanceKm * 4.4); }
@@ -297,7 +300,6 @@ const saveNewDestinations = async () => {
       setIsCalculatingPrice(false);
       const diffText = isIncrease ? `زيادة قدرها ${priceDiff} ج 🔺` : `خصم قدره ${priceDiff} ج 🔻`;
       
-      // تجهيز بيانات التعديل
       const modPayload = {
         newDestinationsList: validDests,
         newDestinationLocation: validDests.join(' - '),
@@ -369,14 +371,14 @@ const saveNewDestinations = async () => {
       Alert.alert('خطأ', 'فشل في حساب المسار الجديد تأكد من اتصالك بالإنترنت.');
     }
   };
+
   const [offers, setOffers] = useState<any[]>([]);
   const [numericSecret, setNumericSecret] = useState('');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState('');
   const latestMsgTimer = useRef<any>(null);
 
-  // ⏱️ --- متغيرات ودالة العداد للراكب ---
-  const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); // 5 دقائق
+  const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); 
   const [rideArrivedAt, setRideArrivedAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -404,7 +406,6 @@ const saveNewDestinations = async () => {
     const s = totalSeconds % 60;
     return `0${m}:${s < 10 ? '0' : ''}${s}`;
   };
-  // ------------------------------------
 
   const [isCallModalVisible, setIsCallModalVisible] = useState(false);
   const [phoneToCall, setPhoneToCall] = useState('');
@@ -427,7 +428,6 @@ const saveNewDestinations = async () => {
     Animated.timing(sidebarAnim, { toValue: Dimensions.get('window').width, duration: 300, useNativeDriver: true }).start(() => setIsSidebarOpen(false));
   };
 
-  // دالة الاستغاثة للطوارئ
   const handleRideSOS = async () => {
     let finalPhone = emergencyPhone;
 
@@ -510,8 +510,8 @@ const saveNewDestinations = async () => {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
 
   const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0, hidePhoneNumber: false });  
-const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
-  const [captainLiveCoords, setCaptainLiveCoords] = useState<any>(null); // 👈 متغير جديد لتتبع موقع الكابتن لايف
+  const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
+  const [captainLiveCoords, setCaptainLiveCoords] = useState<any>(null); 
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
 
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
@@ -536,7 +536,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     return () => unsubscribe();
   }, [passengerProfile]);
   
-  // 🚨 رادار تنبيه الراكب باقتراب الكابتن (قبل الوصول بـ 500 متر)
   useEffect(() => {
     if (rideStatus === 'accepted' && captainLiveCoords && pickupCoords) {
       
@@ -547,22 +546,18 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
         pickupCoords.longitude
       );
 
-      // لو المسافة أقل من 500 متر والتنبيه لسه مظهرش
       if (dist <= 500 && !hasShownAlmostArrivedRef.current) {
-        hasShownAlmostArrivedRef.current = true; // عشان ميظهرش تاني
+        hasShownAlmostArrivedRef.current = true; 
 
-        // 1. الشاشة تنور وتطفي مرة واحدة
         Animated.sequence([
           Animated.timing(flashAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
           Animated.timing(flashAnim, { toValue: 0, duration: 500, useNativeDriver: false })
         ]).start();
 
-        // 2. اهتزاز للموبايل
         if (isVibrationEnabled) {
           Vibration.vibrate([0, 500, 200, 500]);
         }
 
-        // 3. ظهور رسالة التنبيه
         Alert.alert(
           "تنبيه 🔔",
           "الكابتن على وشك الوصول برجاء التوجه إلى نقطة الإقلال"
@@ -570,7 +565,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       }
     }
 
-    // تصفير الرادار لو الرحلة خلصت أو اتلغت
     if (rideStatus === 'idle' || rideStatus === 'searching') {
       hasShownAlmostArrivedRef.current = false;
     }
@@ -642,7 +636,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           } else {
             setDestinations([savedRide.destinationLocation || '']);
           }
-          // 👈 جلب الأسعار المجزأة لو الراكب فاتح التطبيق من جديد
           if (savedRide.destinationsPrices) {
             setDestinationsPrices(savedRide.destinationsPrices);
           }
@@ -661,7 +654,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       
       docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
       
-      // 👈 هنا تعريف activeRide اللي كان طاير
       const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
       
       if (activeRide) {
@@ -675,7 +667,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           setDestinations([activeRide.destinationLocation || '']);
         }
         
-        // 👈 سحب أسعار المحطات من الداتابيز لعرضها للراكب
         if (activeRide.destinationsPrices) {
           setDestinationsPrices(activeRide.destinationsPrices);
         }
@@ -689,7 +680,7 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           prevOffersCountRef.current = (activeRide.offers || []).length;
         } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
           setRideStatus(activeRide.status);
-          if (activeRide.arrivedAt) setRideArrivedAt(activeRide.arrivedAt); // ⏳ استرجاع وقت الوصول
+          if (activeRide.arrivedAt) setRideArrivedAt(activeRide.arrivedAt); 
           setCaptainInfo({
             name: activeRide.captainName || '',
             phone: activeRide.captainPhone || 'غير مسجل',
@@ -728,18 +719,33 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           if (change.type === 'added') {
             const notif = change.doc.data();
             const notifId = change.doc.id;
+
+            const codeMatch = notif.message ? notif.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) : null;
+            const buttons: any[] = [];
+
+            if (codeMatch && codeMatch[1]) {
+              buttons.push({
+                text: 'نسخ الكود 📋',
+                onPress: async () => {
+                  await Clipboard.setStringAsync(codeMatch[1]);
+                  Alert.alert('تم بنجاح', `تم نسخ الكود (${codeMatch[1]}) وجاهز للاستخدام!`);
+                  try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
+                }
+              });
+            }
+
+            buttons.push({
+              text: codeMatch ? 'إغلاق' : 'حسناً',
+              style: 'cancel',
+              onPress: async () => {
+                try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
+              }
+            });
             
             Alert.alert(
               notif.title || 'رسالة هامة من الإدارة 📩',
               notif.message,
-              [{ 
-                text: 'حسناً', 
-                onPress: async () => {
-                  try {
-                    await updateDoc(doc(db, 'notifications', notifId), { read: true });
-                  } catch (e) {}
-                }
-              }]
+              buttons
             );
           }
         });
@@ -773,12 +779,12 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
             ]);
           }
         }
-        // مسحنا جزء الـ else اللي كان بيعمل طرد فوري عشان نتجنب الطرد العشوائي لو النت فصل لحظة
       });
     };
     monitorSession();
     return () => { if (unsubscribe) unsubscribe(); };
   }, []);
+
   useEffect(() => {
     Animated.sequence([
       Animated.timing(vehicleImageAnim, { toValue: 0.5, duration: 150, useNativeDriver: true }),
@@ -829,10 +835,9 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
         if (firebaseData.numericSecret) setNumericSecret(firebaseData.numericSecret);
         if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(firebaseData.status)) {
           setRideStatus(firebaseData.status);
-          if (firebaseData.arrivedAt) setRideArrivedAt(firebaseData.arrivedAt); // ⏳ تحديث وقت الوصول فوراً
+          if (firebaseData.arrivedAt) setRideArrivedAt(firebaseData.arrivedAt); 
           setPrice(firebaseData.price ? String(firebaseData.price) : '');
           
-          // 👈 إضافة تحديث الوجهات لايف عند الراكب
           if (firebaseData.destinationsList && firebaseData.destinationsList.length > 0) {
             setDestinations(firebaseData.destinationsList);
           }
@@ -846,7 +851,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
             plateNumber: firebaseData.captainPlateNumber || ''
           });
           
-          // 👈 السر هنا: هنجيب موقع الكابتن فوراً من العرض بتاعه حتى لو لسه متحركش
           let loc = firebaseData.liveCoords || firebaseData.captainCoords || firebaseData.captainLocation;
           if (!loc && firebaseData.offers && firebaseData.offers.length > 0) {
             const acceptedOffer = firebaseData.offers.find((o: any) => o.captainId === firebaseData.captainId);
@@ -858,7 +862,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
             setCaptainLiveCoords(loc);
           }
 
-          // 👈 استقبال رد الكابتن وتحديث الشاشة فوراً
           if (firebaseData.pendingModification) {
             const mod = firebaseData.pendingModification;
             if (mod.status === 'accepted' && !mod.notifiedPassenger) {
@@ -883,7 +886,7 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
               updateDoc(doc(db, 'rides', currentRideId), { 'pendingModification.notifiedPassenger': true }).catch(()=>{});
             }
           }
-        } else if (firebaseData.status === 'completed') {
+} else if (firebaseData.status === 'completed') {
           setRideToRate({ firebaseData, id: currentRideId });
           setIsRatingModalVisible(true);
           AsyncStorage.removeItem('active_ride'); setCurrentRideId(null);
@@ -893,6 +896,8 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           prevOffersCountRef.current = 0;
           setUnreadChatCount(0); setNotes(''); setLatestMessage('');
           setNumericSecret('');
+          setPromoCodeInput(''); // 👈 تفريغ الكود بعد الرحلة الناجحة
+          setAppliedPromo(null); // 👈 إلغاء تفعيل الخصم
         } else if (firebaseData.status === 'canceled') {
           AsyncStorage.removeItem('active_ride'); setCurrentRideId(null);
           setRideStatus('idle');
@@ -901,6 +906,8 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           prevOffersCountRef.current = 0;
           setUnreadChatCount(0); setNotes(''); setLatestMessage('');
           setNumericSecret('');
+          setPromoCodeInput(''); // 👈 تفريغ الكود لو الرحلة اتلغت
+          setAppliedPromo(null); // 👈 إلغاء تفعيل الخصم
         }
       }
     });
@@ -1020,10 +1027,8 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     }
   };
 
-// 🌍 دالة ذكية لتحويل أسماء الأماكن لإحداثيات باستخدام OpenStreetMap بدقة عالية في مصر
   const getCoordinatesFromText = async (text: string) => {
     try {
-      // 1️⃣ المحاولة الأولى عبر خريطة الموبايل الافتراضية
       const expoResult = await Location.geocodeAsync(text + ' مصر');
       if (expoResult && expoResult.length > 0) {
         return { latitude: expoResult[0].latitude, longitude: expoResult[0].longitude };
@@ -1031,7 +1036,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     } catch (e) { }
 
     try {
-      // 2️⃣ المحاولة الثانية عبر سيرفر OpenStreetMap (تم إضافة User-Agent لضمان عدم الرفض)
       const osmResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(text + ' مصر')}&format=json&limit=1`, {
         headers: {
           'User-Agent': 'BuraqPassengerApp/1.0',
@@ -1046,11 +1050,9 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     return null;
   };
 
-  // 👈 دالة عبقرية لحساب السعر بنظام الشرائح
   const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
     if (!tiers || tiers.length === 0) return 0;
     
-    // ترتيب الشرائح تصاعدياً حسب المسافة لضمان الحساب الصحيح
     const sortedTiers = [...tiers].sort((a, b) => parseFloat(a.upToKm) - parseFloat(b.upToKm));
     
     let totalFare = 0;
@@ -1083,11 +1085,9 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
         base = 12 + ((validDests.length - 1) * 5);
      }
      else {
-        // تسعيرة الطوارئ: 15 جنيه أساسي + 6.5 لكل وجهة إضافية
         let basePriceForOne = 15 + ((validDests.length - 1) * 6.5);
         const count = parseInt(passCountStr) || 1;
         const extraPassengers = count - 1;
-        // زيادة 25% لكل راكب إضافي
         const passengerMultiplier = 1 + (extraPassengers * 0.25);
         base = basePriceForOne * passengerMultiplier;
      }
@@ -1106,25 +1106,21 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       setIsCalculatingPrice(true);
       try {
         let startCoords = overrideStartCoords || pickupCoords;
-        // استخدام المساعد الذكي لجلب إحداثيات نقطة الانطلاق
         if (!startCoords && pickupText !== 'موقعي الحالي') {
           startCoords = await getCoordinatesFromText(pickupText);
         }
 
-        // استخدام المساعد الذكي لجلب إحداثيات كل الوجهات
         let destsCoords: any[] = [];
         for (let dest of validDests) {
           const coords = await getCoordinatesFromText(dest);
           if (coords) destsCoords.push(coords);
         }
 
-        // لو قدرنا نجيب الإحداثيات كلها بنجاح
         if (startCoords && destsCoords.length === validDests.length) {
           let totalDistanceKm = 0;
           let osrmSuccess = false;
 
           try {
-            // محاولة تتبع مسار الشوارع
             let coordsString = `${startCoords.longitude},${startCoords.latitude}`;
             destsCoords.forEach((c: any) => { coordsString += `;${c.longitude},${c.latitude}`; });
             const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=false`;
@@ -1140,7 +1136,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
              console.log("OSRM API failed, switching to fallback");
           }
 
-       // 👈 الحل الرياضي الذكي (حساب مسافة كل محطة بشكل مستقل عشان نوزع السعر بالعدل)
           let legsDistances: number[] = [];
           let totalDirectMeters = 0;
           let currentPoint = startCoords;
@@ -1155,13 +1150,10 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
             totalDistanceKm = (totalDirectMeters / 1000) * 1.35; 
           }
 
-          // تطبيق التسعيرة على المسافة النهائية
           if (totalDistanceKm > 0) {
              setCalculatedDistance(totalDistanceKm.toFixed(1));
 
              let calculatedPrice = 0;
-             
-             // 💡 جلب الإعدادات المحفوظة من الإدارة بنظام الشرائح الجديد
              let appSettings: any = {
                 car: { baseFare: 15, minFare: 20, tiers: [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
                 tuktuk: { baseFare: 10, minFare: 15, tiers: [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
@@ -1180,7 +1172,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
                 }
              } catch(e) { console.log("Failed to load settings, using defaults."); }
 
-             // 👈 حساب السعر بنظام التشريح بدلاً من الضرب المباشر
              if (vType === 'car') {
                const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.car.tiers);
                calculatedPrice = Math.max(appSettings.car.minFare, appSettings.car.baseFare + distanceFare);
@@ -1202,12 +1193,11 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
              setBasePriceForSuggestions(finalBase);
              setPrice(finalBase.toString());
              
-             // 👈 توزيع السعر الإجمالي على المحطات بنسبة المسافة (عشان مجموعهم يساوي السعر الكلي بالظبط)
              let destPricesList = [];
              let accumulated = 0;
              for(let i = 0; i < validDests.length; i++) {
                 if(i === validDests.length - 1) {
-                   destPricesList.push(finalBase - accumulated); // الباقي بيتحط للمحطة الأخيرة لضمان الدقة
+                   destPricesList.push(finalBase - accumulated); 
                 } else {
                    let legPrice = Math.round((legsDistances[i] / totalDirectMeters) * finalBase) || 0;
                    destPricesList.push(legPrice);
@@ -1221,7 +1211,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
           }   
         }
         
-        // لو الراكب كتب كلام غريب ومش موجود ع الخريطة خالص
         fallbackCalculation(validDests, vType, passCountStr);
         
       } catch(e) {
@@ -1252,7 +1241,7 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       }
       let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const currentCoords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
-      setPickupCoords(currentCoords); // ✅ حفظ الإحداثيات صح بدون مسحها
+      setPickupCoords(currentCoords); 
 
       let geocode = await Location.reverseGeocodeAsync(currentCoords);
       let addressText = 'موقعي الحالي';
@@ -1267,7 +1256,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       setIsCalculatingPrice(true);
       debounceTimer.current = setTimeout(() => {
-        // ✅ تمرير الإحداثيات مباشرة لضمان الدقة
         updatePriceCalculation(addressText, destinations, requestedVehicleType, passengersCount, currentCoords);
       }, 1500);
 
@@ -1317,7 +1305,7 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
       updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords);
     }, 1500);
   };
-// 👈 متغيرات ودوال تعديل الوجهة السريع داخل شاشة الانتظار
+
   const [isEditDestModalVisible, setIsEditDestModalVisible] = useState(false);
   const [tempDestinations, setTempDestinations] = useState<string[]>(['']);
 
@@ -1341,7 +1329,6 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     newDests.splice(index, 1);
     setTempDestinations(newDests);
   };
-
 
   const openEditPriceModal = () => {
     const validDests = destinations.filter(d => d.trim().length > 0);
@@ -1402,11 +1389,65 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     } catch (e) {}
   };
 
- const handleSearchCaptain = async () => {
+  const verifyPromoCode = async () => {
+    if (!promoCodeInput.trim()) return;
+    setIsVerifyingPromo(true);
+
+    try {
+      const settingsSnap = await getDoc(doc(db, 'app_settings', 'pricing'));
+      const settingsData = settingsSnap.data();
+      const promoCodesList = settingsData?.promoCodes || [];
+
+      const promo = promoCodesList.find((p: any) => p.code === promoCodeInput.toUpperCase().trim());
+
+      if (!promo) {
+        Alert.alert('خطأ', 'الكود غير صحيح أو غير موجود.');
+        setIsVerifyingPromo(false); return;
+      }
+
+      if (promo.userType !== 'passenger') {
+        Alert.alert('عذراً', 'هذا الكود غير مخصص للركاب.');
+        setIsVerifyingPromo(false); return;
+      }
+
+      if (promo.scope === 'specific' && !promo.selectedUsers?.includes(passengerProfile.id)) {
+        Alert.alert('عذراً', 'هذا الكود غير مخصص لحسابك.');
+        setIsVerifyingPromo(false); return;
+      }
+
+      if (promo.expiryDate) {
+        const today = new Date().toISOString().split('T')[0];
+        if (today > promo.expiryDate) {
+          Alert.alert('عذراً', 'لقد انتهت صلاحية هذا الكود.');
+          setIsVerifyingPromo(false); return;
+        }
+      }
+
+      const userRef = doc(db, 'passengers', passengerProfile.id);
+      const userSnap = await getDoc(userRef);
+      const usedCodes = userSnap.data()?.usedPromoCodes || [];
+
+      if (usedCodes.includes(promo.code)) {
+        Alert.alert('عذراً', 'لقد قمت باستخدام هذا الكود من قبل.');
+        setIsVerifyingPromo(false); return;
+      }
+
+      setAppliedPromo(promo);
+      Alert.alert('مبروك! 🎉', `تم تفعيل الخصم بنجاح: ${promo.discountValue} جنيه سيتم خصمها من ثمن الرحلة.`);
+      
+    } catch (error) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء تفعيل الكود.');
+    } finally {
+      setIsVerifyingPromo(false);
+    }
+  };
+
+  const handleSearchCaptain = async () => {
     if (isSubmitting) return;
 
     const validDests = destinations.filter(d => d.trim() !== '');
-    if (!pickup || validDests.length === 0 || !price) {      Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
+    if (!pickup || validDests.length === 0 || !price) {      
+      Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
       return;
     }
 
@@ -1436,8 +1477,10 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
         destinationsList: validDests,
         destinationLocation: validDests.join(' '),
         price: price,
-        calculatedBasePrice: calculatedBasePrice, // 👈 السطر ده هو اللي بيبعت السعر العادل للكابتن
+        calculatedBasePrice: calculatedBasePrice, 
         distance: calculatedDistance, 
+        discountAmount: appliedPromo ? appliedPromo.discountValue : '0', 
+        promoCodeUsed: appliedPromo ? appliedPromo.code : null, 
         numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
         qrSecret: Math.random().toString(36).substring(2, 10),
         notes: notes.trim(),
@@ -1490,9 +1533,8 @@ const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتو�
     }
   };
 
-const acceptCaptainOffer = async (offer: any) => {
+  const acceptCaptainOffer = async (offer: any) => {
     try {
-      // 1️⃣ نجيب بيانات الرحلة المحفوظة
       const savedRideStr = await AsyncStorage.getItem('active_ride');
       const savedRide = savedRideStr ? JSON.parse(savedRideStr) : {};
       let rideId = currentRideId || savedRide.id;
@@ -1502,7 +1544,6 @@ const acceptCaptainOffer = async (offer: any) => {
         return; 
       }
 
-      // 2️⃣ تأمين إحداثيات الراكب (لو كانت مفقودة من الشاشة لأي سبب نرجعها)
       if (!pickupCoords && savedRide.pickupCoords) {
         setPickupCoords(savedRide.pickupCoords);
       }
@@ -1518,26 +1559,30 @@ const acceptCaptainOffer = async (offer: any) => {
         captainPlateNumber: String(offer?.captainPlateNumber || ''),
       };
 
-      // 3️⃣ السر العظيم: خطف إحداثيات الكابتن مباشرة من جدول الكباتن في الداتابيز!
       if (cleanData.captainId !== 'unknown') {
         const capDoc = await getDoc(doc(db, 'captains', cleanData.captainId));
         if (capDoc.exists()) {
           const capData = capDoc.data();
-          // بندور على أي إحداثيات متسجلة للكابتن ونسحبها
           const loc = capData.location || capData.liveCoords || capData.coords || offer?.captainLocation;
           if (loc) {
-            cleanData.captainLocation = loc; // نحفظها في الرحلة
+            cleanData.captainLocation = loc; 
             cleanData.captainCoords = loc;
-            setCaptainLiveCoords(loc); // 👈 دي اللي هتشغل شريط الدقايق فوراً
+            setCaptainLiveCoords(loc); 
           }
         }
       }
 
-      // 4️⃣ تحديث الرحلة في الداتابيز وحفظها محلياً
       await setDoc(doc(db, 'rides', rideId), cleanData, { merge: true }); 
       setPrice(cleanData.price);
       
       await AsyncStorage.setItem('active_ride', JSON.stringify({ ...savedRide, ...cleanData }));
+
+      if (appliedPromo) {
+        await updateDoc(doc(db, 'passengers', passengerProfile.id), {
+          usedPromoCodes: arrayUnion(appliedPromo.code)
+        });
+      }
+
     } catch (error) {}
   };
 
@@ -1588,7 +1633,6 @@ const acceptCaptainOffer = async (offer: any) => {
     if (!currentRideId) return;
     try { 
       await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); 
-      // 🚀 رفع الشاشة لأعلى فوراً وبنعومة لإظهار العداد
       activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
     } catch (error) {}
   };
@@ -1607,6 +1651,8 @@ const handleCancelRide = async () => {
       setRideStatus('idle');
       setOffers([]);
       prevOffersCountRef.current = 0;
+      setPromoCodeInput(''); // 👈 تفريغ خانة الكود المكتوب
+      setAppliedPromo(null); // 👈 إلغاء تفعيل الخصم من الذاكرة
 
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إلغاء الرحلة');
@@ -1785,7 +1831,6 @@ const handleCancelRide = async () => {
              </View>
           )}
 
-          {/* 1. موقع الانطلاق الحالي */}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
           <View style={styles.rowInputContainer}>
             <TextInput style={[styles.inputWithButton, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="اكتب مكان الانطلاق" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={pickup} onChangeText={handlePickupChange} />
@@ -1794,7 +1839,6 @@ const handleCancelRide = async () => {
             </TouchableOpacity>
           </View>
 
-          {/* 2. الوجهة المطلوبة (مستطيل واحد بيزيد لما تدوس إضافة) */}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الوجهة المطلوبة</Text>
           {destinations.map((dest, index) => (
             <View key={index} style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10 }]}>
@@ -1824,7 +1868,6 @@ const handleCancelRide = async () => {
             </View>
           ))}
 
-          {/* زرار إضافة واجهة بيظهر بس لو عدد الوجهات أقل من 3 */}
           {destinations.length < 3 && (
             <TouchableOpacity 
               style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderStyle: 'dashed', flexDirection: 'row-reverse', justifyContent: 'center' }} 
@@ -1835,9 +1878,34 @@ const handleCancelRide = async () => {
             </TouchableOpacity>
           )}
 
-          {/* 3. ملاحظات للكابتن */}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>ملاحظات للكابتن (اختياري)</Text>
           <TextInput style={[styles.notesInput, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="مثال معايا أغراض خفيفة ..." placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={notes} onChangeText={setNotes} multiline={true} />
+
+          {/* 🎟️ إدخال كود الخصم */}
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>كود الخصم (اختياري)</Text>
+          <View style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 15, gap: 10 }}>
+            <TextInput 
+              style={[styles.inputWithButton, { flex: 1 }, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} 
+              placeholder="أدخل كود الخصم..." 
+              placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} 
+              value={promoCodeInput} 
+              onChangeText={setPromoCodeInput} 
+              editable={!appliedPromo}
+            />
+            <TouchableOpacity 
+              style={{ backgroundColor: appliedPromo ? '#10b981' : '#3b82f6', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 }} 
+              onPress={appliedPromo ? () => { setAppliedPromo(null); setPromoCodeInput(''); } : verifyPromoCode}
+              disabled={isVerifyingPromo}
+            >
+              {isVerifyingPromo ? <ActivityIndicator color="#ffffff" size="small" /> : <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>{appliedPromo ? 'إلغاء' : 'تطبيق'}</Text>}
+            </TouchableOpacity>
+          </View>
+
+          {appliedPromo && (
+             <View style={{ backgroundColor: '#dcfce7', padding: 10, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#86efac', alignItems: 'center' }}>
+               <Text style={{ color: '#166534', fontWeight: 'bold' }}>✅ تم تطبيق خصم {appliedPromo.discountValue} جنيه سيتم خصمه من الأجرة النهائية للرحلة.</Text>
+             </View>
+          )}
 
           <Text style={[styles.label, {marginTop: 10}, isDarkMode && { color: '#cbd5e1' }]}>أجرة الرحلة المقترحة</Text>
           <View style={[styles.priceDisplayContainer, isDarkMode && { backgroundColor: '#422006', borderColor: '#d97706' }, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
@@ -1905,7 +1973,6 @@ const handleCancelRide = async () => {
         <View style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
           <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
           
-          {/* المربع المختصر لبيانات الرحلة والتعديل السريع */}
           <View style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#e2e8f0' }}>
             
             <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 8 }}>
@@ -1918,7 +1985,6 @@ const handleCancelRide = async () => {
               <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{destinations.join(' - ')}</Text>
             </View>
 
- {/* 👈 زرار تعديل الوجهة */}
             <TouchableOpacity 
               style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f1f5f9', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', marginBottom: 10, alignItems: 'center' }} 
               onPress={openEditDestModal}
@@ -1928,7 +1994,6 @@ const handleCancelRide = async () => {
 
             <View style={{ height: 1, backgroundColor: isDarkMode ? '#475569' : '#e2e8f0', marginBottom: 10 }} />
 
-            {/* 👈 سطر السعر المقترح وتعديل السعر (تم حل مشكلة اختفاء السعر) */}
             <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: (basePriceForSuggestions > 0 || parseInt(price) > 0) ? 10 : 0 }}>
               <View style={{ flexDirection: 'row-reverse', alignItems: 'center' }}>
                 <Text style={{ fontSize: 13, color: '#64748b', marginLeft: 5 }}>سعرك المقترح:</Text>
@@ -1942,7 +2007,6 @@ const handleCancelRide = async () => {
               </TouchableOpacity>
             </View>
 
-            {/* 👈 أزرار التسعير السريع المدمجة تحت السعر مباشرة */}
             {(basePriceForSuggestions > 0 || parseInt(price) > 0) && (
               <View style={[styles.suggestionsRow, { marginBottom: 0, marginTop: 5 }]}>
                 {[1.2, 1.4, 1.6].map((multiplier, index) => {
@@ -1978,7 +2042,6 @@ const handleCancelRide = async () => {
             )}
           </View>
 
-          {/* زر القبول التلقائي */}
           <TouchableOpacity 
             style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: autoAcceptEnabled ? '#ecfdf5' : (isDarkMode ? '#0f172a' : '#ffffff'), padding: 10, borderRadius: 10, borderWidth: 1, borderColor: autoAcceptEnabled ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), marginBottom: 15 }} 
             onPress={() => setAutoAcceptEnabled(!autoAcceptEnabled)}
@@ -1997,7 +2060,6 @@ const handleCancelRide = async () => {
             ))}
           </ScrollView>
           
-          {/* 👈 زرار إلغاء البحث بقى تحت خالص وبعرض الشاشة كامل */}
           <TouchableOpacity 
             style={styles.cancelBtnOnly} 
             onPress={() => Alert.alert('إلغاء البحث', 'هل أنت متأكد من إلغاء البحث عن كابتن؟', [{ text: 'تراجع', style: 'cancel' }, { text: 'نعم، إلغاء', onPress: handleCancelRide }])}
@@ -2008,22 +2070,18 @@ const handleCancelRide = async () => {
         </View>
       )}
       
-{/* 🚀 شاشة الرحلة النشطة 🚀 */}
       {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'in_progress') && (
         <Animated.View style={[styles.cardActive, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#d97706' }, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }]}>
           
           <ScrollView ref={activeRideScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
             
-            {/* ⏱️ عنوان الرحلة ومربع العداد بالأعلى */}
             <View style={{ flexDirection: 'row-reverse', justifyContent: 'center', alignItems: 'center', marginBottom: 15, width: '100%' }}>
               
-              {/* لو العداد وصل لصفر -> نشيل العداد تماماً والنص ياخد الشاشة كلها بالعرض */}
               {waitingTimeLeft === 0 && ['captain_arrived', 'waiting_for_scan', 'passenger_on_the_way'].includes(rideStatus) ? (
                 <Text style={[styles.statusAlertTitle, { marginBottom: 0, textAlign: 'center', color: '#ef4444', fontSize: 18, paddingVertical: 5 }]}>
                   تنبيه: يحق للكابتن إلغاء الرحلة ⚠️
                 </Text>
               ) : (
-                /* لو العداد لسه شغال نعرضه طبيعي */
                 <>
                   <View style={{ flex: 1 }}>
                     {rideStatus === 'captain_arrived' ? (
@@ -2054,7 +2112,6 @@ const handleCancelRide = async () => {
               )}
             </View>
 
-{/* ⏱️ شريط الوقت المقدر للوصول (يظهر دائماً والكابتن في الطريق) */}
             {rideStatus === 'accepted' && (
               <View style={{ 
                 backgroundColor: isDarkMode ? '#1e3a8a' : '#dbeafe', 
@@ -2174,7 +2231,6 @@ const handleCancelRide = async () => {
                   </Text>
                 </View>
                 
-                {/* 👈 زر تعديل الوجهة أثناء الرحلة اللي كان ناقص */}
                 <TouchableOpacity 
                   style={{ backgroundColor: '#3b82f6', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, elevation: 2, alignItems: 'center' }}
                   onPress={openEditDestModal}
@@ -2215,6 +2271,7 @@ const handleCancelRide = async () => {
           </ScrollView>
         </Animated.View>
       )}
+
       {/* مودال الطوارئ */}
       <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
@@ -2306,7 +2363,8 @@ const handleCancelRide = async () => {
           </View>
         </View>
       </Modal>
-{/* مودال تعديل الوجهة السريع داخل شاشة البحث */}
+
+      {/* مودال تعديل الوجهة */}
       <Modal visible={isEditDestModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
           <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -2351,6 +2409,7 @@ const handleCancelRide = async () => {
           </View>
         </View>
       </Modal>
+
       {/* مودال تعديل السعر */}
       <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
@@ -2470,23 +2529,23 @@ const handleCancelRide = async () => {
           zIndex: 9999, 
         }}
       />
-    {/* 🚨 شاشة وضع الصيانة الإجبارية 🚨 */}
-          {isMaintenanceMode && (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', zIndex: 100000, padding: 20 }}>
-              <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
-              <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
-              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 30 }}>
-                نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
-              </Text>
-              <ActivityIndicator size="large" color="#eab308" />
-            </View>
-          )}
+      {/* 🚨 شاشة وضع الصيانة الإجبارية 🚨 */}
+      {isMaintenanceMode && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', zIndex: 100000, padding: 20 }}>
+          <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
+          <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
+          <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 30 }}>
+            نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
+          </Text>
+          <ActivityIndicator size="large" color="#eab308" />
+        </View>
+      )}
 
-        </KeyboardAvoidingView>
-      );
-    }
+    </KeyboardAvoidingView>
+  );
+}
 
-    const styles = StyleSheet.create({
+const styles = StyleSheet.create({
   userInfoCentered: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1, justifyContent: 'center' },
   profileTextContainer: { alignItems: 'center', marginRight: 10 },
   headerSettingsBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' },
