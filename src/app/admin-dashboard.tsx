@@ -76,19 +76,26 @@ export default function AdminDashboard() {
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
   // ⚙️ إعدادات النظام المدمجة (مع تواريخ البونص ونظام الشرائح)
-  const [appSettings, setAppSettings] = useState({
+ const [appSettings, setAppSettings] = useState({
     car: { baseFare: '15', minFare: '20', commission: '10', tiers: [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
     tuktuk: { baseFare: '10', minFare: '15', commission: '5', tiers: [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
     scooter: { baseFare: '12', minFare: '12', commission: '8', tiers: [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] },
     waitingTimeMins: '5',
     maxNegativeBalance: '-50',
+    searchRadiusKm: '5',
+    captainCancelBanRules: [] as { cancels: string; banHours: string }[],
+    passengerCancelBanRules: [] as { cancels: string; banHours: string }[],
     maintenanceMode: false,
-bonusTargetRides: '10',
-    bonusAmount: '30',
-    bonusDuration: 'daily', // 👈 مدة احتساب البونص (يومي/أسبوعي/شهري)
-    bonusStartDate: '', // 👈 بداية مدة البونص
-    bonusEndDate: '',   // 👈 نهاية مدة البونص
+    surgeMultiplier: '1.0',
+    captainBonus: { targetRides: '10', bonusAmount: '50', startDate: '', endDate: '' },
+    passengerBonus: { targetRides: '5', bonusAmount: '20', startDate: '', endDate: '' },
+    promoCodes: [] as any[],
   });
+  
+  // متغيرات للتحكم في شاشة اختيار أشخاص محددين لأكواد الخصم
+  const [isPromoUsersModalVisible, setIsPromoUsersModalVisible] = useState(false);
+  const [activePromoIndex, setActivePromoIndex] = useState<number | null>(null);
+  const [promoSearchQuery, setPromoSearchQuery] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
 
   // جلب إعدادات التسعير
@@ -102,12 +109,13 @@ setAppSettings({
           scooter: { baseFare: data.scooter?.baseFare || '12', minFare: data.scooter?.minFare || '12', commission: data.scooter?.commission || '8', tiers: data.scooter?.tiers || [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] },
           waitingTimeMins: data.waitingTimeMins || '5',
           maxNegativeBalance: data.maxNegativeBalance || '-50',
+          searchRadiusKm: data.searchRadiusKm || '5',
+          cancelBanRules: data.cancelBanRules || [],
           maintenanceMode: data.maintenanceMode || false,
-bonusTargetRides: data.bonusTargetRides || '10',
-          bonusAmount: data.bonusAmount || '30',
-          bonusDuration: data.bonusDuration || 'daily',
-          bonusStartDate: data.bonusStartDate || '',
-          bonusEndDate: data.bonusEndDate || '',
+          surgeMultiplier: data.surgeMultiplier || '1.0',
+          captainBonus: data.captainBonus || { targetRides: '10', bonusAmount: '50', startDate: '', endDate: '' },
+          passengerBonus: data.passengerBonus || { targetRides: '5', bonusAmount: '20', startDate: '', endDate: '' },
+          promoCodes: data.promoCodes || [],
         });
       }
     });
@@ -130,6 +138,56 @@ bonusTargetRides: data.bonusTargetRides || '10',
     newTiers[index] = newTiers[index] || {}; // لتفادي الأخطاء
     newTiers[index][field as keyof typeof newTiers[0]] = value;
     setAppSettings({ ...appSettings, [vehicle]: { ...appSettings[vehicle], tiers: newTiers } });
+  };
+
+  // ⚙️ دوال التحكم في قواعد حظر الإلغاءات
+  const addBanRule = (type: 'captain' | 'passenger') => {
+    const key = type === 'captain' ? 'captainCancelBanRules' : 'passengerCancelBanRules';
+    const currentRules = appSettings[key] || [];
+    setAppSettings({ ...appSettings, [key]: [...currentRules, { cancels: '', banHours: '' }] });
+  };
+
+  const removeBanRule = (index: number, type: 'captain' | 'passenger') => {
+    const key = type === 'captain' ? 'captainCancelBanRules' : 'passengerCancelBanRules';
+    const newRules = appSettings[key].filter((_, i) => i !== index);
+    setAppSettings({ ...appSettings, [key]: newRules });
+  };
+
+  const updateBanRule = (index: number, field: 'cancels' | 'banHours', value: string, type: 'captain' | 'passenger') => {
+    const key = type === 'captain' ? 'captainCancelBanRules' : 'passengerCancelBanRules';
+    const newRules = [...appSettings[key]];
+    newRules[index] = { ...newRules[index], [field]: value };
+    setAppSettings({ ...appSettings, [key]: newRules });
+  };
+
+  // 🎟️ دوال التحكم في أكواد الخصم الديناميكية
+  const addPromoCode = () => {
+    setAppSettings({ ...appSettings, promoCodes: [...(appSettings.promoCodes || []), { code: '', userType: 'passenger', scope: 'all', selectedUsers: [], discountValue: '', expiryDate: '' }] });
+  };
+  const removePromoCode = (index: number) => {
+    const newPromo = appSettings.promoCodes.filter((_, i) => i !== index);
+    setAppSettings({ ...appSettings, promoCodes: newPromo });
+  };
+  const updatePromoCode = (index: number, field: string, value: any) => {
+    const newPromo = [...appSettings.promoCodes];
+    newPromo[index] = { ...newPromo[index], [field]: value };
+    setAppSettings({ ...appSettings, promoCodes: newPromo });
+  };
+  const toggleUserInPromo = (userId: string) => {
+    if (activePromoIndex === null) return;
+    const newPromo = [...appSettings.promoCodes];
+    const currentUsers = newPromo[activePromoIndex].selectedUsers || [];
+    if (currentUsers.includes(userId)) {
+      newPromo[activePromoIndex].selectedUsers = currentUsers.filter((id: string) => id !== userId);
+    } else {
+      newPromo[activePromoIndex].selectedUsers = [...currentUsers, userId];
+    }
+    setAppSettings({ ...appSettings, promoCodes: newPromo });
+  };
+  const openPromoUsersModal = (index: number) => {
+    setActivePromoIndex(index);
+    setPromoSearchQuery('');
+    setIsPromoUsersModalVisible(true);
   };
 
   // حفظ الإعدادات
@@ -576,23 +634,129 @@ bonusTargetRides: data.bonusTargetRides || '10',
                 </View>
               </View>
 
-              {/* 🎁 قسم المكافآت والبونص التلقائي */}
-              <View style={[styles.settingsSection, { borderColor: '#38bdf8' }]}>
-                <Text style={[styles.settingsSectionTitle, { color: '#38bdf8' }]}>🎁 نظام المكافآت التلقائي للكباتن</Text>
-                
-                {/* 👈 أزرار اختيار مدة البونص */}
-                <Text style={styles.settingsLabel}>فترة احتساب الرحلات:</Text>
-                <View style={[styles.typeSelectorRow, { marginBottom: 15 }]}>
-                  <TouchableOpacity style={[styles.typeOption, appSettings.bonusDuration === 'monthly' && { backgroundColor: '#38bdf8', borderColor: '#38bdf8' }]} onPress={() => setAppSettings({...appSettings, bonusDuration: 'monthly'})}>
-                    <Text style={[styles.typeOptionText, appSettings.bonusDuration === 'monthly' && { color: '#fff' }]}>شهري</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.typeOption, appSettings.bonusDuration === 'weekly' && { backgroundColor: '#38bdf8', borderColor: '#38bdf8' }]} onPress={() => setAppSettings({...appSettings, bonusDuration: 'weekly'})}>
-                    <Text style={[styles.typeOptionText, appSettings.bonusDuration === 'weekly' && { color: '#fff' }]}>أسبوعي</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.typeOption, appSettings.bonusDuration === 'daily' && { backgroundColor: '#38bdf8', borderColor: '#38bdf8' }]} onPress={() => setAppSettings({...appSettings, bonusDuration: 'daily'})}>
-                    <Text style={[styles.typeOptionText, appSettings.bonusDuration === 'daily' && { color: '#fff' }]}>يومي</Text>
-                  </TouchableOpacity>
+             {/* 📈 قسم أوقات الذروة (Surge Pricing) */}
+              <View style={[styles.settingsSection, { borderColor: '#f59e0b' }]}>
+                <Text style={[styles.settingsSectionTitle, { color: '#f59e0b' }]}>📈 أوقات الذروة ومضاعف السعر</Text>
+                <View style={styles.settingsInputRow}>
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>مُعامل التسعير (الافتراضي 1.0)</Text>
+                    <TextInput style={[styles.settingsInput, { color: '#f59e0b', fontSize: 20, fontWeight: '900' }]} keyboardType="numeric" value={appSettings.surgeMultiplier} onChangeText={t => setAppSettings({...appSettings, surgeMultiplier: t})} textAlign="center" placeholder="1.0" />
+                  </View>
                 </View>
+                <Text style={styles.tierHint}>* اكتب 1.5 لزيادة أجرة جميع الرحلات بنسبة 50% وقت الذروة أو المطر، واكتب 1.0 للعودة للسعر الطبيعي.</Text>
+              </View>
+
+              {/* 🎁 نظام البونص المتقدم (للكباتن والركاب) */}
+              <View style={[styles.settingsSection, { borderColor: '#8b5cf6' }]}>
+                <Text style={[styles.settingsSectionTitle, { color: '#8b5cf6' }]}>🎁 نظام البونص والمكافآت التلقائي</Text>
+                
+                {/* بونص الكباتن */}
+                <View style={{ backgroundColor: '#1e293b', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#4c1d95', marginBottom: 15 }}>
+                  <Text style={{ color: '#c4b5fd', fontWeight: 'bold', marginBottom: 15, textAlign: 'right', fontSize: 16 }}>👨‍✈️ بونص الكباتن:</Text>
+                  <View style={styles.settingsInputRow}>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>المكافأة (ج)</Text>
+                      <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.captainBonus.bonusAmount} onChangeText={t => setAppSettings({...appSettings, captainBonus: {...appSettings.captainBonus, bonusAmount: t}})} textAlign="center" placeholder="50" />
+                    </View>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>الهدف (عدد الرحلات)</Text>
+                      <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.captainBonus.targetRides} onChangeText={t => setAppSettings({...appSettings, captainBonus: {...appSettings.captainBonus, targetRides: t}})} textAlign="center" placeholder="10" />
+                    </View>
+                  </View>
+                  <View style={[styles.settingsInputRow, { marginTop: 10 }]}>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>إلى تاريخ</Text>
+                      <TextInput style={styles.settingsInput} value={appSettings.captainBonus.endDate} onChangeText={t => setAppSettings({...appSettings, captainBonus: {...appSettings.captainBonus, endDate: t}})} textAlign="center" placeholder="2026-12-31" placeholderTextColor="#64748b" />
+                    </View>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>من تاريخ</Text>
+                      <TextInput style={styles.settingsInput} value={appSettings.captainBonus.startDate} onChangeText={t => setAppSettings({...appSettings, captainBonus: {...appSettings.captainBonus, startDate: t}})} textAlign="center" placeholder="2026-10-01" placeholderTextColor="#64748b" />
+                    </View>
+                  </View>
+                </View>
+
+                {/* بونص الركاب */}
+                <View style={{ backgroundColor: '#1e293b', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#0369a1' }}>
+                  <Text style={{ color: '#bae6fd', fontWeight: 'bold', marginBottom: 15, textAlign: 'right', fontSize: 16 }}>👤 بونص الركاب (رصيد محفظة):</Text>
+                  <View style={styles.settingsInputRow}>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>المكافأة (ج)</Text>
+                      <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.passengerBonus.bonusAmount} onChangeText={t => setAppSettings({...appSettings, passengerBonus: {...appSettings.passengerBonus, bonusAmount: t}})} textAlign="center" placeholder="20" />
+                    </View>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>الهدف (عدد الرحلات)</Text>
+                      <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.passengerBonus.targetRides} onChangeText={t => setAppSettings({...appSettings, passengerBonus: {...appSettings.passengerBonus, targetRides: t}})} textAlign="center" placeholder="5" />
+                    </View>
+                  </View>
+                  <View style={[styles.settingsInputRow, { marginTop: 10 }]}>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>إلى تاريخ</Text>
+                      <TextInput style={styles.settingsInput} value={appSettings.passengerBonus.endDate} onChangeText={t => setAppSettings({...appSettings, passengerBonus: {...appSettings.passengerBonus, endDate: t}})} textAlign="center" placeholder="2026-12-31" placeholderTextColor="#64748b" />
+                    </View>
+                    <View style={styles.settingsInputGroup}>
+                      <Text style={styles.settingsLabel}>من تاريخ</Text>
+                      <TextInput style={styles.settingsInput} value={appSettings.passengerBonus.startDate} onChangeText={t => setAppSettings({...appSettings, passengerBonus: {...appSettings.passengerBonus, startDate: t}})} textAlign="center" placeholder="2026-10-01" placeholderTextColor="#64748b" />
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* 🎟️ نظام أكواد الخصم (Promo Codes) */}
+              <View style={[styles.settingsSection, { borderColor: '#10b981' }]}>
+                <Text style={[styles.settingsSectionTitle, { color: '#10b981' }]}>🎟️ أكواد الخصم والمكافآت الترويجية</Text>
+                
+                {(appSettings.promoCodes || []).map((promo, idx) => (
+                  <View key={idx} style={{ backgroundColor: '#0f172a', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#334155' }}>
+                    <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                      <TextInput style={[styles.settingsInput, { flex: 1, color: '#10b981', fontSize: 18, marginRight: 10, letterSpacing: 2 }]} value={promo.code} onChangeText={t => updatePromoCode(idx, 'code', t.toUpperCase())} placeholder="الكود (مثال: FREE20)" placeholderTextColor="#64748b" textAlign="center" />
+                      <TouchableOpacity onPress={() => removePromoCode(idx)} style={{ backgroundColor: '#ef4444', padding: 12, borderRadius: 8 }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>✖</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.settingsLabel}>لمن هذا الكود؟</Text>
+                    <View style={{ flexDirection: 'row-reverse', gap: 10, marginBottom: 10 }}>
+                      <TouchableOpacity style={[styles.typeOption, promo.userType === 'passenger' && { backgroundColor: '#3b82f6', borderColor: '#3b82f6' }]} onPress={() => updatePromoCode(idx, 'userType', 'passenger')}>
+                        <Text style={[styles.typeOptionText, promo.userType === 'passenger' && { color: '#fff' }]}>للركاب 👤</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.typeOption, promo.userType === 'captain' && { backgroundColor: '#f59e0b', borderColor: '#f59e0b' }]} onPress={() => updatePromoCode(idx, 'userType', 'captain')}>
+                        <Text style={[styles.typeOptionText, promo.userType === 'captain' && { color: '#fff' }]}>للكباتن 👨‍✈️</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.settingsLabel}>صلاحية الاستخدام:</Text>
+                    <View style={{ flexDirection: 'row-reverse', gap: 10, marginBottom: 10 }}>
+                      <TouchableOpacity style={[styles.typeOption, promo.scope === 'all' && { backgroundColor: '#10b981', borderColor: '#10b981' }]} onPress={() => updatePromoCode(idx, 'scope', 'all')}>
+                        <Text style={[styles.typeOptionText, promo.scope === 'all' && { color: '#fff' }]}>الكل 🌍</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.typeOption, promo.scope === 'specific' && { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' }]} onPress={() => updatePromoCode(idx, 'scope', 'specific')}>
+                        <Text style={[styles.typeOptionText, promo.scope === 'specific' && { color: '#fff' }]}>أشخاص محددين 🎯</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {promo.scope === 'specific' && (
+                      <TouchableOpacity style={{ backgroundColor: '#1e293b', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#8b5cf6' }} onPress={() => openPromoUsersModal(idx)}>
+                        <Text style={{ color: '#c4b5fd', fontWeight: 'bold' }}>👉 اضغط لاختيار الأشخاص ({promo.selectedUsers?.length || 0} تم اختيارهم)</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <View style={styles.settingsInputRow}>
+                      <View style={styles.settingsInputGroup}>
+                        <Text style={styles.settingsLabel}>قيمة الخصم/المكافأة (ج)</Text>
+                        <TextInput style={styles.settingsInput} keyboardType="numeric" value={promo.discountValue} onChangeText={t => updatePromoCode(idx, 'discountValue', t)} textAlign="center" placeholder="15" />
+                      </View>
+                      <View style={styles.settingsInputGroup}>
+                        <Text style={styles.settingsLabel}>تاريخ الانتهاء</Text>
+                        <TextInput style={styles.settingsInput} value={promo.expiryDate} onChangeText={t => updatePromoCode(idx, 'expiryDate', t)} textAlign="center" placeholder="2026-11-01" placeholderTextColor="#64748b" />
+                      </View>
+                    </View>
+                  </View>
+                ))}
+
+                <TouchableOpacity style={[styles.addTierBtn, { backgroundColor: '#10b98120', alignSelf: 'center', width: '100%', paddingVertical: 12 }]} onPress={addPromoCode}>
+                  <Text style={[styles.addTierBtnText, { color: '#10b981', fontSize: 16, textAlign: 'center' }]}>➕ إضافة كود جديد</Text>
+                </TouchableOpacity>
+              </View>
 
                 {/* 👈 خانات الأرقام والمبلغ */}
                 <View style={styles.settingsInputRow}>
@@ -616,19 +780,66 @@ bonusTargetRides: data.bonusTargetRides || '10',
                 </View>
               </View>
 
-              {/* ⚙️ إعدادات عامة وحد المديونية */}
+              {/* ⚙️ ضوابط وحماية النظام */}
               <View style={styles.settingsSection}>
-                <Text style={styles.settingsSectionTitle}>⚙️ ضوابط النظام</Text>
+                <Text style={styles.settingsSectionTitle}>⚙️ ضوابط وحماية النظام</Text>
+                
+                {/* حد المديونية ووقت الانتظار وقطر البحث */}
                 <View style={styles.settingsInputRow}>
                   <View style={styles.settingsInputGroup}>
                     <Text style={styles.settingsLabel}>حد المديونية (ج)</Text>
                     <TextInput style={[styles.settingsInput, { color: '#ef4444' }]} keyboardType="numeric" value={appSettings.maxNegativeBalance} onChangeText={t => setAppSettings({...appSettings, maxNegativeBalance: t})} textAlign="center" placeholder="-50" />
                   </View>
-                 
+                  
                   <View style={styles.settingsInputGroup}>
-                    <Text style={styles.settingsLabel}>الانتظار (دقائق)</Text>
+                    <Text style={styles.settingsLabel}>الانتظار (ق)</Text>
                     <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.waitingTimeMins} onChangeText={t => setAppSettings({...appSettings, waitingTimeMins: t})} textAlign="center" />
                   </View>
+
+                  <View style={styles.settingsInputGroup}>
+                    <Text style={styles.settingsLabel}>قطر البحث (كم)</Text>
+                    <TextInput style={styles.settingsInput} keyboardType="numeric" value={appSettings.searchRadiusKm} onChangeText={t => setAppSettings({...appSettings, searchRadiusKm: t})} textAlign="center" placeholder="5" />
+                  </View>
+                </View>
+
+                {/* 🛡️ نظام حظر الإلغاءات (للكباتن) */}
+                <View style={[styles.tiersContainer, { marginTop: 20, borderColor: '#f59e0b' }]}>
+                  <Text style={[styles.tiersTitle, { color: '#f59e0b' }]}>👨‍✈️ نظام حظر الإلغاءات التلقائي (للكباتن):</Text>
+                  {(appSettings.captainCancelBanRules || []).map((rule: any, idx: number) => (
+                    <View key={idx} style={styles.tierRow}>
+                      <Text style={styles.tierLabel}>إلغاء</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={rule.cancels} onChangeText={t => updateBanRule(idx, 'cancels', t, 'captain')} textAlign="center" placeholder="مرات" />
+                      <Text style={styles.tierLabel}>مرات ⬅️ حظر</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={rule.banHours} onChangeText={t => updateBanRule(idx, 'banHours', t, 'captain')} textAlign="center" placeholder="ساعات" />
+                      <Text style={styles.tierLabel}>ساعات</Text>
+                      <TouchableOpacity onPress={() => removeBanRule(idx, 'captain')} style={styles.removeTierBtn}>
+                        <Text style={{color: '#fff'}}>✖</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={[styles.addTierBtn, { backgroundColor: '#f59e0b20' }]} onPress={() => addBanRule('captain')}>
+                    <Text style={[styles.addTierBtnText, { color: '#f59e0b' }]}>➕ إضافة شرط حظر للكابتن</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 🛡️ نظام حظر الإلغاءات (للركاب) */}
+                <View style={[styles.tiersContainer, { marginTop: 15, borderColor: '#38bdf8' }]}>
+                  <Text style={[styles.tiersTitle, { color: '#38bdf8' }]}>👤 نظام حظر الإلغاءات التلقائي (للركاب):</Text>
+                  {(appSettings.passengerCancelBanRules || []).map((rule, idx) => (
+                    <View key={idx} style={styles.tierRow}>
+                      <Text style={styles.tierLabel}>إلغاء</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={rule.cancels} onChangeText={t => updateBanRule(idx, 'cancels', t, 'passenger')} textAlign="center" placeholder="مرات" />
+                      <Text style={styles.tierLabel}>مرات ⬅️ حظر</Text>
+                      <TextInput style={styles.tierInput} keyboardType="numeric" value={rule.banHours} onChangeText={t => updateBanRule(idx, 'banHours', t, 'passenger')} textAlign="center" placeholder="ساعات" />
+                      <Text style={styles.tierLabel}>ساعات</Text>
+                      <TouchableOpacity onPress={() => removeBanRule(idx, 'passenger')} style={styles.removeTierBtn}>
+                        <Text style={{color: '#fff'}}>✖</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={[styles.addTierBtn, { backgroundColor: '#38bdf820' }]} onPress={() => addBanRule('passenger')}>
+                    <Text style={[styles.addTierBtnText, { color: '#38bdf8' }]}>➕ إضافة شرط حظر للراكب</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -1098,6 +1309,56 @@ bonusTargetRides: data.bonusTargetRides || '10',
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* 🎯 شاشة منبثقة (مودال) لتحديد الأشخاص لأكواد الخصم */}
+      <Modal visible={isPromoUsersModalVisible} transparent={true} animationType="slide">
+        <View style={styles.overlayCentered}>
+          <View style={[styles.walletModalContent, { height: '85%' }]}>
+            <Text style={styles.modalTitleText}>تحديد مستخدمين للكود 🎯</Text>
+            
+            <TextInput 
+              style={styles.searchInput} 
+              placeholder="ابحث بالاسم أو رقم الهاتف..." 
+              placeholderTextColor="#64748b" 
+              value={promoSearchQuery} 
+              onChangeText={setPromoSearchQuery} 
+              textAlign="right" 
+            />
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {activePromoIndex !== null && appSettings.promoCodes[activePromoIndex] && (
+                (appSettings.promoCodes[activePromoIndex].userType === 'captain' ? captains : passengers)
+                .filter(u => u.name?.includes(promoSearchQuery) || u.phone?.includes(promoSearchQuery))
+                .map(user => {
+                  const isSelected = appSettings.promoCodes[activePromoIndex].selectedUsers?.includes(user.id);
+                  return (
+                    <TouchableOpacity 
+                      key={user.id} 
+                      style={{ flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isSelected ? '#064e3b' : '#1e293b', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: isSelected ? '#10b981' : '#334155' }}
+                      onPress={() => toggleUserInPromo(user.id)}
+                    >
+                      <View style={{ flexDirection: 'row-reverse', alignItems: 'center' }}>
+                        <Image source={{ uri: user.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={{ width: 45, height: 45, borderRadius: 22.5, marginLeft: 12 }} />
+                        <View>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'right', fontSize: 15 }}>{user.name}</Text>
+                          <Text style={{ color: '#94a3b8', fontSize: 13, textAlign: 'right', marginTop: 2 }}>{user.phone}</Text>
+                        </View>
+                      </View>
+                      <View style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: isSelected ? '#10b981' : '#64748b', backgroundColor: isSelected ? '#10b981' : 'transparent', justifyContent: 'center', alignItems: 'center' }}>
+                        {isSelected && <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>✓</Text>}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={[styles.saveSettingsBtn, { marginTop: 15, marginBottom: 0 }]} onPress={() => setIsPromoUsersModalVisible(false)}>
+              <Text style={styles.saveSettingsBtnText}>تأكيد وإغلاق الحفظ</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
     </View>

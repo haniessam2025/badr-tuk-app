@@ -240,6 +240,7 @@ export default function CaptainHome() {
 
   // 🚨 مراقبة إعدادات الإدارة (الصيانة، المديونية، والعمولات المخصصة)
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [captainBanRules, setCaptainBanRules] = useState<any[]>([]); // 👈 السطر ده هو اللي هيشيل الأخطاء
   const [maxDebtLimit, setMaxDebtLimit] = useState(-50); 
   const [appCommissions, setAppCommissions] = useState({ car: 10, tuktuk: 5, scooter: 8 });
 
@@ -255,6 +256,7 @@ export default function CaptainHome() {
           tuktuk: Number(data.tuktuk?.commission || 5),
           scooter: Number(data.scooter?.commission || 8)
         });
+        setCaptainBanRules(data.captainCancelBanRules || []); // 👈 قراءة القوانين
       }
     });
     return () => unsubSettings();
@@ -1091,6 +1093,44 @@ const notifyArrival = async () => {
       setActiveRide(null); 
       await updateDoc(doc(db, 'rides', currentRide.id), { status: 'pending', captainId: null, offers: [] }); 
       handleDismissRequest(currentRide); 
+
+      // 🚨 --- بداية نظام الحظر التلقائي للكابتن --- 🚨
+      if (captainProfile?.id) {
+        const capRef = doc(db, 'captains', captainProfile.id);
+        const capSnap = await getDoc(capRef);
+        if (capSnap.exists()) {
+          const capData = capSnap.data();
+          const currentStrikes = (capData.cancelStrikes || 0) + 1; // زيادة العداد 1
+          let isBanned = false;
+          let banHours = 0;
+
+          // مطابقة الإلغاءات مع القوانين
+          const rule = captainBanRules.find((r: any) => parseInt(r.cancels) === currentStrikes);
+          if (rule) {
+            isBanned = true;
+            banHours = parseInt(rule.banHours);
+          }
+
+          const updates: any = {
+            cancelStrikes: isBanned ? 0 : currentStrikes // تصفير العداد لو اتحظر
+          };
+
+          if (isBanned) {
+            updates.status = 'banned'; // إيقاف الحساب
+            updates.bannedUntil = new Date(Date.now() + banHours * 60 * 60 * 1000).getTime(); // وقت الفك
+            updates.isOnline = false; // يطفي الاتصال
+          }
+
+          await updateDoc(capRef, updates);
+
+          if (isBanned) {
+            Alert.alert('حظر مؤقت 🚫', `تم إيقاف حسابك مؤقتاً لمدة ${banHours} ساعة لتجاوز الحد المسموح من الإلغاءات.`);
+            setIsOnline(false); // تحديث الواجهة أمامه فوراً
+          }
+        }
+      }
+      // 🚨 --- نهاية نظام الحظر التلقائي --- 🚨
+
     } catch(e) {
       Alert.alert("خطأ", "حدثت مشكلة أثناء الإلغاء");
     }
