@@ -38,8 +38,12 @@ export default function CaptainNotifications() {
         }
       });
 
-      // 🚀 السطر السحري: ترتيب الإشعارات من الأحدث للأقدم
-      notifs.sort((a, b) => b.timestamp - a.timestamp);
+      // 🚀 السطر السحري الذكي لترتيب التواريخ (بيعالج المشكلة لو التاريخ متسجل بأي صيغة)
+      notifs.sort((a, b) => {
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : Number(a.timestamp || 0);
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : Number(b.timestamp || 0);
+        return timeB - timeA;
+      });
 
       setNotifications(notifs);
     } catch (error) {

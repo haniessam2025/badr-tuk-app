@@ -530,45 +530,58 @@ export default function PassengerHome() {
     }
   };
 
-const [incomingNotification, setIncomingNotification] = useState<any>(null);
+useEffect(() => {
+    let unsubscribeNotif: any;
+    const listenToNotifications = async () => {
+      const passengerId = await AsyncStorage.getItem('currentPassengerId');
+      if (!passengerId) return;
 
-  useEffect(() => {
-    if (!passengerProfile || !passengerProfile.id) return;
-    
-    const q = query(
-      collection(db, 'notifications'), 
-      where('userId', '==', passengerProfile.id), 
-      where('read', '==', false)
-    );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      // 1️⃣ تحديث عداد الإشعارات الأحمر فوق الجرس
-      setUnreadNotifsCount(snapshot.docs.length);
+      const q = query(collection(db, 'notifications'), where('userId', '==', passengerId), where('read', '==', false));
 
-      // 2️⃣ إظهار المربع المنبثق للإشعار الجديد واهتزاز الهاتف
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const notif = change.doc.data();
-          if (!notif.read) {
-            // استخراج كود الخصم (إن وجد) عشان نظهر زرار النسخ في المربع
-            const codeMatch = notif.message ? notif.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) : null;
-            
-            setIncomingNotification({ 
-              id: change.doc.id, 
-              ...notif,
-              extractedCode: codeMatch ? codeMatch[1] : null
-            });
+      unsubscribeNotif = onSnapshot(q, (snapshot) => {
+        setUnreadNotifsCount(snapshot.docs.length);
 
-            if (isVibrationEnabled) {
-              Vibration.vibrate([0, 500, 200, 500]); // 📳 اهتزاز لتنبيه الراكب
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const notif = change.doc.data();
+            const notifId = change.doc.id;
+
+            if (!notif.read) {
+              if (isVibrationEnabled) Vibration.vibrate([0, 500, 200, 500]); // 📳 اهتزاز
+
+              const codeMatch = notif.message ? notif.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) : null;
+              const buttons: any[] = [];
+
+              if (codeMatch && codeMatch[1]) {
+                buttons.push({
+                  text: 'نسخ الكود 📋',
+                  onPress: async () => {
+                    await Clipboard.setStringAsync(codeMatch[1]);
+                    Alert.alert('تم بنجاح', `تم نسخ الكود (${codeMatch[1]}) وجاهز للاستخدام!`);
+                    try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
+                  }
+                });
+              }
+
+              buttons.push({
+                text: codeMatch ? 'إغلاق' : 'حسناً، فهمت',
+                style: 'cancel',
+                onPress: async () => {
+                  try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
+                }
+              });
+              
+              // 🚀 رسالة النظام الأصلية اللي بتظهر "من برا" فوق أي زحمة
+              Alert.alert(notif.title || 'رسالة هامة 📩', notif.message, buttons);
             }
           }
-        }
+        });
       });
-    });
-    
-    return () => unsubscribe();
-  }, [passengerProfile.id, isVibrationEnabled]);
+    };
+
+    listenToNotifications();
+    return () => { if (unsubscribeNotif) unsubscribeNotif(); };
+  }, [isVibrationEnabled]);
 
   useEffect(() => {
     let unsubscribe: any;
@@ -2091,53 +2104,7 @@ const handleCancelRide = async () => {
         </Animated.View>
       )}
 
-      {/* 🔔 المربع المنبثق الإجباري للإشعارات الجديدة */}
-      <Modal visible={!!incomingNotification} transparent={true} animationType="fade">
-        <View style={styles.modaloverlay}>
-          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }, { borderColor: '#8b5cf6', borderWidth: 2, alignItems: 'center' }]}>
-            <Text style={{ fontSize: 50, marginBottom: 15 }}>📩</Text>
-            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }, { fontSize: 20 }]}>
-              {incomingNotification?.title || 'رسالة هامة من الإدارة !'}
-            </Text>
-            <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }, { fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 25 }]}>
-              {incomingNotification?.message}
-            </Text>
-            
-            <View style={{ flexDirection: 'row-reverse', gap: 10, width: '100%' }}>
-              {/* زرار نسخ ذكي بيظهر لو الإشعار فيه كود خصم */}
-              {incomingNotification?.extractedCode && (
-                <TouchableOpacity 
-                  style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 14, borderRadius: 12, alignItems: 'center' }} 
-                  onPress={async () => {
-                    await Clipboard.setStringAsync(incomingNotification.extractedCode);
-                    Alert.alert('تم بنجاح', `تم نسخ الكود (${incomingNotification.extractedCode}) وجاهز للاستخدام!`);
-                    if (incomingNotification?.id) {
-                      try { await updateDoc(doc(db, 'notifications', incomingNotification.id), { read: true }); } catch (e) {}
-                    }
-                    setIncomingNotification(null);
-                  }}
-                >
-                  <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>نسخ الكود 📋</Text>
-                </TouchableOpacity>
-              )}
-              
-              <TouchableOpacity 
-                style={{ flex: 1, backgroundColor: '#3b82f6', paddingVertical: 14, borderRadius: 12, alignItems: 'center' }} 
-                onPress={async () => {
-                  if (incomingNotification?.id) {
-                    try { await updateDoc(doc(db, 'notifications', incomingNotification.id), { read: true }); } catch (e) {}
-                  }
-                  setIncomingNotification(null);
-                }}
-              >
-                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>حسناً، فهمت</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* مودال الطوارئ */}
+            {/* مودال الطوارئ */}
       <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
           <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
