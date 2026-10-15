@@ -620,6 +620,7 @@ export default function CaptainHome() {
 
 
 const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+const [incomingNotification, setIncomingNotification] = useState<any>(null); // 👈 متغير المربع المنبثق
 
   // ⏱️ --- متغيرات ودالة العداد الجديد ---
   const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); // 5 دقائق
@@ -744,22 +745,24 @@ useEffect(() => {
     if (!captainProfile.id) return;
     const q = query(collection(db, 'notifications'), where('userId', '==', captainProfile.id), where('read', '==', false));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // 1️⃣ تحديث عداد الإشعارات الأحمر على الجرس (بيزيد مع كل إشعار)
       setUnreadNotifsCount(snapshot.docs.length);
       
-      // 2️⃣ إظهار تنبيه منبثق للكابتن فور وصول إشعار جديد (مثل رفض العرض)
+      // 2️⃣ إظهار المربع المنبثق في نص الشاشة للإشعار الجديد
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const notif = change.doc.data();
-          Alert.alert(
-            notif.title || 'تنبيه 🔔',
-            notif.message,
-            [{ text: 'حسناً', onPress: () => updateDoc(doc(db, 'notifications', change.doc.id), { read: true }) }]
-          );
+          if (!notif.read) {
+            setIncomingNotification({ id: change.doc.id, ...notif });
+            if (isVibrationEnabled) {
+              Vibration.vibrate([0, 500, 200, 500]); // 📳 اهتزاز لتنبيه الكابتن
+            }
+          }
         }
       });
     });
     return () => unsubscribe();
-  }, [captainProfile.id]);  const markAdminMessageAsRead = async () => {
+  }, [captainProfile.id, isVibrationEnabled]);  const markAdminMessageAsRead = async () => {
     if (adminMessage && adminMessage.id) {
       try { await updateDoc(doc(db, 'notifications', adminMessage.id), { read: true }); setIsAdminMsgVisible(false); setAdminMessage(null); } catch (error) {}
     }
@@ -1995,6 +1998,35 @@ const notifyArrival = async () => {
 
             <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}><Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text></TouchableOpacity>
           </Animated.View>
+        </View>
+      </Modal>
+
+      {/* 🔔 المربع المنبثق الإجباري للإشعارات الجديدة (بيطلع في نص الشاشة) */}
+      <Modal visible={!!incomingNotification} transparent={true} animationType="fade">
+        <View style={styles.modalOverlayAdmin}>
+          <View style={[styles.adminMsgModalContent, isDarkMode && { backgroundColor: '#1e293b' }, { borderColor: '#3b82f6', borderWidth: 2 }]}>
+            <Text style={{ fontSize: 50, marginBottom: 15 }}>🔔</Text>
+            <Text style={[styles.adminMsgTitle, isDarkMode && { color: '#ffffff' }]}>
+              {incomingNotification?.title || 'إشعار جديد !'}
+            </Text>
+            <Text style={[styles.adminMsgText, isDarkMode && { color: '#cbd5e1' }]}>
+              {incomingNotification?.message}
+            </Text>
+            
+            <TouchableOpacity 
+              style={[styles.adminMsgCloseBtn, { backgroundColor: '#3b82f6' }]} 
+              onPress={async () => {
+                if (incomingNotification?.id) {
+                  try {
+                    await updateDoc(doc(db, 'notifications', incomingNotification.id), { read: true });
+                  } catch (e) {}
+                }
+                setIncomingNotification(null);
+              }}
+            >
+              <Text style={[styles.adminMsgCloseText, { color: '#ffffff' }]}>حسناً، فهمت</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
