@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -25,7 +25,6 @@ export default function PassengerNotifications() {
       const q = query(
         collection(db, 'notifications'),
         where('userId', '==', passengerId),
-        orderBy('timestamp', 'desc')
       );
 
       const snap = await getDocs(q);
@@ -45,7 +44,7 @@ export default function PassengerNotifications() {
         const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp || 0).getTime());
         return timeB - timeA; // الأحدث (القيمة الأكبر) يأتي في المقدمة
       });
-
+      notifs.sort((a, b) => b.timestamp - a.timestamp);
       setNotifications(notifs);
     } catch (error) {
       console.log("Error loading notifications: ", error);

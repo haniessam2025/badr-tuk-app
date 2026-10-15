@@ -530,234 +530,45 @@ export default function PassengerHome() {
     }
   };
 
+const [incomingNotification, setIncomingNotification] = useState<any>(null);
+
   useEffect(() => {
     if (!passengerProfile || !passengerProfile.id) return;
-    const q = query(collection(db, 'notifications'), where('userId', '==', passengerProfile.id), where('read', '==', false));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadNotifsCount(snapshot.docs.length);
-    });
-    return () => unsubscribe();
-  }, [passengerProfile]);
-  
-  useEffect(() => {
-    if (rideStatus === 'accepted' && captainLiveCoords && pickupCoords) {
-      
-      const dist = calculateDistance(
-        captainLiveCoords.latitude, 
-        captainLiveCoords.longitude,
-        pickupCoords.latitude, 
-        pickupCoords.longitude
-      );
-
-      if (dist <= 500 && !hasShownAlmostArrivedRef.current) {
-        hasShownAlmostArrivedRef.current = true; 
-
-        Animated.sequence([
-          Animated.timing(flashAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
-          Animated.timing(flashAnim, { toValue: 0, duration: 500, useNativeDriver: false })
-        ]).start();
-
-        if (isVibrationEnabled) {
-          Vibration.vibrate([0, 500, 200, 500]);
-        }
-
-        Alert.alert(
-          "تنبيه 🔔",
-          "الكابتن على وشك الوصول برجاء التوجه إلى نقطة الإقلال"
-        );
-      }
-    }
-
-    if (rideStatus === 'idle' || rideStatus === 'searching') {
-      hasShownAlmostArrivedRef.current = false;
-    }
-  }, [rideStatus, captainLiveCoords, pickupCoords, isVibrationEnabled]);
-
-  useFocusEffect(useCallback(() => { loadPassengerProfile(); loadEmergencyPhone(); }, []));
-
-  const loadEmergencyPhone = async () => {
-    try {
-      const savedPhone = await AsyncStorage.getItem('emergency_phone');
-      if (savedPhone) setEmergencyPhone(savedPhone);
-    } catch (e) {}
-  };
-
-  const loadPassengerProfile = async () => {
-    try {
-      const passengerId = await AsyncStorage.getItem('currentPassengerId');
-      if (passengerId) {
-        const ratingQ = query(collection(db, 'ratings'), where('passengerId', '==', passengerId), where('type', '==', 'captain_rating_passenger'));
-        let sum = 0;
-        const ratingSnap = await getDocs(ratingQ);
-        ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
-        const rCount = ratingSnap.docs.length;
-        const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : '5';
-        const savedProfile = await AsyncStorage.getItem('passenger_profile');
-        let pName = 'مستخدم جديد';
-        let freshAvatar = DEFAULT_AVATAR;
-        
-        if (savedProfile) {
-          const parsed = JSON.parse(savedProfile);
-          pName = parsed.name || 'مستخدم جديد';
-          setPassengerProfile({ id: passengerId, name: pName, phone: parsed.phone || '', avatar: getSafeAvatar(parsed.avatar), averageRating: Number(avgRate), ratingCount: rCount, hidePhoneNumber: parsed.hidePhoneNumber || false });
-        }
-        
-        const docRef = doc(db, 'passengers', passengerId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          pName = data.name || 'مستخدم جديد';
-          freshAvatar = getSafeAvatar(data.avatar || data.image);
-          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar, averageRating: Number(avgRate), ratingCount: rCount, hidePhoneNumber: data.hidePhoneNumber || false });
-          
-          if (savedProfile) {
-            const parsed = JSON.parse(savedProfile);
-            parsed.name = pName;
-            parsed.avatar = freshAvatar;
-            parsed.hidePhoneNumber = data.hidePhoneNumber || false;
-            await AsyncStorage.setItem('passenger_profile', JSON.stringify(parsed));
-          }
-          checkRideStatus(passengerId, pName);
-        }
-      } else {
-        router.replace('/passenger-login');
-      }
-    } catch (e) {}
-  };
-
-  const checkRideStatus = async (passengerId: string, passengerName: string) => {
-    try {
-      const savedRideStr = await AsyncStorage.getItem('active_ride');
-      if (savedRideStr) {
-        const savedRide = JSON.parse(savedRideStr);
-        if (savedRide.id && ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(savedRide.status)) {
-          setCurrentRideId(savedRide.id); 
-          setPickup(savedRide.pickupLocation || '');
-          if (savedRide.pickupCoords) setPickupCoords(savedRide.pickupCoords);
-          if (savedRide.destinationsList && savedRide.destinationsList.length > 0) {
-            setDestinations(savedRide.destinationsList);
-          } else {
-            setDestinations([savedRide.destinationLocation || '']);
-          }
-          if (savedRide.destinationsPrices) {
-            setDestinationsPrices(savedRide.destinationsPrices);
-          }
-          return; 
-        }
-      }
-
-      let q = query(collection(db, 'rides'), where('passengerId', '==', passengerId), limit(15));
-      let querySnapshot = await getDocs(q);
-      let docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (docs.length === 0 && passengerName) {
-        const qName = query(collection(db, 'rides'), where('name', '==', passengerName), limit(15));
-        const snapName = await getDocs(qName);
-        docs = snapName.docs.map(d => ({ id: d.id, ...d.data() }));
-      }
-      
-      docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
-      
-      const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
-      
-      if (activeRide) {
-        setCurrentRideId(activeRide.id);
-        setPickup(activeRide.pickupLocation || '');
-        if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
-        if (activeRide.numericSecret) setNumericSecret(activeRide.numericSecret);
-        if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
-          setDestinations(activeRide.destinationsList);
-        } else {
-          setDestinations([activeRide.destinationLocation || '']);
-        }
-        
-        if (activeRide.destinationsPrices) {
-          setDestinationsPrices(activeRide.destinationsPrices);
-        }
-
-        setPrice(activeRide.price || '');
-        setUnreadChatCount(activeRide.unreadCountPassenger || 0);
-        
-        if (activeRide.status === 'pending') {
-          setRideStatus('searching');
-          setOffers(activeRide.offers || []);
-          prevOffersCountRef.current = (activeRide.offers || []).length;
-        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
-          setRideStatus(activeRide.status);
-          if (activeRide.arrivedAt) setRideArrivedAt(activeRide.arrivedAt); 
-          setCaptainInfo({
-            name: activeRide.captainName || '',
-            phone: activeRide.captainPhone || 'غير مسجل',
-            vehicle: activeRide.captainVehicle || 'مركبة',
-            avatar: getSafeAvatar(activeRide.captainAvatar),
-            vehicleImage: getSafeAvatar(activeRide.captainVehicleImage),
-            plateNumber: activeRide.captainPlateNumber || ''
-          });
-        }
-        await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
-      } else {
-        setRideStatus('idle');
-        await AsyncStorage.removeItem('active_ride');
-        setCurrentRideId(null);
-        setNumericSecret('');
-      }
-    } catch (error) {}
-  };
-  
-  useEffect(() => {
-    let unsubscribeNotif: any;
     
-    const listenToNotifications = async () => {
-      const passengerId = await AsyncStorage.getItem('currentPassengerId');
-      if (!passengerId) return;
+    const q = query(
+      collection(db, 'notifications'), 
+      where('userId', '==', passengerProfile.id), 
+      where('read', '==', false)
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      // 1️⃣ تحديث عداد الإشعارات الأحمر فوق الجرس
+      setUnreadNotifsCount(snapshot.docs.length);
 
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', passengerId),
-        where('userType', '==', 'passenger'),
-        where('read', '==', false)
-      );
-
-      unsubscribeNotif = onSnapshot(q, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const notif = change.doc.data();
-            const notifId = change.doc.id;
-
+      // 2️⃣ إظهار المربع المنبثق للإشعار الجديد واهتزاز الهاتف
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const notif = change.doc.data();
+          if (!notif.read) {
+            // استخراج كود الخصم (إن وجد) عشان نظهر زرار النسخ في المربع
             const codeMatch = notif.message ? notif.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) : null;
-            const buttons: any[] = [];
-
-            if (codeMatch && codeMatch[1]) {
-              buttons.push({
-                text: 'نسخ الكود 📋',
-                onPress: async () => {
-                  await Clipboard.setStringAsync(codeMatch[1]);
-                  Alert.alert('تم بنجاح', `تم نسخ الكود (${codeMatch[1]}) وجاهز للاستخدام!`);
-                  try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
-                }
-              });
-            }
-
-            buttons.push({
-              text: codeMatch ? 'إغلاق' : 'حسناً',
-              style: 'cancel',
-              onPress: async () => {
-                try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
-              }
-            });
             
-            Alert.alert(
-              notif.title || 'رسالة هامة من الإدارة 📩',
-              notif.message,
-              buttons
-            );
-          }
-        });
-      });
-    };
+            setIncomingNotification({ 
+              id: change.doc.id, 
+              ...notif,
+              extractedCode: codeMatch ? codeMatch[1] : null
+            });
 
-    listenToNotifications();
-    return () => { if (unsubscribeNotif) unsubscribeNotif(); };
-  }, []);
+            if (isVibrationEnabled) {
+              Vibration.vibrate([0, 500, 200, 500]); // 📳 اهتزاز لتنبيه الراكب
+            }
+          }
+        }
+      });
+    });
+    
+    return () => unsubscribe();
+  }, [passengerProfile.id, isVibrationEnabled]);
 
   useEffect(() => {
     let unsubscribe: any;
@@ -2279,6 +2090,52 @@ const handleCancelRide = async () => {
           </ScrollView>
         </Animated.View>
       )}
+
+      {/* 🔔 المربع المنبثق الإجباري للإشعارات الجديدة */}
+      <Modal visible={!!incomingNotification} transparent={true} animationType="fade">
+        <View style={styles.modaloverlay}>
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }, { borderColor: '#8b5cf6', borderWidth: 2, alignItems: 'center' }]}>
+            <Text style={{ fontSize: 50, marginBottom: 15 }}>📩</Text>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }, { fontSize: 20 }]}>
+              {incomingNotification?.title || 'رسالة هامة من الإدارة !'}
+            </Text>
+            <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }, { fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 25 }]}>
+              {incomingNotification?.message}
+            </Text>
+            
+            <View style={{ flexDirection: 'row-reverse', gap: 10, width: '100%' }}>
+              {/* زرار نسخ ذكي بيظهر لو الإشعار فيه كود خصم */}
+              {incomingNotification?.extractedCode && (
+                <TouchableOpacity 
+                  style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 14, borderRadius: 12, alignItems: 'center' }} 
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(incomingNotification.extractedCode);
+                    Alert.alert('تم بنجاح', `تم نسخ الكود (${incomingNotification.extractedCode}) وجاهز للاستخدام!`);
+                    if (incomingNotification?.id) {
+                      try { await updateDoc(doc(db, 'notifications', incomingNotification.id), { read: true }); } catch (e) {}
+                    }
+                    setIncomingNotification(null);
+                  }}
+                >
+                  <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>نسخ الكود 📋</Text>
+                </TouchableOpacity>
+              )}
+              
+              <TouchableOpacity 
+                style={{ flex: 1, backgroundColor: '#3b82f6', paddingVertical: 14, borderRadius: 12, alignItems: 'center' }} 
+                onPress={async () => {
+                  if (incomingNotification?.id) {
+                    try { await updateDoc(doc(db, 'notifications', incomingNotification.id), { read: true }); } catch (e) {}
+                  }
+                  setIncomingNotification(null);
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>حسناً، فهمت</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* مودال الطوارئ */}
       <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">

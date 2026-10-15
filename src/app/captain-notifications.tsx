@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { collection, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -22,10 +22,10 @@ export default function CaptainNotifications() {
       const captainId = await AsyncStorage.getItem('currentCaptainId');
       if (!captainId) return;
 
+      // شيلنا orderBy من هنا عشان ميطلبش Index من الفايربيز
       const q = query(
         collection(db, 'notifications'),
-        where('userId', '==', captainId),
-        orderBy('timestamp', 'desc')
+        where('userId', '==', captainId)
       );
 
       const snap = await getDocs(q);
@@ -33,11 +33,13 @@ export default function CaptainNotifications() {
       
       snap.forEach((d) => {
         notifs.push({ id: d.id, ...d.data() });
-        // بمجرد فتح الصفحة، بنحول كل الإشعارات لـ "مقروءة" عشان البادج الأحمر يختفي
         if (!d.data().read) {
           updateDoc(doc(db, 'notifications', d.id), { read: true });
         }
       });
+
+      // 🚀 السطر السحري: ترتيب الإشعارات من الأحدث للأقدم
+      notifs.sort((a, b) => b.timestamp - a.timestamp);
 
       setNotifications(notifs);
     } catch (error) {
