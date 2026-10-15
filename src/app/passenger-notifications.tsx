@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard'; // 🚀 تم إضافة مكتبة النسخ هنا
 import { useRouter } from 'expo-router';
 import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'; // تم إضافة Alert هنا
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
@@ -96,6 +97,21 @@ export default function PassengerNotifications() {
       <View style={styles.textContainer}>
         <Text style={[styles.title, isDarkMode && { color: '#ffffff' }]}>{item.title || 'إشعار جديد'}</Text>
         <Text style={[styles.message, isDarkMode && { color: '#cbd5e1' }]}>{item.message}</Text>
+        {/* 🚀 زرار نسخ الكود بيظهر أوتوماتيك لو الرسالة فيها كود خصم */}
+            {item.message && item.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) && (
+              <TouchableOpacity 
+                style={{ backgroundColor: '#10b981', paddingVertical: 10, borderRadius: 10, marginTop: 12, alignItems: 'center', borderWidth: 1, borderColor: '#059669' }}
+                onPress={async () => {
+                  const codeMatch = item.message.match(/استخدم الكود:\s*([A-Z0-9]+)/);
+                  if (codeMatch && codeMatch[1]) {
+                    await Clipboard.setStringAsync(codeMatch[1]);
+                    Alert.alert('تم النسخ بنجاح', `تم نسخ الكود (${codeMatch[1]}) وتقدر تستخدمه دلوقتي في الرحلة!`);
+                  }
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>نسخ كود الخصم 📋</Text>
+              </TouchableOpacity>
+            )}
         <Text style={styles.time}>{formatNotificationTime(item.timestamp)}</Text>
       </View>
       {item.actionRoute && (
