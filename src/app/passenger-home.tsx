@@ -519,7 +519,164 @@ export default function PassengerHome() {
 
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
   const prevOffersCountRef = useRef(0);
+  // 🚀 دالة تحميل بيانات الراكب الجديدة المحمية
+  // 🚀 دالة الفحص لحالة الرحلة
+  const checkRideStatus = async (passengerId: string, passengerName: string) => {
+    try {
+      const savedRideStr = await AsyncStorage.getItem('active_ride');
+      if (savedRideStr) {
+        const savedRide = JSON.parse(savedRideStr);
+        if (savedRide.id && ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(savedRide.status)) {
+          setCurrentRideId(savedRide.id); 
+          setPickup(savedRide.pickupLocation || '');
+          if (savedRide.pickupCoords) setPickupCoords(savedRide.pickupCoords);
+          if (savedRide.destinationsList && savedRide.destinationsList.length > 0) {
+            setDestinations(savedRide.destinationsList);
+          } else {
+            setDestinations([savedRide.destinationLocation || '']);
+          }
+          if (savedRide.destinationsPrices) {
+            setDestinationsPrices(savedRide.destinationsPrices);
+          }
+          return; 
+        }
+      }
 
+      let q = query(collection(db, 'rides'), where('passengerId', '==', passengerId), limit(15));
+      let querySnapshot = await getDocs(q);
+      let docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length === 0 && passengerName) {
+        const qName = query(collection(db, 'rides'), where('name', '==', passengerName), limit(15));
+        const snapName = await getDocs(qName);
+        docs = snapName.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+      
+      docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
+      
+      const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
+      
+      if (activeRide) {
+        setCurrentRideId(activeRide.id);
+        setPickup(activeRide.pickupLocation || '');
+        if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
+        if (activeRide.numericSecret) setNumericSecret(activeRide.numericSecret);
+        if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
+          setDestinations(activeRide.destinationsList);
+        } else {
+          setDestinations([activeRide.destinationLocation || '']);
+        }
+        
+        if (activeRide.destinationsPrices) {
+          setDestinationsPrices(activeRide.destinationsPrices);
+        }
+
+        setPrice(activeRide.price || '');
+        setUnreadChatCount(activeRide.unreadCountPassenger || 0);
+        
+        if (activeRide.status === 'pending') {
+          setRideStatus('searching');
+          setOffers(activeRide.offers || []);
+          prevOffersCountRef.current = (activeRide.offers || []).length;
+        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
+          setRideStatus(activeRide.status);
+          if (activeRide.arrivedAt) setRideArrivedAt(activeRide.arrivedAt); 
+          setCaptainInfo({
+            name: activeRide.captainName || '',
+            phone: activeRide.captainPhone || 'غير مسجل',
+            vehicle: activeRide.captainVehicle || 'مركبة',
+            avatar: getSafeAvatar(activeRide.captainAvatar),
+            vehicleImage: getSafeAvatar(activeRide.captainVehicleImage),
+            plateNumber: activeRide.captainPlateNumber || ''
+          });
+        }
+        await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
+      } else {
+        setRideStatus('idle');
+        await AsyncStorage.removeItem('active_ride');
+        setCurrentRideId(null);
+        setNumericSecret('');
+      }
+    } catch (error) {}
+  };
+
+  // 🚀 دالة تحميل بيانات الراكب الجديدة المحمية
+  const loadPassengerProfile = async () => {
+    try {
+      const passengerId = await AsyncStorage.getItem('currentPassengerId');
+      if (passengerId) {
+        
+        // 1️⃣ تحميل البيانات من الذاكرة كحل سريع ومؤقت
+        try {
+          const savedProfile = await AsyncStorage.getItem('passenger_profile');
+          if (savedProfile) {
+            const parsed = JSON.parse(savedProfile);
+            setPassengerProfile(prev => ({ 
+              ...prev, 
+              id: passengerId, 
+              name: parsed.name || 'مستخدم جديد', 
+              phone: parsed.phone || '', 
+              avatar: getSafeAvatar(parsed.avatar), 
+              hidePhoneNumber: parsed.hidePhoneNumber || false 
+            }));
+          }
+        } catch(e) {}
+        
+        // 2️⃣ جلب أحدث بيانات من الفايربيز بشكل محمي
+        try {
+          const docRef = doc(db, 'passengers', passengerId);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const pName = data.name || 'مستخدم جديد';
+            const freshAvatar = getSafeAvatar(data.avatar || data.image);
+            
+            setPassengerProfile(prev => ({ 
+              ...prev, 
+              id: passengerId, 
+              name: pName, 
+              phone: data.phone || '01000000000', 
+              avatar: freshAvatar, 
+              hidePhoneNumber: data.hidePhoneNumber || false 
+            }));
+            
+            await AsyncStorage.setItem('passenger_profile', JSON.stringify({
+              name: pName,
+              avatar: freshAvatar,
+              phone: data.phone || '',
+              hidePhoneNumber: data.hidePhoneNumber || false
+            }));
+            checkRideStatus(passengerId, pName);
+          }
+        } catch (error) {
+          console.log('خطأ في جلب بيانات الراكب:', error);
+        }
+
+        // 3️⃣ جلب التقييمات في بلوك منفصل تماماً
+        try {
+          const ratingQ = query(collection(db, 'ratings'), where('passengerId', '==', passengerId), where('type', '==', 'captain_rating_passenger'));
+          let sum = 0;
+          const ratingSnap = await getDocs(ratingQ);
+          ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
+          const rCount = ratingSnap.docs.length;
+          const avgRate = rCount > 0 ? Number((sum / rCount).toFixed(1)) : 5;
+          
+          setPassengerProfile(prev => ({ ...prev, averageRating: avgRate, ratingCount: rCount }));
+        } catch (ratingError) {
+          console.log("خطأ في جلب التقييمات:", ratingError);
+        }
+
+      } else {
+        router.replace('/passenger-login');
+      }
+    } catch (e) {
+      console.log("خطأ عام في تحميل البروفايل:", e);
+    }
+  };
+
+  // 🚀 أمر التشغيل التلقائي بمجرد فتح الصفحة
+  useFocusEffect(useCallback(() => { 
+    loadPassengerProfile(); 
+  }, []));
   const notifyNewOffer = () => {
     if (isVibrationEnabled) {
       try {
