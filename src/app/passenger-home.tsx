@@ -182,7 +182,10 @@ export default function PassengerHome() {
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<any>(null);
   const [isVerifyingPromo, setIsVerifyingPromo] = useState(false);
-
+  const [promoModalVisible, setPromoModalVisible] = useState(false);
+  const [latestPromoData, setLatestPromoData] = useState<any>(null);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  
   useEffect(() => {
     const savePriceLocally = async () => {
       if (price && price !== '0') {
@@ -1389,7 +1392,7 @@ export default function PassengerHome() {
     } catch (e) {}
   };
 
-  const verifyPromoCode = async () => {
+ const verifyPromoCode = async () => {
     if (!promoCodeInput.trim()) return;
     setIsVerifyingPromo(true);
 
@@ -1398,6 +1401,7 @@ export default function PassengerHome() {
       const settingsData = settingsSnap.data();
       const promoCodesList = settingsData?.promoCodes || [];
 
+      // البحث عن الكود (بحروف كبيرة عشان ميبقاش في مشكلة في حالة الحروف)
       const promo = promoCodesList.find((p: any) => p.code === promoCodeInput.toUpperCase().trim());
 
       if (!promo) {
@@ -1405,16 +1409,15 @@ export default function PassengerHome() {
         setIsVerifyingPromo(false); return;
       }
 
-      if (promo.userType !== 'passenger') {
-        Alert.alert('عذراً', 'هذا الكود غير مخصص للركاب.');
-        setIsVerifyingPromo(false); return;
-      }
+      // تم حذف شرط الكابتن (userType) من هنا لأن كل الأكواد للركاب فقط
 
+      // لو الكود مخصص لركاب معينين
       if (promo.scope === 'specific' && !promo.selectedUsers?.includes(passengerProfile.id)) {
         Alert.alert('عذراً', 'هذا الكود غير مخصص لحسابك.');
         setIsVerifyingPromo(false); return;
       }
 
+      // التحقق من تاريخ الانتهاء
       if (promo.expiryDate) {
         const today = new Date().toISOString().split('T')[0];
         if (today > promo.expiryDate) {
@@ -1423,6 +1426,7 @@ export default function PassengerHome() {
         }
       }
 
+      // التحقق إن الراكب مستخدمش الكود ده قبل كده
       const userRef = doc(db, 'passengers', passengerProfile.id);
       const userSnap = await getDoc(userRef);
       const usedCodes = userSnap.data()?.usedPromoCodes || [];
@@ -1432,8 +1436,12 @@ export default function PassengerHome() {
         setIsVerifyingPromo(false); return;
       }
 
+      // لو الكود سليم 100%
       setAppliedPromo(promo);
-      Alert.alert('مبروك! 🎉', `تم تفعيل الخصم بنجاح: ${promo.discountValue} جنيه سيتم خصمها من ثمن الرحلة.`);
+      Alert.alert(
+        'تم التفعيل! 🎉', 
+        `سيتم خصم مبلغ ${promo.discountValue} ${promo.discountType === 'percentage' ? '%' : 'جنيه'} من السعر النهائي للرحلة. تمنياتنا برحلة سعيدة 🚗`
+      );
       
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء تفعيل الكود.');
