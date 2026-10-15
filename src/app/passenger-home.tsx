@@ -2465,8 +2465,8 @@ const handleCancelRide = async () => {
               </TouchableOpacity>
 
               <TouchableOpacity onPress={() => router.push('/passenger-promos' as any)}>
-  <Text>أكواد الخصم 🎁</Text>
-</TouchableOpacity>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>أكواد الخصم 🎁</Text>
+              </TouchableOpacity>
 
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/emergency-contacts'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>رقم الطوارئ والأمان</Text>
