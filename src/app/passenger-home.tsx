@@ -706,8 +706,8 @@ useEffect(() => {
             if (!notif.read) {
               if (isVibrationEnabled) Vibration.vibrate([0, 500, 200, 500]); // 📳 اهتزاز
 
-              const codeMatch = notif.message ? notif.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) : null;
-              const buttons: any[] = [];
+const codeMatch = notif.message?.match(/استخدم الكود:\s*([A-Z0-9-]+)/);              
+const buttons: any[] = [];
 
               if (codeMatch && codeMatch[1]) {
                 buttons.push({

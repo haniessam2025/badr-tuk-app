@@ -98,11 +98,11 @@ export default function PassengerNotifications() {
         <Text style={[styles.title, isDarkMode && { color: '#ffffff' }]}>{item.title || 'إشعار جديد'}</Text>
         <Text style={[styles.message, isDarkMode && { color: '#cbd5e1' }]}>{item.message}</Text>
         {/* 🚀 زرار نسخ الكود بيظهر أوتوماتيك لو الرسالة فيها كود خصم */}
-            {item.message && item.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) && (
+            {item.message && item.message.match(/استخدم الكود:\s*([A-Z0-9-]+)/) && (
               <TouchableOpacity 
                 style={{ backgroundColor: '#10b981', paddingVertical: 10, borderRadius: 10, marginTop: 12, alignItems: 'center', borderWidth: 1, borderColor: '#059669' }}
                 onPress={async () => {
-                  const codeMatch = item.message.match(/استخدم الكود:\s*([A-Z0-9]+)/);
+                  const codeMatch = item.message.match(/استخدم الكود:\s*([A-Z0-9-]+)/);
                   if (codeMatch && codeMatch[1]) {
                     await Clipboard.setStringAsync(codeMatch[1]);
                     Alert.alert('تم النسخ بنجاح', `تم نسخ الكود (${codeMatch[1]}) وتقدر تستخدمه دلوقتي في الرحلة!`);
