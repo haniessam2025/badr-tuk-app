@@ -2464,7 +2464,7 @@ const handleCancelRide = async () => {
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => router.push('/passenger-promos' as any)}>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passengers-promos' as any); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>أكواد الخصم 🎁</Text>
               </TouchableOpacity>
 
