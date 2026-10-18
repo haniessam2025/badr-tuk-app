@@ -1,15 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
-import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapViewDirections from 'react-native-maps-directions';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
+const GOOGLE_MAPS_APIKEY = "AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg";
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -24,15 +27,13 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c * 1000; 
 };
 
-const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, requestedPrice }: { offer: any, onAcceptOffer: (offer: any) => void, onRejectOffer: (offer: any) => void, isDarkMode: boolean, requestedPrice?: string }) => {
+// ================= كارت عرض الكابتن =================
+const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, requestedPrice }: any) => {
   const progressAnim = useRef(new Animated.Value(100)).current;
 
   useEffect(() => {
@@ -42,11 +43,7 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, r
     const remaining = Math.max(30000 - elapsed, 0);
 
     progressAnim.setValue((remaining / 30000) * 100);
-    Animated.timing(progressAnim, {
-      toValue: 0,
-      duration: remaining,
-      useNativeDriver: false,
-    }).start();
+    Animated.timing(progressAnim, { toValue: 0, duration: remaining, useNativeDriver: false }).start();
   }, [offer]);
 
   let vIcon = '🛺';
@@ -121,47 +118,57 @@ const sendPushNotification = async (expoPushToken: string, passengerName: string
   try {
     await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
+      headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
       body: JSON.stringify(message),
     });
-  } catch (error) {
-    console.log("Error sending push notification:", error);
-  }
+  } catch (error) {}
 };
 
 export default function PassengerHome() {
   const router = useRouter();
+  
+  const { isDarkMode, toggleTheme, isVibrationEnabled, toggleVibration } = useApp(); 
+  const [localVibration, setLocalVibration] = useState(true);
 
-  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [liveSettings, setLiveSettings] = useState<any>(null); // 👈 هنحفظ التسعيرة هنا لايف
+
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
       if (docSnap.exists()) {
-        setIsMaintenanceMode(docSnap.data().maintenanceMode || false);
+        const data = docSnap.data();
+        setIsMaintenanceMode(data.maintenanceMode || false);
+        setLiveSettings(data); // 👈 تحديث الأسعار لايف
       }
     });
     return () => unsubSettings();
   }, []);
+
+  useEffect(() => {
+    // 👈 أول ما التسعيرة تتغير في الداشبورد، الحسبة هتتحدث فوراً باستخدام القيم الجديدة
+    if (liveSettings && pickup && destinations.length > 0 && destinations[0].trim() !== '') {
+      updatePriceCalculation(pickup, destinations, requestedVehicleType, passengersCount, pickupCoords);
+    }
+  }, [liveSettings]);
   
-  const { isDarkMode, isVibrationEnabled } = useApp();
   const pathname = usePathname();
 
   const flashAnim = useRef(new Animated.Value(0)).current;
   const hasShownAlmostArrivedRef = useRef(false);
   const [pickup, setPickup] = useState('');
-  const [pickupCoords, setPickupCoords] = useState<{ latitude: number, longitude: number } | null>(null);
+  const [pickupCoords, setPickupCoords] = useState<any>(null);
   const [destinations, setDestinations] = useState<string[]>(['']);
   const [requestedVehicleType, setRequestedVehicleType] = useState<'car' | 'tuktuk_alt' | 'scooter'>('tuktuk_alt');
   const [requestedTuktukType, setRequestedTuktukType] = useState('كيوت 3 راكب');
   const [passengersCount, setPassengersCount] = useState('1');
+  const pickupRef = useRef<any>(null);
   
-  const openMapForDestination = () => {
-    Alert.alert('فتح الخريطة 🗺️', 'سيتم فتح شاشة الخريطة لاختيار الوجهة بدقة قريباً.');
-  };
-  
+  const [isMapPickerVisible, setIsMapPickerVisible] = useState(false);
+  const [mapPickerIndex, setMapPickerIndex] = useState<number | null>(null);
+  const [mapPickerCoords, setMapPickerCoords] = useState<any>(null);
+  const [mapPickerAddress, setMapPickerAddress] = useState('');
+  const [isGeocoding, setIsGeocoding] = useState(false);
+
   const [paymentMethod, setPaymentMethod] = useState('كاش');
   const [price, setPrice] = useState('');
   const [calculatedBasePrice, setCalculatedBasePrice] = useState(0);
@@ -178,10 +185,81 @@ export default function PassengerHome() {
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState('');
 
-  // متغيرات كود الخصم
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<any>(null);
   const [isVerifyingPromo, setIsVerifyingPromo] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+
+  const [isEditDestModalVisible, setIsEditDestModalVisible] = useState(false);
+  const [tempDestinations, setTempDestinations] = useState<string[]>(['']);
+  
+  const [offers, setOffers] = useState<any[]>([]);
+  const [numericSecret, setNumericSecret] = useState('');
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [latestMessage, setLatestMessage] = useState('');
+  const latestMsgTimer = useRef<any>(null);
+
+  const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); 
+  const [rideArrivedAt, setRideArrivedAt] = useState<number | null>(null);
+  const [liveETA, setLiveETA] = useState('جاري الحساب...');
+  const [captainLiveCoords, setCaptainLiveCoords] = useState<any>(null); 
+  
+  const [isCallModalVisible, setIsCallModalVisible] = useState(false);
+  const [phoneToCall, setPhoneToCall] = useState('');
+  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+  const [isSendingLocation, setIsSendingLocation] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [isEmergencyModalVisible, setIsEmergencyModalVisible] = useState(false);
+  const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const sidebarAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+
+  const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [ratingReason, setRatingReason] = useState('');
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const passengerRatingTags = ['كابتن مهذب', 'مركبة نظيفة', 'قيادة آمنة', 'موسيقى جيدة'];
+  const [rideToRate, setRideToRate] = useState<any>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+  const chatPulseAnim = useRef(new Animated.Value(0)).current;
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(-10)).current;
+  const [toastVisible, setToastVisible] = useState(false);
+  const prevUnreadRef = useRef(0);
+  const toastTimer = useRef<any>(null);
+  const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+
+  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0, hidePhoneNumber: false });  
+  const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+
+  const vehicleImageAnim = useRef(new Animated.Value(1)).current;
+  const prevOffersCountRef = useRef(0);
+  const [actionAfterSave, setActionAfterSave] = useState(false);
+  const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
+
+  useEffect(() => {
+    if(captainLiveCoords && pickupCoords && rideStatus === 'accepted') {
+        fetch(`https://maps.googleapis.com/maps/api/directions/json?origin=${captainLiveCoords.latitude},${captainLiveCoords.longitude}&destination=${pickupCoords.latitude},${pickupCoords.longitude}&key=${GOOGLE_MAPS_APIKEY}&language=ar`)
+        .then(res => res.json())
+        .then(data => { if (data.routes && data.routes.length > 0) setLiveETA(data.routes[0].legs[0].duration.text); })
+        .catch(e => console.log(e));
+    }
+  }, [captainLiveCoords, pickupCoords, rideStatus]);
+
+  const openMapForDestination = (index: number) => {
+    setMapPickerIndex(index);
+    const startCoords = pickupCoords || { latitude: 30.0444, longitude: 31.2357 };
+    setMapPickerCoords(startCoords);
+    setMapPickerAddress(destinations[index] || '');
+    setIsMapPickerVisible(true);
+  };
 
   useEffect(() => {
     const savePriceLocally = async () => {
@@ -220,405 +298,338 @@ export default function PassengerHome() {
     if (currentRideId && rideStatus === 'searching' && price) {
       updateDoc(doc(db, 'rides', currentRideId), { 
         price: price.toString(),
+        fairPrice: calculatedBasePrice || parseInt(price), // 👈 إرسال (السعر العادل) الثابت للكابتن ليقارن به
         timestamp: new Date().getTime() 
       }).catch((e) => console.log('Price Sync Error:', e));
     }
-  }, [price, currentRideId, rideStatus]);
+  }, [price, calculatedBasePrice, currentRideId, rideStatus]);
 
   const saveNewDestinations = async () => {
     const validDests = tempDestinations.filter(d => d.trim().length > 0);
-    if (validDests.length === 0) {
-      Alert.alert('تنبيه', 'يجب إدخال وجهة واحدة على الأقل');
-      return;
-    }
-
+    if (validDests.length === 0) return Alert.alert('تنبيه', 'يجب إدخال وجهة واحدة على الأقل');
+    
     setIsEditDestModalVisible(false);
-    setIsCalculatingPrice(true); 
-
-    try {
-      let startCoords = pickupCoords;
-      let destsCoords: any[] = [];
-      for (let dest of validDests) {
-        const coords = await getCoordinatesFromText(dest);
-        if (coords) destsCoords.push(coords);
+    setDestinations(validDests);
+    
+    // 👈 حفظ الأسعار اللي الراكب اختارها جوا المودال
+    setPrice(modalPrice);
+    setCalculatedBasePrice(modalBasePrice);
+    setBasePriceForSuggestions(modalBasePrice);
+    
+    updatePriceCalculation(pickup, validDests, requestedVehicleType, passengersCount, pickupCoords);
+    
+    if (currentRideId && ['searching', 'accepted', 'captain_arrived', 'in_progress'].includes(rideStatus)) {
+      await updateDoc(doc(db, 'rides', currentRideId), {
+        destinationsList: validDests,
+        destinationLocation: validDests.join(' - '),
+        price: modalPrice, // 👈 السعر النهائي اللي اختاره
+        fairPrice: modalBasePrice // 👈 السعر العادل عشان الكابتن يقارن بيه
+      });
+      if (rideStatus !== 'searching') {
+        Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر بنجاح.');
       }
+    }
+  };
+const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
+    if (!tiers || tiers.length === 0) return 0;
+    const sortedTiers = [...tiers].sort((a, b) => parseFloat(a.upToKm) - parseFloat(b.upToKm));
+    
+    let totalFare = 0;
+    let remainingDistance = distanceKm;
+    let previousTierLimit = 0;
 
-      let totalDirectMeters = 0;
-      let currentPoint = startCoords;
-      if (startCoords && destsCoords.length === validDests.length) {
-        for (let dest of destsCoords) {
-          let d = calculateDistance(currentPoint!.latitude, currentPoint!.longitude, dest.latitude, dest.longitude);
-          totalDirectMeters += d;
-          currentPoint = dest;
-        }
-      }
-
-      let newDistanceKm = (totalDirectMeters / 1000) * 1.35; 
-      const savedRideStr = await AsyncStorage.getItem('active_ride');
-      const activeRide = savedRideStr ? JSON.parse(savedRideStr) : null;
-      const oldDistanceKm = parseFloat(activeRide?.distance || calculatedDistance || '0');
-      const oldPrice = parseInt(activeRide?.price || price || '0');
+    for (let i = 0; i < sortedTiers.length; i++) {
+      const currentTierLimit = parseFloat(sortedTiers[i].upToKm);
+      const tierPricePerKm = parseFloat(sortedTiers[i].price);
+      const distanceInThisTier = Math.min(remainingDistance, currentTierLimit - previousTierLimit);
       
-      let calculatedNewBasePrice = oldPrice;
-      let priceDiff = 0;
-      let isIncrease = true;
-
-      const isActiveRide = ['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(rideStatus);
-
-      if (isActiveRide) {
-        if (newDistanceKm > oldDistanceKm) {
-          const extraKm = newDistanceKm - oldDistanceKm;
-          priceDiff = Math.ceil(extraKm * 6.5); 
-          calculatedNewBasePrice += priceDiff;
-        } else if (newDistanceKm < oldDistanceKm) {
-          const lessKm = oldDistanceKm - newDistanceKm;
-          priceDiff = Math.ceil(lessKm * 4); 
-          calculatedNewBasePrice -= priceDiff;
-          if (calculatedNewBasePrice < 100) calculatedNewBasePrice = 100; 
-          isIncrease = false;
-        }
-      } else {
-         let calculatedPrice = 0;
-         if (requestedVehicleType === 'car') {
-           if (newDistanceKm <= 15) { calculatedPrice = 15 + (newDistanceKm * 4.4); }
-           else if (newDistanceKm <= 45) { calculatedPrice = 91 + ((newDistanceKm - 15) * 3.8); }
-           else { calculatedPrice = 205 + ((newDistanceKm - 45) * 3.2); }
-         } else if (requestedVehicleType === 'scooter') {
-           calculatedPrice = Math.max(12, newDistanceKm * 3.75);
-         } else {
-           let basePriceForOne = Math.max(15, newDistanceKm * 6.5);
-           const count = parseInt(passengersCount) || 1;
-           const passengerMultiplier = 1 + ((count - 1) * 0.25); 
-           calculatedPrice = basePriceForOne * passengerMultiplier;
-         }
-         calculatedNewBasePrice = Math.ceil(calculatedPrice);
-         if (calculatedNewBasePrice < 100) calculatedNewBasePrice = 100;
-         priceDiff = Math.abs(calculatedNewBasePrice - oldPrice);
-         isIncrease = calculatedNewBasePrice >= oldPrice;
+      if (distanceInThisTier > 0) {
+        totalFare += distanceInThisTier * tierPricePerKm;
+        remainingDistance -= distanceInThisTier;
       }
-
-      setIsCalculatingPrice(false);
-      const diffText = isIncrease ? `زيادة قدرها ${priceDiff} ج 🔺` : `خصم قدره ${priceDiff} ج 🔻`;
       
-      const modPayload = {
-        newDestinationsList: validDests,
-        newDestinationLocation: validDests.join(' - '),
-        newDistance: newDistanceKm.toFixed(1),
-        newPrice: calculatedNewBasePrice.toString(),
-        calculatedBasePrice: calculatedNewBasePrice,
-        priceDiff: priceDiff,
-        isIncrease: isIncrease,
-        status: 'pending',
-        timestamp: new Date().getTime(),
-        notifiedPassenger: false
-      };
+      previousTierLimit = currentTierLimit;
+      if (remainingDistance <= 0) break;
+    }
+    return totalFare;
+  };
 
-      const alertTitle = isActiveRide ? 'تأكيد تعديل الوجهة 🗺️' : 'تأكيد السعر الجديد 🗺️';
-      const alertMsg = isActiveRide 
-        ? `السعر العادل للمسار الجديد: ${calculatedNewBasePrice} ج\n(${diffText})\n\nتقدر تعدل السعر أو تبعته فوراً للكابتن للموافقة.`
-        : `السعر المقترح للوجهة الجديدة: ${calculatedNewBasePrice} ج\n\nتقدر تأكد السعر أو تعدله قبل إرسال الطلب للكباتن.`;
+  const updatePriceCalculation = async (pickupText: string, dests: string[], vType: string = requestedVehicleType, passCountStr: string = passengersCount, overrideStartCoords: any = null, isTempModal = false) => {
+    const validDests = dests.filter(d => d.trim().length > 0);
+    if (pickupText.trim().length > 0 && validDests.length > 0) {
+      if (isTempModal) setIsModalCalculating(true); else setIsCalculatingPrice(true);
+      try {
+        let startCoords = overrideStartCoords || pickupCoords;
+        if (!startCoords && pickupText !== 'موقعي الحالي') {
+          startCoords = await getCoordinatesFromText(pickupText);
+        }
+        if (!startCoords) startCoords = { latitude: 30.0444, longitude: 31.2357 };
 
-      Alert.alert(alertTitle, alertMsg, [
-        { text: 'إلغاء وتراجع ❌', style: 'cancel' },
-        { 
-          text: 'تعديل السعر ✏️', 
-          onPress: async () => {
-            await AsyncStorage.setItem('temp_mod_payload', JSON.stringify(modPayload));
-            setTempPrice(calculatedNewBasePrice.toString());
-            setCalculatedBasePrice(calculatedNewBasePrice);
-            setIsEditModalVisible(true);
-          } 
-        },
-        { 
-          text: isActiveRide ? 'إرسال للكابتن 🚀' : 'تأكيد ونشر 🚀', 
-          onPress: async () => {
-            if (currentRideId) {
-              if (isActiveRide) {
-                await updateDoc(doc(db, 'rides', currentRideId), { pendingModification: modPayload });
-                Alert.alert('تم الإرسال 📨', 'تم إرسال طلب تعديل الوجهة للسائق، في انتظار موافقته..');
-              } else {
-                setPrice(calculatedNewBasePrice.toString());
-                setCalculatedBasePrice(calculatedNewBasePrice);
-                setDestinations(validDests);
-                
-                await updateDoc(doc(db, 'rides', currentRideId), {
-                  destinationsList: validDests,
-                  destinationLocation: validDests.join(' - '),
-                  distance: newDistanceKm.toFixed(1),
-                  price: calculatedNewBasePrice.toString(),
-                  calculatedBasePrice: calculatedNewBasePrice,
-                  timestamp: new Date().getTime(),
-                  offers: [] 
-                });
-                
-                const savedRide = await AsyncStorage.getItem('active_ride');
-                if (savedRide) {
-                  const data = JSON.parse(savedRide);
-                  data.price = calculatedNewBasePrice.toString();
-                  data.destinationsList = validDests;
-                  data.destinationLocation = validDests.join(' - ');
-                  await AsyncStorage.setItem('active_ride', JSON.stringify(data));
-                }
-                Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر، وجاري استقبال عروض الكباتن.');
-              }
-            }
+        let totalDistanceKm = 0;
+        let googleSuccess = false;
+
+        try {
+          let originStr = `${startCoords.latitude},${startCoords.longitude}`;
+          let destStr = encodeURIComponent(validDests[validDests.length - 1]);
+          
+          let waypointsParam = "";
+          if (validDests.length > 1) {
+              let wps = validDests.slice(0, validDests.length - 1).map((d: string) => encodeURIComponent(d));
+              waypointsParam = `&waypoints=${wps.join('|')}`;
           }
-        }
-      ]);
 
-    } catch (e) {
-      setIsCalculatingPrice(false);
-      Alert.alert('خطأ', 'فشل في حساب المسار الجديد تأكد من اتصالك بالإنترنت.');
+          const response = await fetch(`https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}${waypointsParam}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
+          const data = await response.json();
+
+          if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+             let totalMeters = data.routes[0].legs.reduce((sum: any, leg: any) => sum + leg.distance.value, 0);
+             totalDistanceKm = totalMeters / 1000;
+             googleSuccess = true;
+          }
+        } catch (e) { console.log("Google Directions API Error"); }
+
+        if (!googleSuccess) {
+           let destsCoords: any[] = [];
+           for (let dest of validDests) {
+             const coords = await getCoordinatesFromText(dest);
+             if (coords) destsCoords.push(coords);
+           }
+           let totalDirectMeters = 0;
+           let currentPoint = startCoords;
+           for (let dest of destsCoords) {
+             let d = calculateDistance(currentPoint.latitude, currentPoint.longitude, dest.latitude, dest.longitude);
+             totalDirectMeters += d;
+             currentPoint = dest;
+           }
+           totalDistanceKm = totalDirectMeters > 0 ? (totalDirectMeters / 1000) * 1.35 : 5; 
+        }
+
+        if (!isTempModal) setCalculatedDistance(totalDistanceKm.toFixed(1));
+
+        let appSettings: any = {
+           car: { baseFare: 15, minFare: 20, tiers: [{ upToKm: 999, price: 4.4 }] },
+           tuktuk: { baseFare: 10, minFare: 15, tiers: [{ upToKm: 999, price: 6.0 }] },
+           scooter: { baseFare: 12, minFare: 12, tiers: [{ upToKm: 999, price: 3.5 }] }
+        };
+        
+        if (liveSettings) {
+           appSettings = { car: liveSettings.car || appSettings.car, tuktuk: liveSettings.tuktuk || appSettings.tuktuk, scooter: liveSettings.scooter || appSettings.scooter };
+        }
+
+        let calculatedPrice = 0;
+        if (vType === 'car') {
+          const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.car.tiers);
+          const firstTierLimit = appSettings.car.tiers && appSettings.car.tiers.length > 0 ? parseFloat(appSettings.car.tiers[0].upToKm) : 999;
+          if (totalDistanceKm <= firstTierLimit) calculatedPrice = Math.max(Number(appSettings.car.minFare), Number(appSettings.car.baseFare) + distanceFare);
+          else calculatedPrice = Number(appSettings.car.baseFare) + distanceFare;
+        } else if (vType === 'scooter') {
+          const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.scooter.tiers);
+          const firstTierLimit = appSettings.scooter.tiers && appSettings.scooter.tiers.length > 0 ? parseFloat(appSettings.scooter.tiers[0].upToKm) : 999;
+          if (totalDistanceKm <= firstTierLimit) calculatedPrice = Math.max(Number(appSettings.scooter.minFare), Number(appSettings.scooter.baseFare) + distanceFare);
+          else calculatedPrice = Number(appSettings.scooter.baseFare) + distanceFare;
+        } else {
+          const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
+          const firstTierLimit = appSettings.tuktuk.tiers && appSettings.tuktuk.tiers.length > 0 ? parseFloat(appSettings.tuktuk.tiers[0].upToKm) : 999;
+          let baseForOne = 0;
+          if (totalDistanceKm <= firstTierLimit) baseForOne = Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFare);
+          else baseForOne = Number(appSettings.tuktuk.baseFare) + distanceFare;
+          const count = parseInt(passCountStr) || 1;
+          calculatedPrice = baseForOne * (1 + ((count - 1) * 0.25));
+        }
+
+        let finalBase = Math.ceil(calculatedPrice);
+        
+        // 👈 توجيه السعر المحسوب للمودال أو الشاشة الرئيسية
+        if (isTempModal) {
+            setModalBasePrice(finalBase);
+            setModalPrice(finalBase.toString());
+            setIsModalCalculating(false);
+        } else {
+            setCalculatedBasePrice(finalBase);
+            setBasePriceForSuggestions(finalBase);
+            setPrice(finalBase.toString());
+            setIsCalculatingPrice(false);
+        }
+
+      } catch(error) {
+        if (isTempModal) setIsModalCalculating(false); else setIsCalculatingPrice(false);
+      }
+    } else {
+      if (isTempModal) {
+          setModalBasePrice(0); setModalPrice(''); setIsModalCalculating(false);
+      } else {
+          setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setPrice(''); setCalculatedDistance('0'); setIsCalculatingPrice(false);
+      }
+    }
+  };
+const handleGetCurrentLocation = async () => {
+    setIsFetchingLocation(true);
+    try {
+      let servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        Alert.alert('تنبيه', 'الـ GPS مغلق برجاء سحب الشاشة وتفعيله');
+        setIsFetchingLocation(false);
+        return;
+      }
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('صلاحية مفقودة', 'برجاء السماح للتطبيق بالوصول لموقعك');
+        setIsFetchingLocation(false);
+        return;
+      }
+
+      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      const currentCoords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
+      setPickupCoords(currentCoords);
+
+      let addressText = 'موقعي الحالي';
+      
+      // 👈 استخدام جوجل ماب API العكسي لجلب العنوان الفعلي بالتفصيل
+      try {
+        const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${currentCoords.latitude},${currentCoords.longitude}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
+        const data = await response.json();
+        if (data.results && data.results.length > 0) {
+          // هنأخد العنوان المنسق من جوجل
+          addressText = data.results[0].formatted_address;
+        }
+      } catch (e) {
+        console.log("Error fetching google geocode", e);
+      }
+
+      setPickup(addressText);
+      
+      // 👈 وضع النص في مربع اقتراحات جوجل للانطلاق
+      if (pickupRef.current) {
+        pickupRef.current.setAddressText(addressText);
+      }
+
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      setIsCalculatingPrice(true);
+      debounceTimer.current = setTimeout(() => {
+        updatePriceCalculation(addressText, destinations, requestedVehicleType, passengersCount, currentCoords);
+      }, 1500);
+
+    } catch (error) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء التقاط إشارة الـ GPS');
+    } finally {
+      setIsFetchingLocation(false);
+    }
+  };
+  const handlePickupChange = (text: string) => {
+    setPickup(text);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, null), 1500);
+  };
+
+  const handleDestinationChange = (text: string, index: number) => {
+    const newDests = [...destinations];
+    newDests[index] = text;
+    setDestinations(newDests);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords), 1500);
+  };
+
+  const addDestination = () => { if (destinations.length < 3) setDestinations([...destinations, '']); };
+  const removeDestination = (index: number) => {
+    const newDests = [...destinations];
+    newDests.splice(index, 1);
+    setDestinations(newDests);
+    updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords);
+  };
+
+  const [modalBasePrice, setModalBasePrice] = useState(0);
+  const [modalPrice, setModalPrice] = useState('');
+  const [isModalCalculating, setIsModalCalculating] = useState(false);
+
+  const openEditDestModal = () => { 
+    setTempDestinations([...destinations]); 
+    setModalBasePrice(basePriceForSuggestions || parseInt(price));
+    setModalPrice(price);
+    setIsEditDestModalVisible(true); 
+  };
+  const handleTempDestChange = (text: string, index: number) => {
+    const newDests = [...tempDestinations];
+    newDests[index] = text;
+    setTempDestinations(newDests);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords, true);
+    }, 1500);
+  };
+  const addTempDest = () => { if (tempDestinations.length < 3) setTempDestinations([...tempDestinations, '']); };
+  const removeTempDest = (index: number) => { 
+    const newDests = [...tempDestinations]; 
+    newDests.splice(index, 1); 
+    setTempDestinations(newDests); 
+    updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords, true);
+  };
+
+  const openEditPriceModal = () => {
+    if (!pickup || destinations[0].trim().length === 0) return;
+    setTempPrice(price);
+    setIsEditModalVisible(true);
+  };
+
+  const saveNewPrice = async () => {
+    setPrice(tempPrice);
+    // 👈 تم إزالة setBasePriceForSuggestions للحفاظ على (السعر العادل) الأصلي دون تغيير لما الراكب يعدل سعره
+    setIsEditModalVisible(false);
+    if (currentRideId && ['accepted', 'captain_arrived', 'in_progress'].includes(rideStatus)) {
+      await updateDoc(doc(db, 'rides', currentRideId), { price: tempPrice.toString() });
     }
   };
 
-  const [offers, setOffers] = useState<any[]>([]);
-  const [numericSecret, setNumericSecret] = useState('');
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const [latestMessage, setLatestMessage] = useState('');
-  const latestMsgTimer = useRef<any>(null);
-
-  const [waitingTimeLeft, setWaitingTimeLeft] = useState(300); 
-  const [rideArrivedAt, setRideArrivedAt] = useState<number | null>(null);
+ const verifyPromoCode = async () => {
+    if (!promoCodeInput.trim()) return;
+    setIsVerifyingPromo(true);
+    try {
+      const settingsSnap = await getDoc(doc(db, 'app_settings', 'pricing'));
+      const promo = settingsSnap.data()?.promoCodes?.find((p: any) => p.code === promoCodeInput.toUpperCase().trim());
+      if (promo) { setAppliedPromo(promo); Alert.alert('تم التفعيل', 'تم خصم الأجرة'); }
+    } catch (error) {} 
+    finally { setIsVerifyingPromo(false); }
+  };
 
   useEffect(() => {
     let interval: any;
     if (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'passenger_on_the_way') {
       const arrivalTime = rideArrivedAt || new Date().getTime();
       const targetTime = arrivalTime + (5 * 60 * 1000);
-
-      const updateTimer = () => {
-        const now = new Date().getTime();
-        const diffInSeconds = Math.max(0, Math.floor((targetTime - now) / 1000));
-        setWaitingTimeLeft(diffInSeconds);
-      };
-
+      const updateTimer = () => { setWaitingTimeLeft(Math.max(0, Math.floor((targetTime - new Date().getTime()) / 1000))); };
       updateTimer();
       interval = setInterval(updateTimer, 1000);
-    } else {
-      setWaitingTimeLeft(300);
-    }
+    } else setWaitingTimeLeft(300);
     return () => clearInterval(interval);
   }, [rideStatus, rideArrivedAt]);
 
   const formatTimer = (totalSeconds: number) => {
-    const m = Math.floor(totalSeconds / 60);
-    const s = totalSeconds % 60;
+    const m = Math.floor(totalSeconds / 60); const s = totalSeconds % 60;
     return `0${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  const [isCallModalVisible, setIsCallModalVisible] = useState(false);
-  const [phoneToCall, setPhoneToCall] = useState('');
-  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
-  const [isSendingLocation, setIsSendingLocation] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [emergencyPhone, setEmergencyPhone] = useState('');
-  const [isEmergencyModalVisible, setIsEmergencyModalVisible] = useState(false);
-  const [tempEmergencyPhone, setTempEmergencyPhone] = useState('');
+  const openSidebar = () => { setIsSidebarOpen(true); Animated.timing(sidebarAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(); };
+  const closeSidebar = () => { Animated.timing(sidebarAnim, { toValue: SCREEN_WIDTH, duration: 300, useNativeDriver: true }).start(() => setIsSidebarOpen(false)); };
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const sidebarAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
-
-  const openSidebar = () => {
-    setIsSidebarOpen(true);
-    Animated.timing(sidebarAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
+  const togglePhoneVisibility = async () => {
+    const newValue = !passengerProfile.hidePhoneNumber;
+    setPassengerProfile(prev => ({ ...prev, hidePhoneNumber: newValue }));
+    await updateDoc(doc(db, 'passengers', passengerProfile.id), { hidePhoneNumber: newValue });
   };
 
-  const closeSidebar = () => {
-    Animated.timing(sidebarAnim, { toValue: Dimensions.get('window').width, duration: 300, useNativeDriver: true }).start(() => setIsSidebarOpen(false));
-  };
-
-  const handleRideSOS = async () => {
-    let finalPhone = emergencyPhone;
-
-    if (!finalPhone && passengerProfile?.id) {
-      try {
-        const contactDoc = await getDoc(doc(db, 'emergencyContacts', passengerProfile.id));
-        if (contactDoc.exists() && contactDoc.data().phone) {
-          finalPhone = contactDoc.data().phone;
-          setEmergencyPhone(finalPhone);
-          await AsyncStorage.setItem('emergency_phone', finalPhone);
-        }
-      } catch (error) {
-        console.log("Error fetching emergency contact:", error);
-      }
-    }
-
-    if (!finalPhone) {
-      Alert.alert("تنبيه", "لم تقم بتسجيل رقم طوارئ. يرجى إضافته أولاً من القائمة الجانبية (رقم الطوارئ والأمان).");
-      return;
-    }
-
-    Alert.alert(
-      "تأكيد الاستغاثة ⚠️",
-      "هل أنت متأكد أنك في خطر وتريد إرسال رسالة استغاثة طارئة عبر الواتساب لجهة الاتصال الخاصة بك؟",
-      [
-        { text: "إلغاء", style: "cancel" },
-        { 
-          text: "نعم، أرسل الآن", 
-          style: "destructive", 
-          onPress: async () => {
-            try {
-              let phone = finalPhone;
-              if (phone.startsWith('01')) {
-                phone = '+20' + phone.substring(1);
-              } else if (phone.startsWith('0')) {
-                phone = '+2' + phone;
-              }
-              
-              const trackingLink = currentRideId ? `\nتتبع مساري (لايف) من هنا:\nhttps://badr-cute.web.app/?ride=${currentRideId}` : '';
-              const message = `🚨 استغاثة عاجلة! أنا في خطر أثناء رحلتي، أرجو المساعدة فوراً.${trackingLink}`;
-              
-              const whatsappUrl = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
-              
-              try { 
-                await Linking.openURL(whatsappUrl); 
-              } catch (err) { 
-                const waMeUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-                try {
-                  await Linking.openURL(waMeUrl);
-                } catch (e) {
-                  Alert.alert("تنبيه", "تعذر فتح الواتساب. تأكد من تثبيت التطبيق.");
-                }
-              }
-            } catch (error) {
-              Alert.alert("خطأ", "حدثت مشكلة أثناء محاولة إرسال الاستغاثة.");
-            }
-          } 
-        }
-      ]
-    );
-  };
-
-  const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
-  const [rating, setRating] = useState(0);
-  const [ratingReason, setRatingReason] = useState('');
-  const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const passengerRatingTags = ['كابتن مهذب', 'مركبة نظيفة', 'قيادة آمنة', 'موسيقى جيدة'];
-  const [rideToRate, setRideToRate] = useState<any>(null);
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [isScannerVisible, setIsScannerVisible] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const pulseAnim = useRef(new Animated.Value(0)).current;
-  const chatPulseAnim = useRef(new Animated.Value(0)).current;
-  const toastOpacity = useRef(new Animated.Value(0)).current;
-  const toastTranslateY = useRef(new Animated.Value(-10)).current;
-  const [toastVisible, setToastVisible] = useState(false);
-  const prevUnreadRef = useRef(0);
-  const toastTimer = useRef<any>(null);
-  const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
-
-  const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0, hidePhoneNumber: false });  
-  const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
-  const [captainLiveCoords, setCaptainLiveCoords] = useState<any>(null); 
-  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
-
-  const vehicleImageAnim = useRef(new Animated.Value(1)).current;
-  const prevOffersCountRef = useRef(0);
-
-  const notifyNewOffer = () => {
-    if (isVibrationEnabled) {
-      try {
-        Vibration.vibrate([0, 500, 200, 500]);
-      } catch (error) {
-        console.log('Error vibrating:', error);
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (!passengerProfile || !passengerProfile.id) return;
-    const q = query(collection(db, 'notifications'), where('userId', '==', passengerProfile.id), where('read', '==', false));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadNotifsCount(snapshot.docs.length);
-    });
-    return () => unsubscribe();
-  }, [passengerProfile]);
-  
-  useEffect(() => {
-    if (rideStatus === 'accepted' && captainLiveCoords && pickupCoords) {
-      
-      const dist = calculateDistance(
-        captainLiveCoords.latitude, 
-        captainLiveCoords.longitude,
-        pickupCoords.latitude, 
-        pickupCoords.longitude
-      );
-
-      if (dist <= 500 && !hasShownAlmostArrivedRef.current) {
-        hasShownAlmostArrivedRef.current = true; 
-
-        Animated.sequence([
-          Animated.timing(flashAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
-          Animated.timing(flashAnim, { toValue: 0, duration: 500, useNativeDriver: false })
-        ]).start();
-
-        if (isVibrationEnabled) {
-          Vibration.vibrate([0, 500, 200, 500]);
-        }
-
-        Alert.alert(
-          "تنبيه 🔔",
-          "الكابتن على وشك الوصول برجاء التوجه إلى نقطة الإقلال"
-        );
-      }
-    }
-
-    if (rideStatus === 'idle' || rideStatus === 'searching') {
-      hasShownAlmostArrivedRef.current = false;
-    }
-  }, [rideStatus, captainLiveCoords, pickupCoords, isVibrationEnabled]);
-
-  useFocusEffect(useCallback(() => { loadPassengerProfile(); loadEmergencyPhone(); }, []));
-
-  const loadEmergencyPhone = async () => {
-    try {
-      const savedPhone = await AsyncStorage.getItem('emergency_phone');
-      if (savedPhone) setEmergencyPhone(savedPhone);
-    } catch (e) {}
-  };
+  useFocusEffect(useCallback(() => { loadPassengerProfile(); }, []));
 
   const loadPassengerProfile = async () => {
     try {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
       if (passengerId) {
-        const ratingQ = query(collection(db, 'ratings'), where('passengerId', '==', passengerId), where('type', '==', 'captain_rating_passenger'));
-        let sum = 0;
-        const ratingSnap = await getDocs(ratingQ);
-        ratingSnap.docs.forEach(r => sum += (r.data().rating || 5));
-        const rCount = ratingSnap.docs.length;
-        const avgRate = rCount > 0 ? (sum / rCount).toFixed(1) : '5';
-        const savedProfile = await AsyncStorage.getItem('passenger_profile');
-        let pName = 'مستخدم جديد';
-        let freshAvatar = DEFAULT_AVATAR;
-        
-        if (savedProfile) {
-          const parsed = JSON.parse(savedProfile);
-          pName = parsed.name || 'مستخدم جديد';
-          setPassengerProfile({ id: passengerId, name: pName, phone: parsed.phone || '', avatar: getSafeAvatar(parsed.avatar), averageRating: Number(avgRate), ratingCount: rCount, hidePhoneNumber: parsed.hidePhoneNumber || false });
-        }
-        
         const docRef = doc(db, 'passengers', passengerId);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          pName = data.name || 'مستخدم جديد';
-          freshAvatar = getSafeAvatar(data.avatar || data.image);
-          setPassengerProfile({ id: passengerId, name: pName, phone: data.phone || '01000000000', avatar: freshAvatar, averageRating: Number(avgRate), ratingCount: rCount, hidePhoneNumber: data.hidePhoneNumber || false });
-          
-          if (savedProfile) {
-            const parsed = JSON.parse(savedProfile);
-            parsed.name = pName;
-            parsed.avatar = freshAvatar;
-            parsed.hidePhoneNumber = data.hidePhoneNumber || false;
-            await AsyncStorage.setItem('passenger_profile', JSON.stringify(parsed));
-          }
-          checkRideStatus(passengerId, pName);
+          setPassengerProfile({ id: passengerId, name: data.name, phone: data.phone, avatar: getSafeAvatar(data.avatar), averageRating: 5, ratingCount: 0, hidePhoneNumber: data.hidePhoneNumber || false });
+          checkRideStatus(passengerId, data.name);
         }
-      } else {
-        router.replace('/passenger-login');
-      }
+      } else router.replace('/passenger-login');
     } catch (e) {}
   };
 
@@ -631,127 +642,201 @@ export default function PassengerHome() {
           setCurrentRideId(savedRide.id); 
           setPickup(savedRide.pickupLocation || '');
           if (savedRide.pickupCoords) setPickupCoords(savedRide.pickupCoords);
-          if (savedRide.destinationsList && savedRide.destinationsList.length > 0) {
-            setDestinations(savedRide.destinationsList);
-          } else {
-            setDestinations([savedRide.destinationLocation || '']);
-          }
-          if (savedRide.destinationsPrices) {
-            setDestinationsPrices(savedRide.destinationsPrices);
-          }
-          return; 
+          if (savedRide.destinationsList && savedRide.destinationsList.length > 0) setDestinations(savedRide.destinationsList);
+          else setDestinations([savedRide.destinationLocation || '']);
+          setRideStatus(savedRide.status === 'pending' ? 'searching' : savedRide.status);
+          setCalculatedDistance(savedRide.distance || '0');
         }
       }
-
       let q = query(collection(db, 'rides'), where('passengerId', '==', passengerId), limit(15));
-      let querySnapshot = await getDocs(q);
-      let docs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (docs.length === 0 && passengerName) {
-        const qName = query(collection(db, 'rides'), where('name', '==', passengerName), limit(15));
-        const snapName = await getDocs(qName);
-        docs = snapName.docs.map(d => ({ id: d.id, ...d.data() }));
-      }
-      
+      let docs = (await getDocs(q)).docs.map(d => ({ id: d.id, ...d.data() }));
       docs.sort((a: any, b: any) => b.timestamp - a.timestamp);
-      
       const activeRide: any = docs.find((d: any) => ['pending', 'accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(d.status));
-      
       if (activeRide) {
         setCurrentRideId(activeRide.id);
         setPickup(activeRide.pickupLocation || '');
         if (activeRide.pickupCoords) setPickupCoords(activeRide.pickupCoords);
         if (activeRide.numericSecret) setNumericSecret(activeRide.numericSecret);
-        if (activeRide.destinationsList && activeRide.destinationsList.length > 0) {
-          setDestinations(activeRide.destinationsList);
-        } else {
-          setDestinations([activeRide.destinationLocation || '']);
-        }
-        
-        if (activeRide.destinationsPrices) {
-          setDestinationsPrices(activeRide.destinationsPrices);
-        }
-
-        setPrice(activeRide.price || '');
-        setUnreadChatCount(activeRide.unreadCountPassenger || 0);
-        
-        if (activeRide.status === 'pending') {
-          setRideStatus('searching');
-          setOffers(activeRide.offers || []);
-          prevOffersCountRef.current = (activeRide.offers || []).length;
-        } else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
+        if (activeRide.destinationsList && activeRide.destinationsList.length > 0) setDestinations(activeRide.destinationsList);
+        setPrice(activeRide.price || ''); setCalculatedDistance(activeRide.distance || '0');
+        if (activeRide.status === 'pending') { setRideStatus('searching'); setOffers(activeRide.offers || []); } 
+        else if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(activeRide.status)) {
           setRideStatus(activeRide.status);
           if (activeRide.arrivedAt) setRideArrivedAt(activeRide.arrivedAt); 
-          setCaptainInfo({
-            name: activeRide.captainName || '',
-            phone: activeRide.captainPhone || 'غير مسجل',
-            vehicle: activeRide.captainVehicle || 'مركبة',
-            avatar: getSafeAvatar(activeRide.captainAvatar),
-            vehicleImage: getSafeAvatar(activeRide.captainVehicleImage),
-            plateNumber: activeRide.captainPlateNumber || ''
-          });
+          setCaptainInfo({ name: activeRide.captainName || '', phone: activeRide.captainPhone || 'غير مسجل', vehicle: activeRide.captainVehicle || 'مركبة', avatar: getSafeAvatar(activeRide.captainAvatar), vehicleImage: '', plateNumber: activeRide.captainPlateNumber || '' });
         }
         await AsyncStorage.setItem('active_ride', JSON.stringify(activeRide));
       } else {
-        setRideStatus('idle');
-        await AsyncStorage.removeItem('active_ride');
-        setCurrentRideId(null);
-        setNumericSecret('');
+        setRideStatus('idle'); await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null);
       }
     } catch (error) {}
   };
-  
+
+  const handleSearchCaptain = async () => {
+    if (isSubmitting) return;
+    const validDests = destinations.filter(d => d.trim() !== '');
+    if (!pickup || validDests.length === 0 || !price) return Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
+    setIsSubmitting(true); setRideStatus('searching'); setOffers([]); prevOffersCountRef.current = 0; 
+    let finalPickupCoords = pickupCoords || { latitude: 30.0444, longitude: 31.2357 };
+    try {
+const rideData = {
+        passengerId: passengerProfile.id, name: passengerProfile.name, phone: passengerProfile.phone,
+        isPhoneHidden: passengerProfile.hidePhoneNumber || false, avatar: passengerProfile.avatar,
+        pickupLocation: pickup, pickupCoords: finalPickupCoords, destinationsList: validDests,
+        destinationLocation: validDests.join(' '), 
+        price: price, 
+        fairPrice: basePriceForSuggestions, // 👈 السعر المقترح بيتبعت هنا
+        distance: calculatedDistance, 
+        numericSecret: Math.floor(1000 + Math.random() * 9000).toString(), qrSecret: Math.random().toString(36).substring(2, 10),
+        notes: notes.trim(), requestedVehicleType, paymentMethod: paymentMethod, offers: [], status: 'pending', timestamp: new Date().getTime(),
+      };
+      const docRef = await addDoc(collection(db, 'rides'), rideData);
+      await AsyncStorage.setItem('active_ride', JSON.stringify({ ...rideData, id: docRef.id }));
+      setCurrentRideId(docRef.id);
+      Alert.alert('نجاح', 'تم إرسال الطلب...');
+    } catch (error) { setRideStatus('idle'); } finally { setIsSubmitting(false); }
+  };
+
+  const acceptCaptainOffer = async (offer: any) => {
+    try {
+      const cleanData: any = { status: 'accepted', price: String(offer?.price || price || '0'), captainId: String(offer?.captainId || 'unknown'), captainName: String(offer?.captainName || 'غير مسجل'), captainPhone: String(offer?.captainPhone || ''), captainVehicle: String(offer?.captainVehicle || 'مركبة'), captainAvatar: getSafeAvatar(offer?.captainAvatar) };
+      await setDoc(doc(db, 'rides', currentRideId!), cleanData, { merge: true }); setPrice(cleanData.price);
+    } catch (error) {}
+  };
+
+  const rejectCaptainOffer = async (offerToReject: any) => {
+    setOffers(prev => prev.filter(o => o.captainId !== offerToReject.captainId));
+    try {
+      const rideSnap = await getDoc(doc(db, 'rides', currentRideId!));
+      if (rideSnap.exists()) await updateDoc(doc(db, 'rides', currentRideId!), { offers: rideSnap.data().offers.filter((o: any) => o.captainId !== offerToReject.captainId) });
+    } catch (error) {}
+  };
+
+  useEffect(() => {
+    if (autoAcceptEnabled && rideStatus === 'searching' && offers.length > 0) {
+      const myPrice = parseInt(price) || 0;
+      offers.forEach(o => { if ((parseInt(o.price) || 0) <= myPrice) acceptCaptainOffer(o); else rejectCaptainOffer(o); });
+    }
+  }, [offers, autoAcceptEnabled, price]);
+
+  const notifyPassengerOnTheWay = async () => {
+    if (!currentRideId) return;
+    try { await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); } catch (error) {}
+  };
+
+  const handleCancelRide = async () => {
+    if (!currentRideId) return;
+    try {
+      await updateDoc(doc(db, 'rides', currentRideId), { status: 'cancelled_by_passenger', canceledAt: new Date().getTime() });
+      await AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setOffers([]);
+    } catch (error) { }
+  };
+
+  const submitRating = async () => {
+    setRatingSubmitted(true); setTimeout(() => { setIsRatingModalVisible(false); setRideToRate(null); }, 2000);
+  };
+
+  const handleCallClick = () => {
+    if (!captainInfo.phone || captainInfo.phone === 'غير مسجل') return Alert.alert('تنبيه', 'رقم الكابتن غير متوفر');
+    setPhoneToCall(captainInfo.phone); setIsCallModalVisible(true);
+  };
+
+  const handleLogout = async () => {
+    await AsyncStorage.removeItem('currentPassengerId'); await AsyncStorage.removeItem('active_ride'); router.replace('/passenger-login');
+  };
+
+  const sendLocationToWhatsApp = async (phoneToUse: string) => {
+    setIsSendingLocation(true);
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('تنبيه', 'نحتاج صلاحية الموقع لإرسال مسار الرحلة للطوارئ'); setIsSendingLocation(false); return; }
+      const trackingLink = `https://badr-cute.web.app/?ride=${currentRideId}`;
+      const message = `أنا حالياً في رحلة مع تطبيق براق .\nتتبع مساري (لايف) من هنا لأسباب الأمان :\n${trackingLink}`;
+      const whatsappUrl = `https://wa.me/${phoneToUse}?text=${encodeURIComponent(message)}`;
+      try { await Linking.openURL(whatsappUrl); } catch (err) { Alert.alert('تنبيه', 'تعذر فتح واتساب'); }
+    } catch (error) { Alert.alert('خطأ', 'حدثت مشكلة'); } finally { setIsSendingLocation(false); }
+  };
+
+  const sendSafetyLocation = () => {
+    if (!emergencyPhone) { setActionAfterSave(true); setTempEmergencyPhone(''); setIsEmergencyModalVisible(true); } 
+    else { sendLocationToWhatsApp(emergencyPhone); }
+  };
+
+  const saveEmergencyPhone = async () => {
+    if (tempEmergencyPhone.length < 10) return Alert.alert('تنبيه', 'أدخل رقم هاتف صحيح');
+    let formattedPhone = tempEmergencyPhone;
+    if (formattedPhone.startsWith('0')) formattedPhone = '+2' + formattedPhone;
+    await AsyncStorage.setItem('emergency_phone', formattedPhone);
+    setEmergencyPhone(formattedPhone);
+    setIsEmergencyModalVisible(false);
+    if (actionAfterSave) sendLocationToWhatsApp(formattedPhone);
+    else Alert.alert('نجاح', 'تم تحديث رقم الطوارئ');
+  };
+
+  const getCoordinatesFromText = async (text: string) => {
+    try {
+      const expoResult = await Location.geocodeAsync(text + ' مصر');
+      if (expoResult && expoResult.length > 0) return { latitude: expoResult[0].latitude, longitude: expoResult[0].longitude };
+    } catch (e) { }
+    return null;
+  };
+
+  const openChatScreen = async () => {
+    if (currentRideId) {
+      setUnreadChatCount(0);
+      await updateDoc(doc(db, 'rides', currentRideId), { unreadCountPassenger: 0 });
+      router.push({ pathname: '/chat', params: { senderType: 'passenger', rideId: currentRideId } });
+    }
+  };
+
+  const openScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const { status } = await requestCameraPermission();
+      if (status !== 'granted') return Alert.alert('تنبيه', 'نحتاج صلاحية الكاميرا');
+    }
+    setScanned(false); setIsScannerVisible(true);
+  };
+
+  const handleBarCodeScanned = async ({ data }: { data: string }) => {
+    setScanned(true);
+    if (!currentRideId) return; 
+    try {
+      const qrData = JSON.parse(data);
+      if (qrData.rideId === currentRideId) {
+        await updateDoc(doc(db, 'rides', currentRideId), { status: 'in_progress' });
+        setIsScannerVisible(false); Alert.alert('نجاح', 'بدأت الرحلة بنجاح');
+      } else { Alert.alert('خطأ', 'الكود غير مطابق'); }
+    } catch (error) { Alert.alert('خطأ', 'الكود غير صالح'); }
+  };
+
+  const notifyNewOffer = () => {
+    if (isVibrationEnabled) {
+      try { Vibration.vibrate([0, 500, 200, 500]); } catch (error) {}
+    }
+  };
+
+  useEffect(() => {
+    if (!passengerProfile || !passengerProfile.id) return;
+    const q = query(collection(db, 'notifications'), where('userId', '==', passengerProfile.id), where('read', '==', false));
+    const unsubscribe = onSnapshot(q, (snapshot) => { setUnreadNotifsCount(snapshot.docs.length); });
+    return () => unsubscribe();
+  }, [passengerProfile]);
+
   useEffect(() => {
     let unsubscribeNotif: any;
-    
     const listenToNotifications = async () => {
       const passengerId = await AsyncStorage.getItem('currentPassengerId');
       if (!passengerId) return;
-
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', passengerId),
-        where('userType', '==', 'passenger'),
-        where('read', '==', false)
-      );
-
+      const q = query(collection(db, 'notifications'), where('userId', '==', passengerId), where('userType', '==', 'passenger'), where('read', '==', false));
       unsubscribeNotif = onSnapshot(q, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const notif = change.doc.data();
-            const notifId = change.doc.id;
-
-            const codeMatch = notif.message ? notif.message.match(/استخدم الكود:\s*([A-Z0-9]+)/) : null;
-            const buttons: any[] = [];
-
-            if (codeMatch && codeMatch[1]) {
-              buttons.push({
-                text: 'نسخ الكود 📋',
-                onPress: async () => {
-                  await Clipboard.setStringAsync(codeMatch[1]);
-                  Alert.alert('تم بنجاح', `تم نسخ الكود (${codeMatch[1]}) وجاهز للاستخدام!`);
-                  try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
-                }
-              });
-            }
-
-            buttons.push({
-              text: codeMatch ? 'إغلاق' : 'حسناً',
-              style: 'cancel',
-              onPress: async () => {
-                try { await updateDoc(doc(db, 'notifications', notifId), { read: true }); } catch (e) {}
-              }
-            });
-            
-            Alert.alert(
-              notif.title || 'رسالة هامة من الإدارة 📩',
-              notif.message,
-              buttons
-            );
+            Alert.alert(notif.title || 'رسالة', notif.message, [{ text: 'حسناً', onPress: () => updateDoc(doc(db, 'notifications', change.doc.id), { read: true }) }]);
           }
         });
       });
     };
-
     listenToNotifications();
     return () => { if (unsubscribeNotif) unsubscribeNotif(); };
   }, []);
@@ -761,22 +846,12 @@ export default function PassengerHome() {
     const monitorSession = async () => {
       const userId = await AsyncStorage.getItem('currentPassengerId');
       const localSessionId = await AsyncStorage.getItem('currentSessionId');
-      
       if (!userId) return;
-
       unsubscribe = onSnapshot(doc(db, 'passengers', userId), async (docSnap) => {
         if (docSnap.exists()) {
           const dbSessionId = docSnap.data().sessionId;
           if (localSessionId && dbSessionId && dbSessionId !== localSessionId) {
-            Alert.alert('تنبيه ⚠', 'لقد تم فتح الحساب من جهاز آخر، سيتم تسجيل الخروج الآن.', [
-              { 
-                text: 'حسناً', 
-                onPress: async () => {
-                  await AsyncStorage.clear(); 
-                  router.replace('/passenger-login');
-                } 
-              }
-            ]);
+            Alert.alert('تنبيه ⚠', 'تم فتح الحساب من جهاز آخر', [{ text: 'حسناً', onPress: async () => { await AsyncStorage.clear(); router.replace('/passenger-login'); } }]);
           }
         }
       });
@@ -793,16 +868,11 @@ export default function PassengerHome() {
   }, [requestedVehicleType, requestedTuktukType]);
 
   let headerImageSource;
-  if (requestedVehicleType === 'car') {
-    headerImageSource = require('../../assets/images/car.png');
-  } else if (requestedVehicleType === 'scooter') {
-    headerImageSource = require('../../assets/images/scooter.png');
-  } else {
-    if (requestedTuktukType === 'كيوت 3 راكب') {
-      headerImageSource = require('../../assets/images/cute.png');
-    } else {
-      headerImageSource = require('../../assets/images/galaxy.png');
-    }
+  if (requestedVehicleType === 'car') headerImageSource = require('../../assets/images/car.png');
+  else if (requestedVehicleType === 'scooter') headerImageSource = require('../../assets/images/scooter.png');
+  else {
+    if (requestedTuktukType === 'كيوت 3 راكب') headerImageSource = require('../../assets/images/cute.png');
+    else headerImageSource = require('../../assets/images/galaxy.png');
   }
 
   useEffect(() => {
@@ -821,14 +891,9 @@ export default function PassengerHome() {
         const firebaseData = docSnap.data();
         if (firebaseData.status === 'pending') {
           setRideStatus('searching');
-          
           const currentOffers = firebaseData.offers || [];
-          
-          if (currentOffers.length > prevOffersCountRef.current) {
-            notifyNewOffer();
-          }
+          if (currentOffers.length > prevOffersCountRef.current) notifyNewOffer();
           prevOffersCountRef.current = currentOffers.length;
-          
           setOffers(currentOffers);
         }
         setUnreadChatCount(firebaseData.unreadCountPassenger || 0);
@@ -837,77 +902,15 @@ export default function PassengerHome() {
           setRideStatus(firebaseData.status);
           if (firebaseData.arrivedAt) setRideArrivedAt(firebaseData.arrivedAt); 
           setPrice(firebaseData.price ? String(firebaseData.price) : '');
-          
-          if (firebaseData.destinationsList && firebaseData.destinationsList.length > 0) {
-            setDestinations(firebaseData.destinationsList);
-          }
-
-          setCaptainInfo({
-            name: firebaseData.captainName || 'كابتن',
-            phone: firebaseData.captainPhone || 'غير مسجل',
-            vehicle: firebaseData.captainVehicle || 'مركبة',
-            avatar: getSafeAvatar(firebaseData.captainAvatar),
-            vehicleImage: getSafeAvatar(firebaseData.captainVehicleImage),
-            plateNumber: firebaseData.captainPlateNumber || ''
-          });
-          
+          if (firebaseData.destinationsList && firebaseData.destinationsList.length > 0) setDestinations(firebaseData.destinationsList);
+          setCaptainInfo({ name: firebaseData.captainName || 'كابتن', phone: firebaseData.captainPhone || 'غير مسجل', vehicle: firebaseData.captainVehicle || 'مركبة', avatar: getSafeAvatar(firebaseData.captainAvatar), vehicleImage: getSafeAvatar(firebaseData.captainVehicleImage), plateNumber: firebaseData.captainPlateNumber || '' });
           let loc = firebaseData.liveCoords || firebaseData.captainCoords || firebaseData.captainLocation;
-          if (!loc && firebaseData.offers && firebaseData.offers.length > 0) {
-            const acceptedOffer = firebaseData.offers.find((o: any) => o.captainId === firebaseData.captainId);
-            if (acceptedOffer && acceptedOffer.captainLocation) {
-              loc = acceptedOffer.captainLocation;
-            }
-          }
-          if (loc) {
-            setCaptainLiveCoords(loc);
-          }
-
-          if (firebaseData.pendingModification) {
-            const mod = firebaseData.pendingModification;
-            if (mod.status === 'accepted' && !mod.notifiedPassenger) {
-              setDestinations(mod.newDestinationsList);
-              setPrice(mod.newPrice);
-              
-              AsyncStorage.getItem('active_ride').then(savedRideStr => {
-                if (savedRideStr) {
-                  const savedRide = JSON.parse(savedRideStr);
-                  savedRide.destinationsList = mod.newDestinationsList;
-                  savedRide.destinationLocation = mod.newDestinationLocation;
-                  savedRide.price = mod.newPrice;
-                  savedRide.distance = mod.newDistance;
-                  AsyncStorage.setItem('active_ride', JSON.stringify(savedRide));
-                }
-              });
-
-              Alert.alert('موافقة الكابتن ✅', 'وافق الكابتن على تعديل الوجهة، وتم تحديث السعر والمسار بنجاح.');
-              updateDoc(doc(db, 'rides', currentRideId), { 'pendingModification.notifiedPassenger': true }).catch(()=>{});
-            } else if (mod.status === 'rejected' && !mod.notifiedPassenger) {
-              Alert.alert('رفض التعديل ❌', 'عذراً، لم يوافق الكابتن على تغيير الوجهة. ستستمر الرحلة كالمعتاد بالوجهة الأصلية.');
-              updateDoc(doc(db, 'rides', currentRideId), { 'pendingModification.notifiedPassenger': true }).catch(()=>{});
-            }
-          }
-} else if (firebaseData.status === 'completed') {
-          setRideToRate({ firebaseData, id: currentRideId });
-          setIsRatingModalVisible(true);
-          AsyncStorage.removeItem('active_ride'); setCurrentRideId(null);
-          setRideStatus('idle');
-          setPickup(''); setPickupCoords(null); setDestinations(['']);
-          setPrice(''); setOffers([]);
-          prevOffersCountRef.current = 0;
-          setUnreadChatCount(0); setNotes(''); setLatestMessage('');
-          setNumericSecret('');
-          setPromoCodeInput(''); // 👈 تفريغ الكود بعد الرحلة الناجحة
-          setAppliedPromo(null); // 👈 إلغاء تفعيل الخصم
+          if (loc) setCaptainLiveCoords(loc);
+        } else if (firebaseData.status === 'completed') {
+          setRideToRate({ firebaseData, id: currentRideId }); setIsRatingModalVisible(true);
+          AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setOffers([]); prevOffersCountRef.current = 0; setUnreadChatCount(0); setNotes(''); setLatestMessage(''); setNumericSecret(''); setPromoCodeInput(''); setAppliedPromo(null); 
         } else if (firebaseData.status === 'canceled') {
-          AsyncStorage.removeItem('active_ride'); setCurrentRideId(null);
-          setRideStatus('idle');
-          setPickup(''); setPickupCoords(null); setDestinations(['']);
-          setPrice(''); setOffers([]);
-          prevOffersCountRef.current = 0;
-          setUnreadChatCount(0); setNotes(''); setLatestMessage('');
-          setNumericSecret('');
-          setPromoCodeInput(''); // 👈 تفريغ الكود لو الرحلة اتلغت
-          setAppliedPromo(null); // 👈 إلغاء تفعيل الخصم
+          AsyncStorage.removeItem('active_ride'); setCurrentRideId(null); setRideStatus('idle'); setPickup(''); setPickupCoords(null); setDestinations(['']); setPrice(''); setOffers([]); prevOffersCountRef.current = 0; setUnreadChatCount(0); setNotes(''); setLatestMessage(''); setNumericSecret(''); setPromoCodeInput(''); setAppliedPromo(null); 
         }
       }
     });
@@ -918,10 +921,7 @@ export default function PassengerHome() {
     if (!currentRideId) return;
     const q = query(collection(db, 'rides', currentRideId, 'messages'), orderBy('timestamp', 'desc'), limit(1));
     const unsubscribeMsgs = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        const msg = snap.docs[0].data();
-        if (msg.sender === 'captain') setLatestMessage(msg.text);
-      }
+      if (!snap.empty) { const msg = snap.docs[0].data(); if (msg.sender === 'captain') setLatestMessage(msg.text); }
     });
     return () => unsubscribeMsgs();
   }, [currentRideId]);
@@ -932,9 +932,7 @@ export default function PassengerHome() {
         Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: false }),
         Animated.timing(pulseAnim, { toValue: 0, duration: 600, useNativeDriver: false })
       ])).start();
-    } else {
-      pulseAnim.setValue(0);
-    }
+    } else pulseAnim.setValue(0);
   }, [rideStatus]);
 
   useEffect(() => {
@@ -958,10 +956,7 @@ export default function PassengerHome() {
         Animated.timing(chatPulseAnim, { toValue: 1, duration: 400, useNativeDriver: false }),
         Animated.timing(chatPulseAnim, { toValue: 0, duration: 400, useNativeDriver: false })
       ])).start();
-    } else {
-      chatPulseAnim.stopAnimation();
-      chatPulseAnim.setValue(0);
-    }
+    } else { chatPulseAnim.stopAnimation(); chatPulseAnim.setValue(0); }
   }, [unreadChatCount]);
 
   useEffect(() => {
@@ -988,765 +983,6 @@ export default function PassengerHome() {
 
   const backgroundColorInterpolate = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#064e3b', '#10b981'] });
   const chatBackgroundColor = chatPulseAnim.interpolate({ inputRange: [0, 1], outputRange: ['#8b5cf6', '#000000'] });
-
-  const openChatScreen = async () => {
-    if (currentRideId) {
-      setUnreadChatCount(0);
-      await updateDoc(doc(db, 'rides', currentRideId), { unreadCountPassenger: 0 });
-      router.push({ pathname: '/chat', params: { senderType: 'passenger', rideId: currentRideId } });
-    }
-  };
-
-  const openScanner = async () => {
-    if (!cameraPermission?.granted) {
-      const { status } = await requestCameraPermission();
-      if (status !== 'granted') { Alert.alert('تنبيه', 'نحتاج صلاحية الكاميرا لمسح الكود لتأكيد بدء الرحلة'); return; }
-    }
-    setScanned(false);
-    setIsScannerVisible(true);
-  };
-
-  const handleBarCodeScanned = async ({ data }: { data: string }) => {
-    setScanned(true);
-    if (!currentRideId) return; 
-    try {
-      const qrData = JSON.parse(data);
-      if (qrData.rideId === currentRideId) {
-        const rideDoc = await getDoc(doc(db, 'rides', currentRideId));
-        if (rideDoc.exists() && rideDoc.data().qrSecret === qrData.token) {
-          await updateDoc(doc(db, 'rides', currentRideId), { status: 'in_progress' });
-          setIsScannerVisible(false); Alert.alert('نجاح', 'تم تأكيد الكود بنجاح والرحلة بدأت الآن رحلة سعيدة');
-        } else {
-          Alert.alert('خطأ', 'الكود غير مطابق لهذه الرحلة', [{ text: 'إعادة المحاولة', onPress: () => setScanned(false) }]);
-        }
-      } else {
-        Alert.alert('خطأ', 'هذا الكود لا يخص هذه الرحلة', [{ text: 'إعادة المحاولة', onPress: () => setScanned(false) }]);
-      }
-    } catch (error) {
-      Alert.alert('خطأ', 'الكود الممسوح غير صالح', [{ text: 'حسناً', onPress: () => setScanned(false) }]);
-    }
-  };
-
-  const getCoordinatesFromText = async (text: string) => {
-    try {
-      const expoResult = await Location.geocodeAsync(text + ' مصر');
-      if (expoResult && expoResult.length > 0) {
-        return { latitude: expoResult[0].latitude, longitude: expoResult[0].longitude };
-      }
-    } catch (e) { }
-
-    try {
-      const osmResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(text + ' مصر')}&format=json&limit=1`, {
-        headers: {
-          'User-Agent': 'BuraqPassengerApp/1.0',
-          'Accept-Language': 'ar'
-        }
-      });
-      const osmData = await osmResponse.json();
-      if (osmData && osmData.length > 0) {
-        return { latitude: parseFloat(osmData[0].lat), longitude: parseFloat(osmData[0].lon) };
-      }
-    } catch (e) { }
-    return null;
-  };
-
-  const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
-    if (!tiers || tiers.length === 0) return 0;
-    
-    const sortedTiers = [...tiers].sort((a, b) => parseFloat(a.upToKm) - parseFloat(b.upToKm));
-    
-    let totalFare = 0;
-    let remainingDistance = distanceKm;
-    let previousTierLimit = 0;
-
-    for (let i = 0; i < sortedTiers.length; i++) {
-      const currentTierLimit = parseFloat(sortedTiers[i].upToKm);
-      const tierPricePerKm = parseFloat(sortedTiers[i].price);
-      
-      const distanceInThisTier = Math.min(remainingDistance, currentTierLimit - previousTierLimit);
-      
-      if (distanceInThisTier > 0) {
-        totalFare += distanceInThisTier * tierPricePerKm;
-        remainingDistance -= distanceInThisTier;
-      }
-      
-      previousTierLimit = currentTierLimit;
-      if (remainingDistance <= 0) break;
-    }
-    return totalFare;
-  };
-
-  const fallbackCalculation = (validDests: string[], vType: string, passCountStr: string) => {
-     let base = 0;
-     if (vType === 'car') {
-        base = 35 + ((validDests.length - 1) * 20);
-     }
-     else if (vType === 'scooter') {
-        base = 12 + ((validDests.length - 1) * 5);
-     }
-     else {
-        let basePriceForOne = 15 + ((validDests.length - 1) * 6.5);
-        const count = parseInt(passCountStr) || 1;
-        const extraPassengers = count - 1;
-        const passengerMultiplier = 1 + (extraPassengers * 0.25);
-        base = basePriceForOne * passengerMultiplier;
-     }
-
-     let finalBase = Math.ceil(base);
-     setCalculatedBasePrice(finalBase); 
-     setBasePriceForSuggestions(finalBase);
-     setCalculatedDistance('0'); 
-     setPrice(finalBase.toString());
-  };
-
-  const updatePriceCalculation = async (pickupText: string, dests: string[], vType: string = requestedVehicleType, passCountStr: string = passengersCount, overrideStartCoords: any = null) => {
-    const validDests = dests.filter(d => d.trim().length > 0);
-    
-    if (pickupText.trim().length > 0 && validDests.length > 0) {
-      setIsCalculatingPrice(true);
-      try {
-        let startCoords = overrideStartCoords || pickupCoords;
-        if (!startCoords && pickupText !== 'موقعي الحالي') {
-          startCoords = await getCoordinatesFromText(pickupText);
-        }
-
-        let destsCoords: any[] = [];
-        for (let dest of validDests) {
-          const coords = await getCoordinatesFromText(dest);
-          if (coords) destsCoords.push(coords);
-        }
-
-        if (startCoords && destsCoords.length === validDests.length) {
-          let totalDistanceKm = 0;
-          let osrmSuccess = false;
-
-          try {
-            let coordsString = `${startCoords.longitude},${startCoords.latitude}`;
-            destsCoords.forEach((c: any) => { coordsString += `;${c.longitude},${c.latitude}`; });
-            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=false`;
-            
-            const response = await fetch(osrmUrl);
-            const data = await response.json();
-
-            if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-               totalDistanceKm = data.routes[0].distance / 1000;
-               osrmSuccess = true;
-            }
-          } catch (osrmError) {
-             console.log("OSRM API failed, switching to fallback");
-          }
-
-          let legsDistances: number[] = [];
-          let totalDirectMeters = 0;
-          let currentPoint = startCoords;
-          for (let dest of destsCoords) {
-            let d = calculateDistance(currentPoint.latitude, currentPoint.longitude, dest.latitude, dest.longitude);
-            legsDistances.push(d);
-            totalDirectMeters += d;
-            currentPoint = dest;
-          }
-
-          if (!osrmSuccess) {
-            totalDistanceKm = (totalDirectMeters / 1000) * 1.35; 
-          }
-
-          if (totalDistanceKm > 0) {
-             setCalculatedDistance(totalDistanceKm.toFixed(1));
-
-             let calculatedPrice = 0;
-             let appSettings: any = {
-                car: { baseFare: 15, minFare: 20, tiers: [{ upToKm: '5', price: '4.4' }, { upToKm: '999', price: '4.0' }] },
-                tuktuk: { baseFare: 10, minFare: 15, tiers: [{ upToKm: '5', price: '6.5' }, { upToKm: '999', price: '6.0' }] },
-                scooter: { baseFare: 12, minFare: 12, tiers: [{ upToKm: '5', price: '3.75' }, { upToKm: '999', price: '3.5' }] }
-             };
-             
-             try {
-                const settingsSnap = await getDoc(doc(db, 'app_settings', 'pricing'));
-                if (settingsSnap.exists()) {
-                  const data = settingsSnap.data();
-                  appSettings = {
-                    car: { baseFare: Number(data.car?.baseFare || 15), minFare: Number(data.car?.minFare || 20), tiers: data.car?.tiers || appSettings.car.tiers },
-                    tuktuk: { baseFare: Number(data.tuktuk?.baseFare || 10), minFare: Number(data.tuktuk?.minFare || 15), tiers: data.tuktuk?.tiers || appSettings.tuktuk.tiers },
-                    scooter: { baseFare: Number(data.scooter?.baseFare || 12), minFare: Number(data.scooter?.minFare || 12), tiers: data.scooter?.tiers || appSettings.scooter.tiers }
-                  };
-                }
-             } catch(e) { console.log("Failed to load settings, using defaults."); }
-
-             if (vType === 'car') {
-               const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.car.tiers);
-               calculatedPrice = Math.max(appSettings.car.minFare, appSettings.car.baseFare + distanceFare);
-             } else if (vType === 'scooter') {
-               const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.scooter.tiers);
-               calculatedPrice = Math.max(appSettings.scooter.minFare, appSettings.scooter.baseFare + distanceFare);
-             } else {
-               const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
-               let basePriceForOne = Math.max(appSettings.tuktuk.minFare, appSettings.tuktuk.baseFare + distanceFare);
-               
-               const count = parseInt(passCountStr) || 1;
-               const extraPassengers = count - 1;
-               const passengerMultiplier = 1 + (extraPassengers * 0.25); 
-               calculatedPrice = basePriceForOne * passengerMultiplier;
-             }
-
-             let finalBase = Math.ceil(calculatedPrice);
-             setCalculatedBasePrice(finalBase);
-             setBasePriceForSuggestions(finalBase);
-             setPrice(finalBase.toString());
-             
-             let destPricesList = [];
-             let accumulated = 0;
-             for(let i = 0; i < validDests.length; i++) {
-                if(i === validDests.length - 1) {
-                   destPricesList.push(finalBase - accumulated); 
-                } else {
-                   let legPrice = Math.round((legsDistances[i] / totalDirectMeters) * finalBase) || 0;
-                   destPricesList.push(legPrice);
-                   accumulated += legPrice;
-                }
-             }
-             setDestinationsPrices(destPricesList);
-
-             setIsCalculatingPrice(false);
-             return; 
-          }   
-        }
-        
-        fallbackCalculation(validDests, vType, passCountStr);
-        
-      } catch(e) {
-         fallbackCalculation(validDests, vType, passCountStr);
-      } finally {
-         setIsCalculatingPrice(false);
-      }
-    } else {
-      setCalculatedBasePrice(0); setBasePriceForSuggestions(0); setPrice(''); setCalculatedDistance('0');
-      setIsCalculatingPrice(false);
-    }
-  };
-
-  const handleGetCurrentLocation = async () => {
-    setIsFetchingLocation(true);
-    try {
-      let servicesEnabled = await Location.hasServicesEnabledAsync();
-      if (!servicesEnabled) {
-        Alert.alert('تنبيه', 'الـ GPS مغلق برجاء سحب الشاشة وتفعيله');
-        setIsFetchingLocation(false);
-        return;
-      }
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('صلاحية مفقودة', 'برجاء السماح للتطبيق بالوصول لموقعك');
-        setIsFetchingLocation(false);
-        return;
-      }
-      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const currentCoords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
-      setPickupCoords(currentCoords); 
-
-      let geocode = await Location.reverseGeocodeAsync(currentCoords);
-      let addressText = 'موقعي الحالي';
-      if (geocode && geocode.length > 0) {
-        const place = geocode[0];
-        const address = [place.street, place.subregion || place.district, place.city].filter(Boolean).join(', ');
-        addressText = address.trim() ? address : `موقعي الحالي (${currentCoords.latitude.toFixed(4)})`;
-      }
-      
-      setPickup(addressText);
-      
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      setIsCalculatingPrice(true);
-      debounceTimer.current = setTimeout(() => {
-        updatePriceCalculation(addressText, destinations, requestedVehicleType, passengersCount, currentCoords);
-      }, 1500);
-
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء التقاط إشارة الـ GPS');
-    } finally {
-      setIsFetchingLocation(false);
-    }
-  };
-
-  const handlePickupChange = (text: string) => {
-    setPickup(text);
-    setPickupCoords(null);
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    setIsCalculatingPrice(true);
-    debounceTimer.current = setTimeout(() => {
-      updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, null);
-    }, 1500);
-  };
-
-  const handleDestinationChange = (text: string, index: number) => {
-    const newDests = [...destinations];
-    newDests[index] = text;
-    setDestinations(newDests);
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    setIsCalculatingPrice(true);
-    debounceTimer.current = setTimeout(() => {
-      updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords);
-    }, 1500);
-  };
-
-  const addDestination = () => {
-    if (destinations.length < 3) {
-      setDestinations([...destinations, '']);
-    } else {
-      Alert.alert('تنبيه', 'الحد الأقصى هو 3 وجهات في الرحلة الواحدة.');
-    }
-  };
-
-  const removeDestination = (index: number) => {
-    const newDests = [...destinations];
-    newDests.splice(index, 1);
-    setDestinations(newDests);
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    setIsCalculatingPrice(true);
-    debounceTimer.current = setTimeout(() => {
-      updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords);
-    }, 1500);
-  };
-
-  const [isEditDestModalVisible, setIsEditDestModalVisible] = useState(false);
-  const [tempDestinations, setTempDestinations] = useState<string[]>(['']);
-
-  const openEditDestModal = () => {
-    setTempDestinations([...destinations]);
-    setIsEditDestModalVisible(true);
-  };
-
-  const handleTempDestChange = (text: string, index: number) => {
-    const newDests = [...tempDestinations];
-    newDests[index] = text;
-    setTempDestinations(newDests);
-  };
-
-  const addTempDest = () => {
-    if (tempDestinations.length < 3) setTempDestinations([...tempDestinations, '']);
-  };
-
-  const removeTempDest = (index: number) => {
-    const newDests = [...tempDestinations];
-    newDests.splice(index, 1);
-    setTempDestinations(newDests);
-  };
-
-  const openEditPriceModal = () => {
-    const validDests = destinations.filter(d => d.trim().length > 0);
-    if (!pickup || validDests.length === 0) {
-      Alert.alert('تنبيه', 'برجاء إدخال الانطلاق والوجهة أولاً');
-      return;
-    }
-    setTempPrice(price);
-    setIsEditModalVisible(true);
-  };
-
-  const saveNewPrice = async () => {
-    const minAllowedPrice = Math.floor(calculatedBasePrice * 0.80);
-    const savedNewPrice = parseInt(tempPrice) || 0;
-    if (savedNewPrice < minAllowedPrice) {
-      Alert.alert('تنبيه', `لا يمكن أن يقل السعر عن ${minAllowedPrice}`);
-      return;
-    }
-    
-    setPrice(tempPrice);
-    setBasePriceForSuggestions(savedNewPrice);
-    setIsEditModalVisible(false);
-    
-    try {
-      const tempModStr = await AsyncStorage.getItem('temp_mod_payload');
-      if (tempModStr && currentRideId) {
-        const modPayload = JSON.parse(tempModStr);
-        modPayload.newPrice = tempPrice.toString();
-        modPayload.timestamp = new Date().getTime();
-        
-        if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(rideStatus)) {
-          await updateDoc(doc(db, 'rides', currentRideId), { pendingModification: modPayload });
-          Alert.alert('تم الإرسال 📨', 'تم إرسال طلب تعديل الوجهة والسعر الجديد للكابتن للموافقة.');
-        } else {
-          setDestinations(modPayload.newDestinationsList);
-          await updateDoc(doc(db, 'rides', currentRideId), {
-            destinationsList: modPayload.newDestinationsList,
-            destinationLocation: modPayload.newDestinationLocation,
-            distance: modPayload.newDistance,
-            price: tempPrice.toString(),
-            calculatedBasePrice: modPayload.calculatedBasePrice,
-            timestamp: new Date().getTime(),
-            offers: []
-          });
-          Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر وإرسالها للكباتن.');
-        }
-        await AsyncStorage.removeItem('temp_mod_payload');
-        return; 
-      }
-
-      const savedRide = await AsyncStorage.getItem('active_ride');
-      if (savedRide) {
-        const data = JSON.parse(savedRide);
-        data.price = tempPrice;
-        await AsyncStorage.setItem('active_ride', JSON.stringify(data));
-        if (data.id) await updateDoc(doc(db, 'rides', data.id), { price: tempPrice });
-      }
-    } catch (e) {}
-  };
-
-  const verifyPromoCode = async () => {
-    if (!promoCodeInput.trim()) return;
-    setIsVerifyingPromo(true);
-
-    try {
-      const settingsSnap = await getDoc(doc(db, 'app_settings', 'pricing'));
-      const settingsData = settingsSnap.data();
-      const promoCodesList = settingsData?.promoCodes || [];
-
-      const promo = promoCodesList.find((p: any) => p.code === promoCodeInput.toUpperCase().trim());
-
-      if (!promo) {
-        Alert.alert('خطأ', 'الكود غير صحيح أو غير موجود.');
-        setIsVerifyingPromo(false); return;
-      }
-
-      if (promo.userType !== 'passenger') {
-        Alert.alert('عذراً', 'هذا الكود غير مخصص للركاب.');
-        setIsVerifyingPromo(false); return;
-      }
-
-      if (promo.scope === 'specific' && !promo.selectedUsers?.includes(passengerProfile.id)) {
-        Alert.alert('عذراً', 'هذا الكود غير مخصص لحسابك.');
-        setIsVerifyingPromo(false); return;
-      }
-
-      if (promo.expiryDate) {
-        const today = new Date().toISOString().split('T')[0];
-        if (today > promo.expiryDate) {
-          Alert.alert('عذراً', 'لقد انتهت صلاحية هذا الكود.');
-          setIsVerifyingPromo(false); return;
-        }
-      }
-
-      const userRef = doc(db, 'passengers', passengerProfile.id);
-      const userSnap = await getDoc(userRef);
-      const usedCodes = userSnap.data()?.usedPromoCodes || [];
-
-      if (usedCodes.includes(promo.code)) {
-        Alert.alert('عذراً', 'لقد قمت باستخدام هذا الكود من قبل.');
-        setIsVerifyingPromo(false); return;
-      }
-
-      setAppliedPromo(promo);
-      Alert.alert('مبروك! 🎉', `تم تفعيل الخصم بنجاح: ${promo.discountValue} جنيه سيتم خصمها من ثمن الرحلة.`);
-      
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء تفعيل الكود.');
-    } finally {
-      setIsVerifyingPromo(false);
-    }
-  };
-
-  const handleSearchCaptain = async () => {
-    if (isSubmitting) return;
-
-    const validDests = destinations.filter(d => d.trim() !== '');
-    if (!pickup || validDests.length === 0 || !price) {      
-      Alert.alert('تنبيه', 'برجاء إدخال بيانات الرحلة كاملاً');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setRideStatus('searching');
-    setOffers([]);
-    prevOffersCountRef.current = 0; 
-    
-    let finalPickupCoords = pickupCoords;
-    if (!finalPickupCoords) {
-      try {
-        const geocoded = await Location.geocodeAsync(pickup + ' مصر');
-        if (geocoded.length > 0) finalPickupCoords = { latitude: geocoded[0].latitude, longitude: geocoded[0].longitude };
-      } catch (error) {}
-    }
-    try {
-      const rideData = {
-        passengerId: passengerProfile.id || await AsyncStorage.getItem('currentPassengerId'),
-        name: passengerProfile.name,
-        phone: passengerProfile.phone,
-        isPhoneHidden: passengerProfile.hidePhoneNumber || false,
-        avatar: getSafeAvatar(passengerProfile.avatar),
-        passengerRating: passengerProfile.averageRating,
-        passengerRatingCount: passengerProfile.ratingCount,
-        pickupLocation: pickup,
-        pickupCoords: finalPickupCoords,
-        destinationsList: validDests,
-        destinationLocation: validDests.join(' '),
-        price: price,
-        calculatedBasePrice: calculatedBasePrice, 
-        distance: calculatedDistance, 
-        discountAmount: appliedPromo ? appliedPromo.discountValue : '0', 
-        promoCodeUsed: appliedPromo ? appliedPromo.code : null, 
-        numericSecret: Math.floor(1000 + Math.random() * 9000).toString(),
-        qrSecret: Math.random().toString(36).substring(2, 10),
-        notes: notes.trim(),
-        requestedVehicleType,
-        requestedTuktukType: requestedVehicleType === 'tuktuk_alt' ? requestedTuktukType : null,
-        passengersCount: requestedVehicleType === 'tuktuk_alt' ? passengersCount : null,
-        destinationsPrices: destinationsPrices.length > 0 ? destinationsPrices : [parseInt(price) || 0],
-        paymentMethod: paymentMethod,
-        offers: [],
-        status: 'pending',
-        timestamp: new Date().getTime(),
-        unreadCountPassenger: 0,
-        unreadCountCaptain: 0
-      };
-      const docRef = await addDoc(collection(db, 'rides'), rideData);
-      await AsyncStorage.setItem('active_ride', JSON.stringify({ ...rideData, id: docRef.id }));
-      setCurrentRideId(docRef.id);
-      Alert.alert('نجاح', 'تم إرسال الطلب، في انتظار عروض الكباتن...');
-
-      try {
-        let captainsQuery;
-        if (requestedVehicleType === 'tuktuk_alt') {
-          captainsQuery = query(
-            collection(db, 'captains'), 
-            where('vehicleCategory', '==', 'tuktuk_alt'),
-            where('tuktukAltType', '==', requestedTuktukType)
-          );
-        } else {
-          captainsQuery = query(
-            collection(db, 'captains'), 
-            where('vehicleCategory', '==', requestedVehicleType)
-          );
-        }
-        
-        const captainsSnapshot = await getDocs(captainsQuery);
-        captainsSnapshot.forEach((docSnap) => {
-          const captainData = docSnap.data();
-          if (captainData.pushToken) {
-            sendPushNotification(captainData.pushToken, passengerProfile.name || 'راكب جديد', pickup);
-          }
-        });
-      } catch (notifyError) {
-        console.log("فشل في إرسال الإشعارات:", notifyError);
-      }
-    } catch (error) {
-      setRideStatus('idle');
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال الطلب');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const acceptCaptainOffer = async (offer: any) => {
-    try {
-      const savedRideStr = await AsyncStorage.getItem('active_ride');
-      const savedRide = savedRideStr ? JSON.parse(savedRideStr) : {};
-      let rideId = currentRideId || savedRide.id;
-      
-      if (!rideId) { 
-        Alert.alert('خطأ', 'بيانات الرحلة مفقودة'); 
-        return; 
-      }
-
-      if (!pickupCoords && savedRide.pickupCoords) {
-        setPickupCoords(savedRide.pickupCoords);
-      }
-
-      const cleanData: any = { 
-        status: 'accepted', 
-        price: String(offer?.price || price || '0'), 
-        captainId: String(offer?.captainId || 'unknown'),
-        captainName: String(offer?.captainName || 'غير مسجل'),
-        captainPhone: String(offer?.captainPhone || ''),
-        captainVehicle: String(offer?.captainVehicle || 'مركبة'),
-        captainAvatar: getSafeAvatar(offer?.captainAvatar),
-        captainPlateNumber: String(offer?.captainPlateNumber || ''),
-      };
-
-      if (cleanData.captainId !== 'unknown') {
-        const capDoc = await getDoc(doc(db, 'captains', cleanData.captainId));
-        if (capDoc.exists()) {
-          const capData = capDoc.data();
-          const loc = capData.location || capData.liveCoords || capData.coords || offer?.captainLocation;
-          if (loc) {
-            cleanData.captainLocation = loc; 
-            cleanData.captainCoords = loc;
-            setCaptainLiveCoords(loc); 
-          }
-        }
-      }
-
-      await setDoc(doc(db, 'rides', rideId), cleanData, { merge: true }); 
-      setPrice(cleanData.price);
-      
-      await AsyncStorage.setItem('active_ride', JSON.stringify({ ...savedRide, ...cleanData }));
-
-      if (appliedPromo) {
-        await updateDoc(doc(db, 'passengers', passengerProfile.id), {
-          usedPromoCodes: arrayUnion(appliedPromo.code)
-        });
-      }
-
-    } catch (error) {}
-  };
-
-  const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
-
-  const rejectCaptainOffer = async (offerToReject: any) => {
-    setOffers(prev => prev.filter(o => o.captainId !== offerToReject.captainId));
-    try {
-      let rideId = currentRideId || JSON.parse(await AsyncStorage.getItem('active_ride') || '{}').id;
-      if (!rideId) return;
-      const rideRef = doc(db, 'rides', rideId);
-      const rideSnap = await getDoc(rideRef);
-      if (rideSnap.exists()) {
-        const currentOffers = rideSnap.data().offers || [];
-        const updatedOffers = currentOffers.filter((o: any) => o.captainId !== offerToReject.captainId);
-        await updateDoc(rideRef, { offers: updatedOffers });
-        
-        await addDoc(collection(db, 'notifications'), {
-          userId: offerToReject.captainId,
-          userType: 'captain',
-          title: 'تم رفض العرض ❌',
-          message: 'عذراً، لقد قام الراكب برفض عرضك لأن السعر غير مناسب.',
-          read: false,
-          timestamp: new Date().getTime()
-        });
-      }
-    } catch (error) {
-      console.log("Error rejecting offer:", error);
-    }
-  };
-
-  useEffect(() => {
-    if (autoAcceptEnabled && rideStatus === 'searching' && offers.length > 0) {
-      const myPrice = parseInt(price) || 0;
-      
-      offers.forEach(o => {
-        const offerPrice = parseInt(o.price) || 0;
-        if (offerPrice <= myPrice) {
-          acceptCaptainOffer(o);
-        } else {
-          rejectCaptainOffer(o);
-        }
-      });
-    }
-  }, [offers, autoAcceptEnabled, price]);
-
-  const notifyPassengerOnTheWay = async () => {
-    if (!currentRideId) return;
-    try { 
-      await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); 
-      activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
-    } catch (error) {}
-  };
-
-const handleCancelRide = async () => {
-    if (!currentRideId) return;
-
-    try {
-      await updateDoc(doc(db, 'rides', currentRideId), {
-        status: 'cancelled_by_passenger',
-        canceledAt: new Date().getTime()
-      });
-      
-      await AsyncStorage.removeItem('active_ride');
-      setCurrentRideId(null);
-      setRideStatus('idle');
-      setOffers([]);
-      prevOffersCountRef.current = 0;
-      setPromoCodeInput(''); // 👈 تفريغ خانة الكود المكتوب
-      setAppliedPromo(null); // 👈 إلغاء تفعيل الخصم من الذاكرة
-
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء إلغاء الرحلة');
-    }
-  };
-
-  const submitRating = async () => {
-    if (rating === 0) return;
-    try {
-      const targetCaptainId = rideToRate?.captainId || rideToRate?.firebaseData?.captainId || '';
-
-      await addDoc(collection(db, 'ratings'), {
-        rideId: rideToRate?.id,
-        captainId: targetCaptainId,
-        passengerId: passengerProfile.id,
-        senderName: passengerProfile.name || 'راكب',
-        rating: rating,
-        reason: [...selectedTags, ratingReason.trim()].filter(Boolean).join(' - ') || (rating === 5 ? 'ممتاز' : 'تقييم منخفض'),
-        timestamp: new Date().getTime(),
-        type: 'passenger_rating_captain'
-      });
-
-      if (rideToRate?.id) {
-        const finalReason = [...selectedTags, ratingReason.trim()].filter(Boolean).join(' - ') || (rating === 5 ? 'ممتاز' : 'تقييم منخفض');
-        await updateDoc(doc(db, 'rides', rideToRate.id), {
-          passengerRating: rating,
-          passengerRatingReason: finalReason
-        });
-      }
-      setRatingSubmitted(true);
-      setTimeout(() => {
-        setIsRatingModalVisible(false);
-        setRating(0);
-        setRatingReason('');
-        setSelectedTags([]);
-        setRatingSubmitted(false);
-        setRideToRate(null);
-      }, 2000);
-    } catch (error) {}
-  };
-
-  const handleCallClick = () => {
-    if (!captainInfo.phone || captainInfo.phone === 'غير مسجل') {
-      Alert.alert('تنبيه', 'رقم الكابتن غير متوفر');
-      return;
-    }
-    setPhoneToCall(captainInfo.phone);
-    setIsCallModalVisible(true);
-  };
-
-  const makeRegularCall = () => { setIsCallModalVisible(false); Linking.openURL(`tel:${phoneToCall}`); };
-  const makeFreeCall = () => { setIsCallModalVisible(false); Alert.alert('مكالمة مجانية', 'تتطلب ربط التطبيق بخدمة اتصالات خارجية'); };
-
-  const handleLogout = async () => {
-    await AsyncStorage.removeItem('currentPassengerId');
-    await AsyncStorage.removeItem('passenger_profile');
-    await AsyncStorage.removeItem('active_ride');
-    router.replace('/passenger-login');
-  };
-
-  const [actionAfterSave, setActionAfterSave] = useState(false);
-  const openEmergencyEdit = () => { setActionAfterSave(false); setTempEmergencyPhone(emergencyPhone); setIsEmergencyModalVisible(true); };
-
-  const saveEmergencyPhone = async () => {
-    if (tempEmergencyPhone.length < 10) { Alert.alert('تنبيه', 'أدخل رقم هاتف صحيح (مثال: ٠١٠١٢٣٤٥٦٧٨)'); return; }
-    let formattedPhone = tempEmergencyPhone;
-    if (formattedPhone.startsWith('0')) formattedPhone = '+2' + formattedPhone;
-    await AsyncStorage.setItem('emergency_phone', formattedPhone);
-    setEmergencyPhone(formattedPhone);
-    setIsEmergencyModalVisible(false);
-    if (actionAfterSave) sendLocationToWhatsApp(formattedPhone);
-    else Alert.alert('نجاح', 'تم تحديث رقم الطوارئ الخاص بك بنجاح');
-  };
-
-  const sendSafetyLocation = () => {
-    if (!emergencyPhone) { setActionAfterSave(true); setTempEmergencyPhone(''); setIsEmergencyModalVisible(true); } 
-    else { sendLocationToWhatsApp(emergencyPhone); }
-  };
-
-  const sendLocationToWhatsApp = async (phoneToUse: string) => {
-    setIsSendingLocation(true);
-    try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('تنبيه', 'نحتاج صلاحية الموقع لإرسال مسار الرحلة للطوارئ'); setIsSendingLocation(false); return; }
-      const trackingLink = `https://badr-cute.web.app/?ride=${currentRideId}`;
-      const message = `أنا حالياً في رحلة مع تطبيق براق .\nتتبع مساري (لايف) من هنا لأسباب الأمان :\n${trackingLink}`;
-      const whatsappUrl = `https://wa.me/${phoneToUse}?text=${encodeURIComponent(message)}`;
-      try { await Linking.openURL(whatsappUrl); } catch (err) { Alert.alert('تنبيه', 'تعذر فتح واتساب قد يكون التطبيق غير مثبت'); }
-    } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء محاولة تحديد وإرسال الموقع');
-    } finally {
-      setIsSendingLocation(false);
-    }
-  };
 
   return (
     <KeyboardAvoidingView style={[styles.container, isDarkMode && { backgroundColor: '#0f172a' }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1796,11 +1032,7 @@ const handleCancelRide = async () => {
           
           <View style={styles.requestHeaderRow}>
             <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>اطلب مشوارك الآن</Text>
-            <Animated.Image 
-              source={headerImageSource} 
-              style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} 
-              resizeMode="contain" 
-            />
+            <Animated.Image source={headerImageSource} style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} resizeMode="contain" />
           </View>
 
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>اختر نوع براقك</Text>
@@ -1831,40 +1063,147 @@ const handleCancelRide = async () => {
              </View>
           )}
 
-          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
-          <View style={styles.rowInputContainer}>
-            <TextInput style={[styles.inputWithButton, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569', color: '#ffffff' }]} placeholder="اكتب مكان الانطلاق" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} value={pickup} onChangeText={handlePickupChange} />
-            <TouchableOpacity style={styles.myLocationBtn} onPress={handleGetCurrentLocation} disabled={isFetchingLocation}>
+         <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
+          <View style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10, zIndex: 2000 }]}>
+            <View style={styles.modernDestRight}>
+              <Ionicons name="location" size={22} color="#10b981" />
+              <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>من</Text>
+              
+              <View style={{ flex: 1, zIndex: 2000 }}>
+                <GooglePlacesAutocomplete
+                  ref={pickupRef}
+                  placeholder="ابحث عن مكان الانطلاق..."
+                  fetchDetails={true}
+                  enablePoweredByContainer={false}
+                  isRowScrollable={false}
+                  onPress={(data: any, details: any = null) => {
+                    let text = data.description;
+                    setPickup(text);
+                    let coords = details?.geometry?.location ? { latitude: details.geometry.location.lat, longitude: details.geometry.location.lng } : null;
+                    if (coords) setPickupCoords(coords);
+                    
+                    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                    debounceTimer.current = setTimeout(() => updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, coords), 1500);
+                  }}
+                  query={{
+                    key: GOOGLE_MAPS_APIKEY,
+                    language: 'ar',
+                    components: 'country:eg',
+                  }}
+                  textInputProps={{
+                    placeholderTextColor: isDarkMode ? '#64748b' : '#9ca3af',
+                    onChangeText: (text: string) => { 
+                      setPickup(text);
+                      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                      debounceTimer.current = setTimeout(() => updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, null), 1500);
+                    },
+                  }}
+                  renderRow={(rowData: any) => (
+                    <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#cbd5e1' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                      {rowData.description}
+                    </Text>
+                  )}
+                  styles={{
+                    container: { flex: 0, width: '100%' },
+                    textInputContainer: { backgroundColor: 'transparent', width: '100%', borderTopWidth: 0, borderBottomWidth: 0, flexDirection: 'row-reverse', alignItems: 'center' },
+                    textInput: { height: 45, color: '#ffffff', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', paddingHorizontal: 10 },
+                    listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
+                    row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
+                  }}
+                />
+              </View>
+            </View>
+            <TouchableOpacity style={[styles.myLocationBtn, { paddingVertical: 8, paddingHorizontal: 12, marginLeft: 5 }]} onPress={handleGetCurrentLocation} disabled={isFetchingLocation}>
               {isFetchingLocation ? <ActivityIndicator color="#ffffff" size="small" /> : <Text style={styles.myLocationBtnText}>موقعي</Text>}
             </TouchableOpacity>
           </View>
 
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الوجهة المطلوبة</Text>
           {destinations.map((dest, index) => (
-            <View key={index} style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10 }]}>
+            <View key={index} style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10, zIndex: 1000 - index }]}>
               <View style={styles.modernDestRight}>
                 <Ionicons name="search" size={22} color="#9ca3af" />
                 <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>
                   {index === 0 ? 'إلى' : 'ثم'}
                 </Text>
-                <TextInput 
-                  style={[styles.modernDestInput, isDarkMode && { color: '#ffffff' }]} 
-                  placeholder={index === 0 ? "ابحث عن وجهتك..." : "اكتب الوجهة الإضافية..."} 
-                  placeholderTextColor={isDarkMode ? '#64748b' : '#9ca3af'} 
-                  value={dest} 
-                  onChangeText={(text) => handleDestinationChange(text, index)} 
-                />
+                
+                <View style={{ flex: 1, zIndex: 999 }}>
+<GooglePlacesAutocomplete
+              placeholder="ابحث عن مكان الانطلاق..."
+              fetchDetails={true}
+              enablePoweredByContainer={false}
+              isRowScrollable={false} // 👈 هنا الحل
+              onPress={(data: any, details: any = null) => {
+                      handleDestinationChange(data.description, index);
+                    }}
+                    query={{
+                      key: GOOGLE_MAPS_APIKEY, // 👈 بياخد مفتاح جوجل اللي إنت ضايفه فوق
+                      language: 'ar',
+                      components: 'country:eg',
+                    }}
+                    textInputProps={{
+                      placeholderTextColor: isDarkMode ? '#64748b' : '#9ca3af',
+                      value: destinations[index] || '',
+                      onChangeText: (text: any) => {
+                        handleDestinationChange(text, index);
+                      }
+                    }}
+                    renderRow={(rowData: any) => (
+                      <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#cbd5e1' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                        {rowData.description}
+                      </Text>
+                    )}
+                    styles={{
+                      container: { flex: 0, width: '100%' },
+                      textInputContainer: { 
+                        backgroundColor: 'transparent', 
+                        width: '100%', 
+                        borderTopWidth: 0, 
+                        borderBottomWidth: 0,
+                        flexDirection: 'row-reverse',
+                        alignItems: 'center',
+                      }, 
+                      textInput: {
+                        height: 45,
+                        color: '#ffffff',
+                        backgroundColor: 'transparent',
+                        fontSize: 15,
+                        textAlign: 'right',
+                        paddingHorizontal: 10,
+                      },
+                      listView: {
+                        position: 'absolute',
+                        top: 48,
+                        width: SCREEN_WIDTH - 30,
+                        right: -45,
+                        zIndex: 9999,
+                        backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+                        borderRadius: 12,
+                        elevation: 10,
+                      },
+                      row: {
+                        paddingVertical: 12,
+                        paddingHorizontal: 15,
+                        flexDirection: 'row-reverse',
+                        alignItems: 'center',
+                        width: '100%',
+                        minHeight: 50,
+                      },
+                    }}
+                  />
+                </View>
               </View>
 
-              {index === 0 ? (
-                <TouchableOpacity style={styles.modernDestMapBtn} onPress={openMapForDestination}>
+              <View style={{ flexDirection: 'row-reverse', gap: 5 }}>
+                <TouchableOpacity style={styles.modernDestMapBtn} onPress={() => openMapForDestination(index)}>
                   <Ionicons name="map" size={22} color="#60a5fa" />
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={[styles.modernDestMapBtn, { backgroundColor: '#fee2e2' }]} onPress={() => removeDestination(index)}>
-                  <Ionicons name="trash" size={22} color="#ef4444" />
-                </TouchableOpacity>
-              )}
+                {index > 0 && (
+                  <TouchableOpacity style={[styles.modernDestMapBtn, { backgroundColor: '#fee2e2' }]} onPress={() => removeDestination(index)}>
+                    <Ionicons name="trash" size={22} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           ))}
 
@@ -1969,7 +1308,7 @@ const handleCancelRide = async () => {
         </ScrollView>
       )}
 
-{rideStatus === 'searching' && (
+      {rideStatus === 'searching' && (
         <View style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
           <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
           
@@ -2070,7 +1409,7 @@ const handleCancelRide = async () => {
         </View>
       )}
       
-      {(rideStatus === 'accepted' || rideStatus === 'passenger_on_the_way' || rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan' || rideStatus === 'in_progress') && (
+      {['accepted', 'passenger_on_the_way', 'captain_arrived', 'waiting_for_scan', 'in_progress'].includes(rideStatus) && (
         <Animated.View style={[styles.cardActive, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#d97706' }, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && styles.cardArrivalPulse, (rideStatus === 'captain_arrived' || rideStatus === 'waiting_for_scan') && { backgroundColor: backgroundColorInterpolate }]}>
           
           <ScrollView ref={activeRideScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
@@ -2147,7 +1486,6 @@ const handleCancelRide = async () => {
                 borderWidth: 2,
                 borderColor: '#b91c1c'
               }}
-              onPress={handleRideSOS}
             >
               <Ionicons name="warning" size={24} color="#ffffff" />
               <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold' }}>أنا في خطر (SOS)</Text>
@@ -2187,6 +1525,63 @@ const handleCancelRide = async () => {
                 <View style={styles.numericCodeBox}>
                   <Text style={styles.numericCode}>{numericSecret ? numericSecret : '...'}</Text>
                 </View>
+              </View>
+            )}
+
+            {/* 🗺️ خريطة التتبع المباشر (تتحرك مع الكابتن وبترسم المسار) */}
+            {pickupCoords && captainLiveCoords && (
+              <View style={{ width: '100%', height: 280, borderRadius: 16, overflow: 'hidden', marginBottom: 15, borderWidth: 2, borderColor: '#3b82f6', backgroundColor: '#e2e8f0', position: 'relative' }}>
+                <MapView
+                  provider={PROVIDER_GOOGLE}
+                  style={{ flex: 1, width: '100%', height: '100%' }}
+                  customMapStyle={isDarkMode ? darkMapStyle : []} 
+                  region={{
+                    latitude: (pickupCoords.latitude + captainLiveCoords.latitude) / 2,
+                    longitude: (pickupCoords.longitude + captainLiveCoords.longitude) / 2,
+                    latitudeDelta: Math.abs(pickupCoords.latitude - captainLiveCoords.latitude) * 1.5 || 0.02,
+                    longitudeDelta: Math.abs(pickupCoords.longitude - captainLiveCoords.longitude) * 1.5 || 0.02,
+                  }}
+                >
+                  <Marker coordinate={{ latitude: Number(captainLiveCoords.latitude), longitude: Number(captainLiveCoords.longitude) }} title="الكابتن هنا">
+                    <View style={{ backgroundColor: '#1e3a8a', padding: 8, borderRadius: 20, borderWidth: 3, borderColor: '#a3e635', alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 14 }}>A</Text>
+                      <Text style={{ fontSize: 20 }}>{captainInfo.vehicle === 'car' ? '🚗' : captainInfo.vehicle === 'scooter' ? '🛵' : '🛺'}</Text>
+                    </View>
+                  </Marker>
+
+                  <Marker coordinate={{ latitude: Number(pickupCoords.latitude), longitude: Number(pickupCoords.longitude) }} title="موقعك">
+                    <View style={{ backgroundColor: '#22c55e', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignItems: 'center' }}>
+                      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 18 }}>B</Text>
+                    </View>
+                  </Marker>
+
+                  {GOOGLE_MAPS_APIKEY !== 'AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg' && (
+                    <MapViewDirections
+                      origin={{ latitude: Number(captainLiveCoords.latitude), longitude: Number(captainLiveCoords.longitude) }}
+                      destination={{ latitude: Number(pickupCoords.latitude), longitude: Number(pickupCoords.longitude) }}
+                      apikey={GOOGLE_MAPS_APIKEY}
+                      strokeWidth={6}
+                      strokeColor="#a3e635"
+                      language="ar"
+                    />
+                  )}
+                  {GOOGLE_MAPS_APIKEY === 'AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg' && (
+                     <Polyline 
+                       coordinates={[{ latitude: Number(captainLiveCoords.latitude), longitude: Number(captainLiveCoords.longitude) }, { latitude: Number(pickupCoords.latitude), longitude: Number(pickupCoords.longitude) }]} 
+                       strokeColor="#a3e635" 
+                       strokeWidth={5} 
+                     />
+                  )}
+                </MapView>
+
+                {waitingTimeLeft > 0 && (
+                  <View style={{ position: 'absolute', top: 20, right: 20, backgroundColor: '#3b82f6', paddingHorizontal: 20, paddingVertical: 15, borderRadius: 12, alignItems: 'center', elevation: 5 }}>
+                    <Text style={{ color: 'white', fontSize: 20, fontWeight: '900' }}>{Math.ceil(waitingTimeLeft / 60)} دقيقة</Text>
+                    <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold', marginTop: 4 }}>
+                      {((calculateDistance(captainLiveCoords.latitude, captainLiveCoords.longitude, pickupCoords.latitude, pickupCoords.longitude)) / 1000).toFixed(1)} كم
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
 
@@ -2272,6 +1667,130 @@ const handleCancelRide = async () => {
         </Animated.View>
       )}
 
+{/* مودال تعديل الوجهة الموحد (يعمل باقتراحات جوجل والسعر اللايف) */}
+      <Modal visible={isEditDestModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modaloverlay}>
+          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }, { minHeight: 450 }]}>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تعديل الوجهة 🗺️</Text>
+            
+            <View style={{ height: 280, width: '100%', marginTop: 10, zIndex: 9999 }}>
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="always"
+                contentContainerStyle={{ flexGrow: 1, paddingBottom: 100 }}
+              >
+                {tempDestinations.map((dest, index) => (
+                  <View key={index} style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 15, zIndex: 1000 - index }}>
+                    <Text style={{ fontSize: 16, marginRight: 5, color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 'bold' }}>
+                      {index === 0 ? 'إلى:' : 'ثم:'}
+                    </Text>
+                    
+                    <View style={{ flex: 1, marginLeft: 10, zIndex: 1000 - index }}>
+                      <GooglePlacesAutocomplete
+                        placeholder="ابحث عن الوجهة الجديدة..."
+                        fetchDetails={true}
+                        enablePoweredByContainer={false}
+                        isRowScrollable={false}
+                        // @ts-ignore
+                        getDefaultValue={() => dest}
+                        onPress={(data: any, details: any = null) => {
+                          handleTempDestChange(data.description, index);
+                        }}
+                        query={{ key: GOOGLE_MAPS_APIKEY, language: 'ar', components: 'country:eg' }}
+                        textInputProps={{
+                          placeholderTextColor: isDarkMode ? '#64748b' : '#94a3b8',
+                          onChangeText: (text: string) => handleTempDestChange(text, index)
+                        }}
+                        renderRow={(rowData: any) => (
+                          <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#cbd5e1' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                            {rowData.description}
+                          </Text>
+                        )}
+                        styles={{
+                          container: { flex: 0, width: '100%' },
+                          textInputContainer: { backgroundColor: isDarkMode ? '#334155' : '#f8fafc', borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderRadius: 12, flexDirection: 'row-reverse', alignItems: 'center' },
+                          textInput: { height: 45, color: isDarkMode ? '#ffffff' : '#0f172a', backgroundColor: 'transparent', fontSize: 14, textAlign: 'right', paddingHorizontal: 10 },
+                          listView: { position: 'absolute', top: 48, width: '100%', zIndex: 10000, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
+                          row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
+                        }}
+                      />
+                    </View>
+                    
+                    {index > 0 && (
+                      <TouchableOpacity style={{ backgroundColor: '#fee2e2', padding: 10, borderRadius: 10, marginRight: 8 }} onPress={() => removeTempDest(index)}>
+                        <Ionicons name="trash" size={20} color="#ef4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+                
+                {tempDestinations.length < 3 && (
+                  <TouchableOpacity style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderStyle: 'dashed' }} onPress={addTempDest}>
+                    <Text style={{ color: isDarkMode ? '#60a5fa' : '#3b82f6', fontWeight: 'bold' }}>+ إضافة وجهة أخرى</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            </View>
+
+            {/* 💰 قسم حساب السعر المباشر داخل المودال */}
+            <View style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: 15, borderRadius: 12, marginTop: 5, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0', zIndex: 1 }}>
+               {isModalCalculating ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                     <ActivityIndicator color="#10b981" size="small" />
+                     <Text style={{ color: '#10b981', fontSize: 12, marginTop: 5, fontWeight: 'bold' }}>جاري حساب المسافة والسعر...</Text>
+                  </View>
+               ) : (
+                 <>
+                   <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                     <Text style={{ fontSize: 14, color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 'bold' }}>السعر المقترح (للوجهة الجديدة):</Text>
+                     <Text style={{ fontSize: 20, fontWeight: '900', color: '#10b981' }}>{modalBasePrice} ج</Text>
+                   </View>
+                   
+                   <View style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 15, gap: 10 }}>
+                     <Text style={{ fontSize: 14, color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 'bold' }}>تعديل سعرك:</Text>
+                     <TextInput 
+                        style={{ flex: 1, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderWidth: 2, borderColor: '#d97706', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, textAlign: 'center', color: isDarkMode ? '#ffffff' : '#1e293b', fontWeight: 'bold', fontSize: 18 }}
+                        keyboardType="numeric"
+                        value={modalPrice}
+                        onChangeText={setModalPrice}
+                     />
+                     <Text style={{ fontSize: 14, color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 'bold' }}>جنيه</Text>
+                   </View>
+
+                   {modalBasePrice > 0 && (
+                     <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', gap: 8 }}>
+                        {[1.2, 1.4, 1.6].map((multiplier, idx) => {
+                          const suggested = Math.round(modalBasePrice * multiplier);
+                          const isSelected = modalPrice === suggested.toString();
+                          return (
+                            <TouchableOpacity 
+                              key={idx} 
+                              style={{ flex: 1, backgroundColor: isSelected ? '#d97706' : (isDarkMode ? '#334155' : '#ffffff'), paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: isSelected ? '#d97706' : (isDarkMode ? '#475569' : '#cbd5e1'), alignItems: 'center', elevation: isSelected ? 2 : 0 }}
+                              onPress={() => setModalPrice(suggested.toString())}
+                            >
+                               <Text style={{ color: isSelected ? '#ffffff' : (isDarkMode ? '#cbd5e1' : '#475569'), fontWeight: 'bold', fontSize: 15 }}>{suggested}</Text>
+                               <Text style={{ color: isSelected ? '#fef3c7' : '#94a3b8', fontSize: 11, marginTop: 2 }}>+{Math.round((multiplier - 1)*100)}%</Text>
+                            </TouchableOpacity>
+                          )
+                        })}
+                     </View>
+                   )}
+                 </>
+               )}
+            </View>
+
+            <View style={[styles.modalButtonsRow, { marginTop: 15, zIndex: 1 }]}>
+              <TouchableOpacity style={[styles.modalSaveBtn, isModalCalculating && { opacity: 0.5 }]} disabled={isModalCalculating} onPress={saveNewDestinations}>
+                <Text style={styles.modalSaveBtnText}>حفظ وتحديث السعر ✅</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEditDestModalVisible(false)}>
+                <Text style={styles.modalCancelBtnText}>إلغاء ❌</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* مودال الطوارئ */}
       <Modal visible={isEmergencyModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
@@ -2310,18 +1829,18 @@ const handleCancelRide = async () => {
           <View style={[styles.ratingModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
             {!ratingSubmitted ? (
               <>
-                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>كيف كانت الرحلة؟</Text>
-                <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }]}>تقييمك للكابتن يساعدنا في تحسين الخدمة</Text>
+                <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }, { fontSize: 20, marginBottom: 5 }]}>كيف كانت الرحلة ؟</Text>
+                <Text style={{ textAlign: 'center', color: '#64748b', fontSize: 13, marginBottom: 15 }}>تقييمك للراكب يساعدنا في تحسين الخدمة</Text>
                 <View style={styles.starsRow}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                      <Text style={[styles.starText, { color: star <= rating ? '#f59e0b' : '#cbd5e1' }]}>★</Text>
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <TouchableOpacity key={s} onPress={() => setRating(s)}>
+                      <Text style={[styles.starText, { color: s <= rating ? '#f59e0b' : '#cbd5e1' }]}>★</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
                 {rating === 5 && (
                   <View style={{ marginBottom: 15 }}>
-                    <Text style={styles.thankYouFiveStars}>شكراً لك! اختر مميزات الرحلة:</Text>
+                    <Text style={{ color: '#10b981', fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 }}>شكراً لك! اختر مميزات الراكب:</Text>
                     <View style={styles.tagsContainer}>
                       {passengerRatingTags.map(tag => {
                         const isSelected = selectedTags.includes(tag);
@@ -2348,198 +1867,152 @@ const handleCancelRide = async () => {
                     multiline={true} 
                   />
                 )}
-                {rating > 0 && (
-                  <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}>
-                    <Text style={styles.submitRatingBtnText}>إرسال التقييم</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity style={styles.submitRatingBtn} onPress={submitRating}>
+                  <Text style={styles.submitRatingBtnText}>إرسال التقييم</Text>
+                </TouchableOpacity>
               </>
             ) : (
               <View style={styles.successRatingContainer}>
                 <Text style={styles.successRatingIcon}>✅</Text>
-                <Text style={[styles.successRatingText, isDarkMode && { color: '#ffffff' }]}>نشكرك على تقييمك لمساعدتنا في تطوير الخدمة</Text>
+                <Text style={[styles.successRatingText, isDarkMode && { color: '#ffffff' }]}>تم التقييم بنجاح</Text>
               </View>
             )}
           </View>
         </View>
       </Modal>
 
-      {/* مودال تعديل الوجهة */}
-      <Modal visible={isEditDestModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modaloverlay}>
-          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
-            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تعديل الوجهة 🗺️</Text>
+      {/* 🗺️ مودال اختيار الموقع من الخريطة (يتحرك الدبوس لالتقاط العنوان) */}
+      <Modal visible={isMapPickerVisible} transparent={true} animationType="slide">
+        <View style={{ flex: 1, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc' }}>
+          
+          {/* الهيدر وزر الإغلاق */}
+          <View style={{ position: 'absolute', top: 40, left: 20, right: 20, zIndex: 1, flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }}>
+            <TouchableOpacity style={{ backgroundColor: isDarkMode ? '#334155' : '#ffffff', padding: 10, borderRadius: 50, elevation: 5, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#e2e8f0' }} onPress={() => setIsMapPickerVisible(false)}>
+              <Ionicons name="close" size={24} color={isDarkMode ? '#ffffff' : '#0f172a'} />
+            </TouchableOpacity>
             
-            {tempDestinations.map((dest, index) => (
-              <View key={index} style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 10 }}>
-                <TextInput 
-                  style={[styles.modalInput, { flex: 1, marginBottom: 0, paddingVertical: 12 }, isDarkMode && { backgroundColor: '#334155', color: '#ffffff', borderColor: '#475569' }]} 
-                  value={dest} 
-                  onChangeText={(text) => handleTempDestChange(text, index)} 
-                  placeholder={index === 0 ? "الوجهة الجديدة..." : "وجهة إضافية..."} 
-                  placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} 
-                  textAlign="right"
-                />
-                {index > 0 && (
-                  <TouchableOpacity style={{ backgroundColor: '#fee2e2', padding: 12, borderRadius: 10, marginLeft: 10, borderWidth: 1, borderColor: '#fca5a5' }} onPress={() => removeTempDest(index)}>
-                    <Ionicons name="trash" size={22} color="#ef4444" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
-
-            {tempDestinations.length < 3 && (
-              <TouchableOpacity 
-                style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', borderStyle: 'dashed', flexDirection: 'row-reverse', justifyContent: 'center' }} 
-                onPress={addTempDest}
-              >
-                <Ionicons name="add-circle-outline" size={20} color={isDarkMode ? '#60a5fa' : '#3b82f6'} style={{ marginLeft: 5 }} />
-                <Text style={{ color: isDarkMode ? '#60a5fa' : '#3b82f6', fontWeight: 'bold', fontSize: 14 }}>إضافة وجهة</Text>
-              </TouchableOpacity>
-            )}
-
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveNewDestinations}>
-                <Text style={styles.modalSaveBtnText}>تأكيد الوجهة</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEditDestModalVisible(false)}>
-                <Text style={styles.modalCancelBtnText}>إلغاء</Text>
-              </TouchableOpacity>
+            <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', padding: 12, borderRadius: 20, flex: 1, marginRight: 10, elevation: 5, borderWidth: 1, borderColor: '#3b82f6' }}>
+              <Text style={{ textAlign: 'right', fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#0f172a', fontSize: 13 }} numberOfLines={2}>
+                {isGeocoding ? '⏳ جاري قراءة اسم الشارع...' : (mapPickerAddress || '📍 حرك الخريطة لاختيار الموقع')}
+              </Text>
             </View>
           </View>
-        </View>
-      </Modal>
 
-      {/* مودال تعديل السعر */}
-      <Modal visible={isEditModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modaloverlay}>
-          <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
-            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>تعديل سعر الرحلة</Text>
-            <Text style={[styles.modalSubtitle, isDarkMode && { color: '#cbd5e1' }]}>الحد الأدنى {Math.floor(calculatedBasePrice * 0.80)} جنيه</Text>
-            <TextInput style={[styles.modalInput, isDarkMode && { backgroundColor: '#334155', color: '#ffffff', borderColor: '#475569' }]} value={tempPrice} onChangeText={setTempPrice} keyboardType="numeric" placeholder="اكتب السعر الجديد" placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} />
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveNewPrice}>
-                <Text style={styles.modalSaveBtnText}>حفظ</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsEditModalVisible(false)}>
-                <Text style={styles.modalCancelBtnText}>إلغاء</Text>
-              </TouchableOpacity>
-            </View>
+          {/* الخريطة التفاعلية */}
+          <MapView
+            style={{ flex: 1 }}
+            provider={PROVIDER_GOOGLE}
+            customMapStyle={isDarkMode ? darkMapStyle : []}
+            showsUserLocation={true}
+            initialRegion={{
+              latitude: mapPickerCoords?.latitude || 30.0444,
+              longitude: mapPickerCoords?.longitude || 31.2357,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005,
+            }}
+            onRegionChangeComplete={async (region) => {
+              setMapPickerCoords({ latitude: region.latitude, longitude: region.longitude });
+              setIsGeocoding(true);
+              try {
+                let geocode = await Location.reverseGeocodeAsync({ latitude: region.latitude, longitude: region.longitude });
+                if (geocode && geocode.length > 0) {
+                  const place = geocode[0];
+                  const address = [place.name, place.street, place.subregion || place.district, place.city].filter(Boolean).join('، ');
+                  setMapPickerAddress(address || `موقع محدد (${region.latitude.toFixed(3)}, ${region.longitude.toFixed(3)})`);
+                } else {
+                  setMapPickerAddress(`موقع محدد (${region.latitude.toFixed(3)}, ${region.longitude.toFixed(3)})`);
+                }
+              } catch (e) {
+                setMapPickerAddress(`موقع محدد (${region.latitude.toFixed(3)}, ${region.longitude.toFixed(3)})`);
+              } finally {
+                setIsGeocoding(false);
+              }
+            }}
+          />
+
+          {/* الدبوس الثابت في منتصف الشاشة */}
+          <View style={{ position: 'absolute', top: '50%', left: '50%', marginLeft: -24, marginTop: -48, alignItems: 'center' }}>
+            <Ionicons name="location" size={48} color="#ef4444" />
+            <View style={{ width: 10, height: 10, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 5, marginTop: -5, transform: [{ scaleX: 2 }] }} />
           </View>
-        </View>
-      </Modal>
 
-      {/* مودال الاتصال */}
-      <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modaloverlay}>
-          <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
-            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال</Text>
-            <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
-              <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#ffffff' }]}>مكالمة عادية شبكة المحمول</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
-              <Text style={styles.freeCallBtnText}>مكالمة مجانية داخل التطبيق</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}>
-              <Text style={styles.cancelCallBtnText}>إلغاء</Text>
+          {/* زر التأكيد */}
+          <View style={{ position: 'absolute', bottom: 30, left: 20, right: 20 }}>
+            <TouchableOpacity
+              style={{ backgroundColor: isGeocoding ? '#94a3b8' : '#10b981', paddingVertical: 16, borderRadius: 14, alignItems: 'center', elevation: 5, borderWidth: 2, borderColor: '#34d399' }}
+              disabled={isGeocoding}
+              onPress={() => {
+                if (mapPickerIndex !== null && mapPickerAddress) {
+                   handleDestinationChange(mapPickerAddress, mapPickerIndex);
+                }
+                setIsMapPickerVisible(false);
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: 'bold' }}>
+                {isGeocoding ? 'انتظر قليلاً...' : 'تأكيد الوجهة من هنا ✅'}
+              </Text>
             </TouchableOpacity>
           </View>
+
         </View>
       </Modal>
 
-      {/* القائمة الجانبية */}
-      <Modal visible={isSidebarOpen} transparent={true} animationType="none" onRequestClose={closeSidebar}>
+      {/* القائمة الجانبية (تصميم مطابق لنسخة الكابتن بدون المحفظة) */}
+      <Modal visible={isSidebarOpen} transparent={true} animationType="fade" onRequestClose={closeSidebar}>
         <View style={styles.sidebarOverlay}>
           <TouchableOpacity style={styles.sidebarCloseArea} onPress={closeSidebar} activeOpacity={1} />
-          <Animated.View style={[styles.sidebarPanel, { transform: [{ translateX: sidebarAnim }] }, isDarkMode && { backgroundColor: '#0f172a' }]}>
+          <Animated.View style={[styles.sidebarPanel, isDarkMode && { backgroundColor: '#0f172a' }]}>
+            
+            {/* الهيدر الكحلي المطابق للكابتن */}
             <View style={[styles.sidebarHeader, isDarkMode && { backgroundColor: '#1e293b' }]}>
-              <Image source={{ uri: passengerProfile.avatar }} style={styles.sidebarAvatar} />
+              <View style={styles.sidebarAvatarContainer}>
+                <Image source={{ uri: passengerProfile.avatar }} style={styles.sidebarAvatar} />
+              </View>
               <Text style={styles.sidebarName}>{passengerProfile.name}</Text>
-              <Text style={styles.sidebarPhone}>{passengerProfile.phone}</Text>
+              <Text style={styles.sidebarPhone}>{passengerProfile.phone || '01000000000'}</Text>
             </View>
-            <ScrollView style={styles.sidebarLinks}>             
+
+            <ScrollView style={styles.sidebarLinks} showsVerticalScrollIndicator={false}>
+              
+              {/* الإشعارات */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-notifications'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الإشعارات 🔔</Text>
+              </TouchableOpacity>
+
+              {/* سجل الرحلات */}
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-history'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-ratings'); }}>
-                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>تقييماتي</Text>
+              {/* التقييمات */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); Alert.alert('التقييمات', `تقييمك الحالي: ${passengerProfile.averageRating} نجوم`); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>التقييمات</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }, { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }]} onPress={() => { closeSidebar(); router.push('/passenger-notifications'); }}>
-                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الإشعارات 🔔</Text>
-                {unreadNotifsCount > 0 && (
-                  <View style={{ backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 26, alignItems: 'center' }}>
-                    <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>{unreadNotifsCount}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/emergency-contacts'); }}>
-                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>رقم الطوارئ والأمان</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}>
+              {/* الدعم الفني */}
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); Alert.alert('الدعم الفني', 'سيتم تحويلك لصفحة الدعم'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-complaints'); }}>
-                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى</Text>
+              <Text style={[styles.sidebarSectionTitle, isDarkMode && { color: '#cbd5e1' }]}>المقترحات والشكاوى</Text>
+              
+              {/* زرار الدعم الفني المباشر الأخضر */}
+              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => {
+                closeSidebar();
+                Linking.openURL('https://wa.me/201017770180?text=محتاج%20مساعدة%20من%20الدعم%20الفني');
+              }}>
+                <Text style={styles.sidebarSupportBtnText}>💬 محادثة الدعم الفني (مباشر)</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-safety'); }}>
-                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>السلامة 🛡️</Text>
+              {/* تسجيل الخروج */}
+              <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}>
+                <Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text>
               </TouchableOpacity>
-            </ScrollView>            
-            <TouchableOpacity 
-              style={{ 
-                backgroundColor: '#10b981', 
-                paddingVertical: 14, 
-                paddingHorizontal: 20,
-                borderRadius: 12, 
-                marginBottom: 15,
-                marginHorizontal: 15,
-                flexDirection: 'row',
-                justifyContent: 'center',
-                alignItems: 'center',
-                elevation: 2
-              }} 
-              onPress={() => router.push('/live-support')}
-            >
-              <Text style={{ fontSize: 16, color: '#ffffff', fontWeight: 'bold', marginRight: 10 }}>محادثة الدعم الفني (مباشر)</Text>
-              <Text style={{ fontSize: 18 }}>💬</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}>
-              <Text style={styles.sidebarLogoutText}>تسجيل الخروج</Text>
-            </TouchableOpacity>
+              
+            </ScrollView>
           </Animated.View>
         </View>
       </Modal>
-
-      {/* 🌟 تأثير الفلاش الأصفر لما الكابتن يقرب */}
-      <Animated.View
-        pointerEvents="none" 
-        style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: flashAnim.interpolate({
-            inputRange: [0, 1],
-            outputRange: ['rgba(250, 204, 21, 0)', 'rgba(250, 204, 21, 0.4)'] 
-          }),
-          zIndex: 9999, 
-        }}
-      />
-      {/* 🚨 شاشة وضع الصيانة الإجبارية 🚨 */}
-      {isMaintenanceMode && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', zIndex: 100000, padding: 20 }}>
-          <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
-          <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
-          <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 30 }}>
-            نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
-          </Text>
-          <ActivityIndicator size="large" color="#eab308" />
-        </View>
-      )}
 
     </KeyboardAvoidingView>
   );
@@ -2551,15 +2024,10 @@ const styles = StyleSheet.create({
   headerSettingsBtn: { padding: 8, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' },
   container: { flex: 1, backgroundColor: '#f1f5f9', padding: 15, paddingTop: 40 },
   header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: 12, borderRadius: 16, marginBottom: 20, elevation: 2 },
-  userInfo: { flexDirection: 'row-reverse', alignItems: 'center', flex: 1 },
   profileAvatar: { width: 45, height: 45, borderRadius: 22.5, backgroundColor: '#cbd5e1', marginLeft: 10 },
   headerPassengerName: { fontSize: 14, fontWeight: 'bold', color: '#1e293b', marginRight: 8, textAlign: 'right' },
-  logoutButton: { backgroundColor: '#fee2e2', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
-  logoutText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14 },
-  toastContainer: { position: 'absolute', alignSelf: 'center', backgroundColor: '#1e293b', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 30, zIndex: 9999, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5 },
+  toastContainer: { position: 'absolute', alignSelf: 'center', backgroundColor: '#1e293b', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 30, zIndex: 9999, elevation: 10 },
   toastText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
-  inlineToast: { backgroundColor: '#1e293b', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 12, marginBottom: 10, width: '100%', flexDirection: 'row-reverse', alignItems: 'center', elevation: 3 },
-  inlineToastText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', textAlign: 'right', flex: 1 },
   card: { backgroundColor: '#ffffff', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#e2e8f0', elevation: 4, flex: 1, marginBottom: 10 },
   requestHeaderRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', textAlign: 'right' },
@@ -2577,10 +2045,6 @@ const styles = StyleSheet.create({
   vTypeText: { fontSize: 14, fontWeight: 'bold', color: '#64748b' },
   vTypeTextActive: { color: '#2563eb' },
   passengerCountContainer: { marginBottom: 15 },
-  countBtn: { backgroundColor: '#f1f5f9', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginHorizontal: 5, borderWidth: 1, borderColor: '#cbd5e1' },
-  countBtnActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
-  countBtnText: { fontSize: 16, fontWeight: 'bold', color: '#64748b' },
-  countBtnTextActive: { color: '#ffffff' },
   rowInputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   inputWithButton: { flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, padding: 10, fontSize: 14, color: '#0f172a', textAlign: 'right', marginLeft: 8 },
   myLocationBtn: { backgroundColor: '#d97706', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', minWidth: 80 },
@@ -2671,31 +2135,58 @@ const styles = StyleSheet.create({
   sidebarCloseArea: { flex: 1 },
   sidebarPanel: { width: '75%', backgroundColor: '#ffffff', height: '100%', elevation: 15 },
   sidebarHeader: { 
-    backgroundColor: '#1e293b', 
-    padding: 15,
-    paddingTop: 30,
+    backgroundColor: '#1f2937', // لون كحلي غامق مطابق للصورة
+    padding: 20,
+    paddingTop: 40,
     alignItems: 'center', 
-    borderBottomWidth: 3, 
-    borderColor: '#eab308' 
+    borderBottomWidth: 4, 
+    borderColor: '#eab308' // الخط الأصفر الفاصل
+  },
+  sidebarAvatarContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+    overflow: 'hidden'
   },
   sidebarAvatar: { 
-    width: 70,
-    height: 70, 
-    borderRadius: 35, 
-    borderWidth: 2, 
-    borderColor: '#eab308', 
-    marginBottom: 8
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover'
   },
-  sidebarName: { fontSize: 16, fontWeight: 'bold', color: '#ffffff' },
-  sidebarPhone: { fontSize: 13, color: '#94a3b8', marginTop: 3 },
-  sidebarLinks: { padding: 15 },
+  sidebarName: { fontSize: 18, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
+  sidebarPhone: { fontSize: 14, color: '#94a3b8' },
+  sidebarLinks: { padding: 20 },
   sidebarLink: { 
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderBottomWidth: 1, 
     borderColor: '#f1f5f9' 
   },
-  sidebarLinkText: { fontSize: 15, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
-  sidebarLogoutBtn: {backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center' },
+  sidebarLinkText: { fontSize: 16, color: '#1e293b', fontWeight: 'bold', textAlign: 'center' },
+  sidebarSectionTitle: { fontSize: 14, color: '#64748b', fontWeight: 'bold', textAlign: 'center', marginTop: 20, marginBottom: 10 },
+  sidebarSupportBtn: {
+    backgroundColor: '#10b981', // اللون الأخضر المميز
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 15,
+    elevation: 2
+  },
+  sidebarSupportBtnText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
+  sidebarLogoutBtn: {
+    backgroundColor: '#fee2e2', 
+    paddingVertical: 14, 
+    borderRadius: 8, 
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: '#fca5a5'
+  },
   sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
   searchButton: { backgroundColor: '#d97706', paddingVertical: 15, borderRadius: 14, alignItems: 'center', elevation: 3, marginBottom: 20 },
   searchButtonText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
@@ -2733,3 +2224,14 @@ const styles = StyleSheet.create({
   editEmergencyBtn: { backgroundColor: '#e2e8f0', paddingVertical: 10, borderRadius: 10, alignItems: 'center', marginBottom: 15 },
   editEmergencyText: { color: '#475569', fontSize: 13, fontWeight: 'bold' }
 });
+
+// مصفوفة الاستايل الغامق للخريطة (Dark Mode)
+const darkMapStyle = [
+  { "elementType": "geometry", "stylers": [{ "color": "#212121" }] },
+  { "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] },
+  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#212121" }] },
+  { "featureType": "administrative", "elementType": "geometry", "stylers": [{ "color": "#757575" }] },
+  { "featureType": "road", "elementType": "geometry.fill", "stylers": [{ "color": "#2c2c2c" }] },
+  { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#8a8a8a" }] }
+];

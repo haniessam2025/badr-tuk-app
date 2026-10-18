@@ -139,20 +139,21 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
             </View>
             
             {/* 👈 المكان الوحيد المخصص لشارة السعر العادل تحت السعر */}
-            <View style={styles.newPriceCol}>
+<View style={styles.newPriceCol}>
               <Text style={styles.newTripDistanceText}>{tripDistanceDisplay} ~</Text>
-              <Text style={styles.newPriceText}>{activePrice} EGP</Text>
-             {/* 👈 شارة السعر العادل لو السعرين متطابقين */}
-              {item.calculatedBasePrice != null && Number(item.price) === Number(item.calculatedBasePrice) && (
+              <Text style={styles.newPriceText}>{activePrice} ج</Text>
+              
+              {/* 👈 شارة السعر العادل لو السعرين متطابقين */}
+              {item.fairPrice != null && Number(item.price) === Number(item.fairPrice) && (
                 <View style={{backgroundColor: '#dcfce7', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 1, borderWidth: 1, borderColor: '#86efac'}}>
                   <Text style={{color: '#059669', fontSize: 10, fontWeight: 'bold'}}>السعر العادل ⚖️</Text>
                 </View>
               )}
 
-              {/* 👈 شارة سعر عالي وبخط كبير وواضح لو الراكب مزود السعر */}
-              {item.calculatedBasePrice != null && Number(item.price) > Number(item.calculatedBasePrice) && (
-                <View style={{backgroundColor: '#fef3c7', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, marginTop: 5, flexDirection: 'row-reverse', alignItems: 'center', elevation: 2, borderWidth: 1.5, borderColor: '#f59e0b', alignSelf: 'center'}}>
-                  <Text style={{color: '#d97706', fontSize: 12, fontWeight: '900'}}>سعر عالي 💰🔥</Text>
+              {/* 👈 شارة سعر عالي لو الراكب مزود السعر */}
+              {item.fairPrice != null && Number(item.price) > Number(item.fairPrice) && (
+                <View style={{backgroundColor: '#fef08a', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 1, borderWidth: 1, borderColor: '#facc15'}}>
+                  <Text style={{color: '#ca8a04', fontSize: 10, fontWeight: 'bold'}}>سعر عالي 🚀</Text>
                 </View>
               )}
             </View>
@@ -478,8 +479,27 @@ export default function CaptainHome() {
     if (captainProfile.id) { try { await updateDoc(doc(db, 'captains', captainProfile.id), { isOnline: newState }); } catch (error) {} }
   };
 
-  useFocusEffect(useCallback(() => { loadCaptainProfileFromFirebase(); loadDismissedRequests(); getInitialCaptainLocation(); }, []));
-  const getInitialCaptainLocation = async () => {
+useFocusEffect(useCallback(() => { 
+    loadCaptainProfileFromFirebase(); 
+    loadDismissedRequests(); 
+    getInitialCaptainLocation(); 
+    loadActiveRideLocally(); // 👈 استدعاء الرحلة من الذاكرة فوراً
+  }, []));
+
+  // 👈 الدالة السحرية لاسترجاع الرحلة النشطة فوراً لو قفل التطبيق وفتحه
+  const loadActiveRideLocally = async () => {
+    try {
+      const savedRide = await AsyncStorage.getItem('active_ride_captain');
+      if (savedRide) {
+        const parsedRide = JSON.parse(savedRide);
+        if (['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'].includes(parsedRide.status)) {
+          setActiveRide(parsedRide);
+        } else {
+          await AsyncStorage.removeItem('active_ride_captain');
+        }
+      }
+    } catch(e) {}
+  };  const getInitialCaptainLocation = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
     if (status === 'granted') { 
       try { 
@@ -821,21 +841,25 @@ pendingRequests.sort((a, b) => b.timestamp - a.timestamp);
       where('captainId', '==', captainProfile.id),
       where('status', 'in', ['accepted', 'captain_arrived', 'passenger_on_the_way', 'waiting_for_scan', 'in_progress'])
     );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
         if (docs.length > 0) {
           setActiveRide(docs[0]); 
           setUnreadChatCount(docs[0].unreadCountCaptain || 0);
+          // 👈 حفظ تحديثات الرحلة محلياً في خلفية الموبايل
+          await AsyncStorage.setItem('active_ride_captain', JSON.stringify(docs[0]));
         } else {
           setActiveRide((prev: any) => { 
             if (prev && !isEndingRide.current) {
               Alert.alert("تنبيه", "الرحلة الحالية غير موجودة أو قام الراكب بإلغائها."); 
             }
             isEndingRide.current = false; 
+            AsyncStorage.removeItem('active_ride_captain'); // 👈 مسح الرحلة لو خلصت أو اتلغت
             return null; 
           });
         }
       });
+      return () => unsubscribe(); // تنظيف المراقب
   }, [captainProfile.id]);
 
   useEffect(() => {

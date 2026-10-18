@@ -1,53 +1,61 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { db } from '../firebase'; // تأكد إن ده مسار الفايربيز الصح
+export const useApp = () => useContext(AppContext);
+// 1. تعريف شكل البيانات عشان TypeScript
+export const AppContext = createContext<any>(null);
 
-type AppContextType = {
-  isDarkMode: boolean;
-  isVibrationEnabled: boolean;
-  toggleTheme: (value: boolean) => void;
-  toggleVibration: (value: boolean) => void;
-};
+export const AppProvider = ({ children }: { children: ReactNode }) => {
+  // متغيراتك الحالية (زي بيانات الرحلة أو الكابتن)
+  const [activeRide, setActiveRide] = useState(null);
+  const [user, setUser] = useState(null);
 
-const AppContext = createContext<AppContextType | undefined>(undefined);
+  // 🌟 هنا المتغير الجديد اللي هيشيل كل إعدادات اللوحة 🌟
+  const [appSettings, setAppSettings] = useState({
+    isMaintenanceEnabled: false,
+    debtLimit: -50,
+    waitingTime: 5,
+    searchRadius: 5,
+    cancelLimit: 3,
+    isPeakEnabled: false,
+    peakMultiplier: 1.5,
+    isCashEnabled: true,
+    isWalletEnabled: true,
+    isInstapayEnabled: true,
+  });
 
-export const AppProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
-
+  // 2. المستمع اللي بيقرأ من اللوحة (Firebase) لايف
   useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const savedTheme = await AsyncStorage.getItem('app_theme');
-        const savedVib = await AsyncStorage.getItem('app_vibration');
-        
-        if (savedTheme === 'dark') setIsDarkMode(true);
-        if (savedVib === 'disabled') setIsVibrationEnabled(false);
-      } catch (error) {
-        console.log("Error loading prefs", error);
+    const unsub = onSnapshot(doc(db, 'settings', 'pricing'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setAppSettings({
+          isMaintenanceEnabled: data.isMaintenanceEnabled || false,
+          debtLimit: Number(data.debtLimit) || -50,
+          waitingTime: Number(data.waitingTime) || 5,
+          searchRadius: Number(data.searchRadius) || 5,
+          cancelLimit: Number(data.cancelLimit) || 3,
+          isPeakEnabled: data.isPeakEnabled || false,
+          peakMultiplier: Number(data.peakMultiplier) || 1.5,
+          isCashEnabled: data.isCashEnabled ?? true,
+          isWalletEnabled: data.isWalletEnabled ?? true,
+          isInstapayEnabled: data.isInstapayEnabled ?? true,
+        });
       }
-    };
-    loadPreferences();
+    });
+
+    return () => unsub(); // تنظيف المستمع لما التطبيق يتقفل
   }, []);
 
-  const toggleTheme = async (value: boolean) => {
-    setIsDarkMode(value);
-    await AsyncStorage.setItem('app_theme', value ? 'dark' : 'light');
-  };
-
-  const toggleVibration = async (value: boolean) => {
-    setIsVibrationEnabled(value);
-    await AsyncStorage.setItem('app_vibration', value ? 'enabled' : 'disabled');
-  };
-
   return (
-    <AppContext.Provider value={{ isDarkMode, isVibrationEnabled, toggleTheme, toggleVibration }}>
+    <AppContext.Provider value={{ 
+      activeRide, 
+      setActiveRide, 
+      user, 
+      setUser, 
+      appSettings // 👈 ضفنا الإعدادات هنا عشان التطبيق كله يشوفها
+    }}>
       {children}
     </AppContext.Provider>
   );
-};
-
-export const useApp = () => {
-  const context = useContext(AppContext);
-  if (!context) throw new Error('useApp must be used within AppProvider');
-  return context;
 };
