@@ -250,14 +250,18 @@ export default function CaptainHome() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setIsMaintenanceMode(data.maintenanceMode || false);
-        setMaxDebtLimit(Number(data.maxNegativeBalance) || -50); 
-        // جلب العمولة المخصصة لكل مركبة
+        
+        // 👈 إصلاح قراءة المديونية لو كانت صفر
+        setMaxDebtLimit(data.maxNegativeBalance !== undefined ? Number(data.maxNegativeBalance) : -50); 
+        
+        // 👈 إصلاح قراءة العمولة عشان تقرأ الصفر (0) وأي رقم تاني بدقة بدون ما ترجع للافتراضي
         setAppCommissions({
-          car: Number(data.car?.commission || 10),
-          tuktuk: Number(data.tuktuk?.commission || 5),
-          scooter: Number(data.scooter?.commission || 8)
+          car: data.car?.commission !== undefined ? Number(data.car.commission) : 10,
+          tuktuk: data.tuktuk?.commission !== undefined ? Number(data.tuktuk.commission) : 5,
+          scooter: data.scooter?.commission !== undefined ? Number(data.scooter.commission) : 8
         });
-        setCaptainBanRules(data.captainCancelBanRules || []); // 👈 قراءة القوانين
+        
+        setCaptainBanRules(data.captainCancelBanRules || []); 
       }
     });
     return () => unsubSettings();
@@ -384,13 +388,12 @@ export default function CaptainHome() {
   const [confirmedDestCoords, setConfirmedDestCoords] = useState<any>(null);
   const [placesSuggestions, setPlacesSuggestions] = useState<any[]>([]);
 
-  const GOOGLE_API_KEY = 'ضع_مفتاح_جوجل_هنا'; 
-
+const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
   const fetchPlaceSuggestions = async (text: string) => {
     setDestinationFilterText(text);
     if (text.length > 2) {
       try {
-        const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${text}&key=${GOOGLE_API_KEY}&language=ar&components=country:eg`);
+        const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${text}&key=${GOOGLE_MAPS_APIKEY}&language=ar&components=country:eg`);
         const data = await response.json();
         if (data.predictions) {
           setPlacesSuggestions(data.predictions);

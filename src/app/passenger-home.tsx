@@ -12,7 +12,7 @@ import MapViewDirections from 'react-native-maps-directions';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
-const GOOGLE_MAPS_APIKEY = "AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg";
+const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -162,6 +162,7 @@ const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   const [requestedTuktukType, setRequestedTuktukType] = useState('كيوت 3 راكب');
   const [passengersCount, setPassengersCount] = useState('1');
   const pickupRef = useRef<any>(null);
+  const destRefs = useRef<any>({});
   
   const [isMapPickerVisible, setIsMapPickerVisible] = useState(false);
   const [mapPickerIndex, setMapPickerIndex] = useState<number | null>(null);
@@ -368,32 +369,42 @@ const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
         let totalDistanceKm = 0;
         let googleSuccess = false;
 
-        try {
-          let originStr = `${startCoords.latitude},${startCoords.longitude}`;
-          let destStr = encodeURIComponent(validDests[validDests.length - 1]);
-          
-          let waypointsParam = "";
-          if (validDests.length > 1) {
-              let wps = validDests.slice(0, validDests.length - 1).map((d: string) => encodeURIComponent(d));
-              waypointsParam = `&waypoints=${wps.join('|')}`;
-          }
+        // 1. تحويل كل نصوص الوجهات لإحداثيات دقيقة أولاً
+        let destsCoords: any[] = [];
+        for (let dest of validDests) {
+          const coords = await getCoordinatesFromText(dest);
+          if (coords) destsCoords.push(coords);
+        }
 
-          const response = await fetch(`https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}${waypointsParam}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
-          const data = await response.json();
+        // 2. الاتصال بجوجل باستخدام الإحداثيات (مستحيل يرجع NOT_FOUND)
+        if (destsCoords.length > 0) {
+          try {
+            let originStr = `${startCoords.latitude},${startCoords.longitude}`;
+            let finalDest = destsCoords[destsCoords.length - 1];
+            let destStr = `${finalDest.latitude},${finalDest.longitude}`;
+            
+            let waypointsParam = "";
+            if (destsCoords.length > 1) {
+                let wps = destsCoords.slice(0, destsCoords.length - 1).map((c: any) => `${c.latitude},${c.longitude}`);
+                waypointsParam = `&waypoints=${wps.join('|')}`;
+            }
 
-          if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-             let totalMeters = data.routes[0].legs.reduce((sum: any, leg: any) => sum + leg.distance.value, 0);
-             totalDistanceKm = totalMeters / 1000;
-             googleSuccess = true;
-          }
-        } catch (e) { console.log("Google Directions API Error"); }
+            const response = await fetch(`https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}${waypointsParam}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
+            const data = await response.json();
 
+            if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+               let totalMeters = data.routes[0].legs.reduce((sum: any, leg: any) => sum + leg.distance.value, 0);
+               totalDistanceKm = totalMeters / 1000;
+               googleSuccess = true;
+            } else {
+               // تم إزالة الرسالة المزعجة، التطبيق سيكمل صامتاً أثناء كتابة الراكب
+               console.log("Directions Status: ", data.status);
+            }
+          } catch (e) { console.log("Google Directions API Error"); }
+        }
+
+        // 3. بديل الطوارئ لو جوجل فشل
         if (!googleSuccess) {
-           let destsCoords: any[] = [];
-           for (let dest of validDests) {
-             const coords = await getCoordinatesFromText(dest);
-             if (coords) destsCoords.push(coords);
-           }
            let totalDirectMeters = 0;
            let currentPoint = startCoords;
            for (let dest of destsCoords) {
@@ -774,10 +785,21 @@ const rideData = {
   };
 
   const getCoordinatesFromText = async (text: string) => {
+    // 1. الاعتماد على جوجل أولاً للدقة المتناهية في مصر
+    try {
+      const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(text + ' مصر')}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        return { latitude: data.results[0].geometry.location.lat, longitude: data.results[0].geometry.location.lng };
+      }
+    } catch (e) { }
+
+    // 2. بديل إكسبو لو جوجل فشل
     try {
       const expoResult = await Location.geocodeAsync(text + ' مصر');
       if (expoResult && expoResult.length > 0) return { latitude: expoResult[0].latitude, longitude: expoResult[0].longitude };
     } catch (e) { }
+
     return null;
   };
 
@@ -1035,41 +1057,13 @@ const rideData = {
             <Animated.Image source={headerImageSource} style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} resizeMode="contain" />
           </View>
 
-          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>اختر نوع براقك</Text>
-          <View style={styles.vehicleTypeTabs}>
-            <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedVehicleType === 'car' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedVehicleType('car'); updatePriceCalculation(pickup, destinations, 'car'); }}>
-              <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedVehicleType === 'car' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>سيارة</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedVehicleType === 'tuktuk_alt' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedVehicleType('tuktuk_alt'); updatePriceCalculation(pickup, destinations, 'tuktuk_alt'); }}>
-              <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedVehicleType === 'tuktuk_alt' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>بديل توكتوك</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedVehicleType === 'scooter' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedVehicleType('scooter'); updatePriceCalculation(pickup, destinations, 'scooter'); }}>
-              <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedVehicleType === 'scooter' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>سكوتر</Text>
-            </TouchableOpacity>
-          </View>
-
-          {requestedVehicleType === 'tuktuk_alt' && (
-            <View style={styles.passengerCountContainer}>
-              <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>اختر نوع بديل التوكتوك 🛺</Text>
-              <View style={{ flexDirection: 'row-reverse', gap: 10, marginBottom: 15 }}>
-                <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedTuktukType === 'كيوت 3 راكب' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedTuktukType('كيوت 3 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
-                  <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedTuktukType === 'كيوت 3 راكب' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>كيوت 3 راكب</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.vTypeBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, requestedTuktukType === 'جالاكسي 7 راكب' && (isDarkMode ? { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' } : styles.vTypeBtnActive)]} onPress={() => { setRequestedTuktukType('جالاكسي 7 راكب'); setPassengersCount('1'); updatePriceCalculation(pickup, destinations, requestedVehicleType, '1'); }}>
-                  <Text style={[styles.vTypeText, isDarkMode && { color: '#cbd5e1' }, requestedTuktukType === 'جالاكسي 7 راكب' && (isDarkMode ? { color: '#bfdbfe' } : styles.vTypeTextActive)]}>جالاكسي 7 راكب</Text>
-                </TouchableOpacity>
-              </View>
-
-             </View>
-          )}
-
-         <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
           <View style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10, zIndex: 2000 }]}>
             <View style={styles.modernDestRight}>
               <Ionicons name="location" size={22} color="#10b981" />
               <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>من</Text>
               
-              <View style={{ flex: 1, zIndex: 2000 }}>
+              <View style={{ flex: 1, zIndex: 2000, position: 'relative', justifyContent: 'center' }}>
                 <GooglePlacesAutocomplete
                   ref={pickupRef}
                   placeholder="ابحث عن مكان الانطلاق..."
@@ -1081,7 +1075,6 @@ const rideData = {
                     setPickup(text);
                     let coords = details?.geometry?.location ? { latitude: details.geometry.location.lat, longitude: details.geometry.location.lng } : null;
                     if (coords) setPickupCoords(coords);
-                    
                     if (debounceTimer.current) clearTimeout(debounceTimer.current);
                     debounceTimer.current = setTimeout(() => updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, coords), 1500);
                   }}
@@ -1090,8 +1083,9 @@ const rideData = {
                     language: 'ar',
                     components: 'country:eg',
                   }}
-                  textInputProps={{
+textInputProps={{
                     placeholderTextColor: isDarkMode ? '#64748b' : '#9ca3af',
+                    value: pickup,
                     onChangeText: (text: string) => { 
                       setPickup(text);
                       if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -1099,18 +1093,34 @@ const rideData = {
                     },
                   }}
                   renderRow={(rowData: any) => (
-                    <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#cbd5e1' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                    <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
                       {rowData.description}
                     </Text>
                   )}
                   styles={{
                     container: { flex: 0, width: '100%' },
                     textInputContainer: { backgroundColor: 'transparent', width: '100%', borderTopWidth: 0, borderBottomWidth: 0, flexDirection: 'row-reverse', alignItems: 'center' },
-                    textInput: { height: 45, color: '#ffffff', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', paddingHorizontal: 10 },
+                    textInput: { height: 45, color: isDarkMode ? '#ffffff' : '#0f172a', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', paddingHorizontal: 10, paddingLeft: 35 },
                     listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
                     row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
+                    description: { color: isDarkMode ? '#ffffff' : '#0f172a' } 
                   }}
                 />
+                
+                {/* 👈 زرار الحذف الجديد (يظهر فقط لو فيه كلام مكتوب) */}
+                {pickup ? (
+                  <TouchableOpacity 
+                    style={{ position: 'absolute', left: 5, padding: 5, zIndex: 2001 }}
+                    onPress={() => {
+                      setPickup('');
+                      pickupRef.current?.setAddressText('');
+                      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                      debounceTimer.current = setTimeout(() => updatePriceCalculation('', destinations, requestedVehicleType, passengersCount, null), 500);
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#94a3b8" />
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </View>
             <TouchableOpacity style={[styles.myLocationBtn, { paddingVertical: 8, paddingHorizontal: 12, marginLeft: 5 }]} onPress={handleGetCurrentLocation} disabled={isFetchingLocation}>
@@ -1127,23 +1137,25 @@ const rideData = {
                   {index === 0 ? 'إلى' : 'ثم'}
                 </Text>
                 
-                <View style={{ flex: 1, zIndex: 999 }}>
-<GooglePlacesAutocomplete
-              placeholder="ابحث عن مكان الانطلاق..."
-              fetchDetails={true}
-              enablePoweredByContainer={false}
-              isRowScrollable={false} // 👈 هنا الحل
-              onPress={(data: any, details: any = null) => {
+                <View style={{ flex: 1, zIndex: 999, position: 'relative', justifyContent: 'center' }}>
+                  <GooglePlacesAutocomplete
+                    ref={(el) => { destRefs.current[index] = el; }}
+                    placeholder="ابحث عن وجهتك..."
+                    fetchDetails={true}
+                    enablePoweredByContainer={false}
+                    isRowScrollable={false}
+                    onPress={(data: any, details: any = null) => {
                       handleDestinationChange(data.description, index);
                     }}
                     query={{
-                      key: GOOGLE_MAPS_APIKEY, // 👈 بياخد مفتاح جوجل اللي إنت ضايفه فوق
+                      key: GOOGLE_MAPS_APIKEY,
                       language: 'ar',
                       components: 'country:eg',
                     }}
                     textInputProps={{
                       placeholderTextColor: isDarkMode ? '#64748b' : '#9ca3af',
                       value: destinations[index] || '',
+                      style: { color: isDarkMode ? '#ffffff' : '#0f172a', textAlign: 'right', flex: 1, backgroundColor: 'transparent' },
                       onChangeText: (text: any) => {
                         handleDestinationChange(text, index);
                       }
@@ -1155,42 +1167,25 @@ const rideData = {
                     )}
                     styles={{
                       container: { flex: 0, width: '100%' },
-                      textInputContainer: { 
-                        backgroundColor: 'transparent', 
-                        width: '100%', 
-                        borderTopWidth: 0, 
-                        borderBottomWidth: 0,
-                        flexDirection: 'row-reverse',
-                        alignItems: 'center',
-                      }, 
-                      textInput: {
-                        height: 45,
-                        color: '#ffffff',
-                        backgroundColor: 'transparent',
-                        fontSize: 15,
-                        textAlign: 'right',
-                        paddingHorizontal: 10,
-                      },
-                      listView: {
-                        position: 'absolute',
-                        top: 48,
-                        width: SCREEN_WIDTH - 30,
-                        right: -45,
-                        zIndex: 9999,
-                        backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
-                        borderRadius: 12,
-                        elevation: 10,
-                      },
-                      row: {
-                        paddingVertical: 12,
-                        paddingHorizontal: 15,
-                        flexDirection: 'row-reverse',
-                        alignItems: 'center',
-                        width: '100%',
-                        minHeight: 50,
-                      },
+                      textInputContainer: { backgroundColor: 'transparent', width: '100%', borderTopWidth: 0, borderBottomWidth: 0, flexDirection: 'row-reverse', alignItems: 'center' }, 
+                      textInput: { height: 45, color: isDarkMode ? '#ffffff' : '#0f172a', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', paddingHorizontal: 10, paddingLeft: 35 },
+                      listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
+                      row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
                     }}
                   />
+                  
+                  {/* 👈 زرار الحذف الجديد للوجهات */}
+                  {destinations[index] ? (
+                    <TouchableOpacity 
+                      style={{ position: 'absolute', left: 5, padding: 5, zIndex: 1000 }}
+                      onPress={() => {
+                        handleDestinationChange('', index);
+                        destRefs.current[index]?.setAddressText('');
+                      }}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#94a3b8" />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
 
@@ -1699,10 +1694,13 @@ const rideData = {
                         query={{ key: GOOGLE_MAPS_APIKEY, language: 'ar', components: 'country:eg' }}
                         textInputProps={{
                           placeholderTextColor: isDarkMode ? '#64748b' : '#94a3b8',
-                          onChangeText: (text: string) => handleTempDestChange(text, index)
+                          defaultValue: dest,
+                          onChangeText: (text: string) => {
+                            handleTempDestChange(text, index);
+                          }
                         }}
                         renderRow={(rowData: any) => (
-                          <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#cbd5e1' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                          <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
                             {rowData.description}
                           </Text>
                         )}
@@ -1712,6 +1710,7 @@ const rideData = {
                           textInput: { height: 45, color: isDarkMode ? '#ffffff' : '#0f172a', backgroundColor: 'transparent', fontSize: 14, textAlign: 'right', paddingHorizontal: 10 },
                           listView: { position: 'absolute', top: 48, width: '100%', zIndex: 10000, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
                           row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
+                          description: { color: isDarkMode ? '#ffffff' : '#0f172a' }
                         }}
                       />
                     </View>

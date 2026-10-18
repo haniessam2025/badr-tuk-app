@@ -22,7 +22,7 @@
       "package": "com.haniessam.badrtukapp",
       "config": {
         "googleMaps": {
-          "apiKey": ""
+          "apiKey": "AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg"
         }
       },
       "permissions": [
