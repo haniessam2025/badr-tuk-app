@@ -2010,7 +2010,7 @@ const notifyArrival = async () => {
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-history'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-ratings'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>التقييمات</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات </Text></TouchableOpacity>
             </ScrollView>
             
             <TouchableOpacity 

@@ -5,12 +5,14 @@ import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, LogBox, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
+
+LogBox.ignoreLogs(['VirtualizedLists should never be nested']);
 
 const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -107,50 +109,26 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, r
   );
 };
 
-const sendPushNotification = async (expoPushToken: string, passengerName: string, pickupLocation: string) => {
-  const message = {
-    to: expoPushToken,
-    sound: 'default',
-    title: 'مشوار جديد متاح! 🛺',
-    body: `طلب جديد من ${passengerName} للانطلاق من: ${pickupLocation}`,
-    data: { route: '/captain-home' },
-  };
-  try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
-      body: JSON.stringify(message),
-    });
-  } catch (error) {}
-};
-
 export default function PassengerHome() {
   const router = useRouter();
   
   const { isDarkMode, toggleTheme, isVibrationEnabled, toggleVibration } = useApp(); 
   const [localVibration, setLocalVibration] = useState(true);
-
-const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
-  const [liveSettings, setLiveSettings] = useState<any>(null); // 👈 هنحفظ التسعيرة هنا لايف
-
+  const [isRideDetailsExpanded, setIsRideDetailsExpanded] = useState(false); // 👈 للتحكم في كارت التفاصيل
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [liveSettings, setLiveSettings] = useState<any>(null); 
+  const [isSearchingDetailsExpanded, setIsSearchingDetailsExpanded] = useState(false); // 👈 ده اللي هيقفل ويفتح تفاصيل استقبال العروض
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setIsMaintenanceMode(data.maintenanceMode || false);
-        setLiveSettings(data); // 👈 تحديث الأسعار لايف
+        setLiveSettings(data); 
       }
     });
     return () => unsubSettings();
   }, []);
 
-  useEffect(() => {
-    // 👈 أول ما التسعيرة تتغير في الداشبورد، الحسبة هتتحدث فوراً باستخدام القيم الجديدة
-    if (liveSettings && pickup && destinations.length > 0 && destinations[0].trim() !== '') {
-      updatePriceCalculation(pickup, destinations, requestedVehicleType, passengersCount, pickupCoords);
-    }
-  }, [liveSettings]);
-  
   const pathname = usePathname();
 
   const flashAnim = useRef(new Animated.Value(0)).current;
@@ -246,6 +224,12 @@ const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
 
   useEffect(() => {
+    if (liveSettings && pickup && destinations.length > 0 && destinations[0].trim() !== '') {
+      updatePriceCalculation(pickup, destinations, requestedVehicleType, passengersCount, pickupCoords);
+    }
+  }, [liveSettings]);
+
+  useEffect(() => {
     if(captainLiveCoords && pickupCoords && rideStatus === 'accepted') {
         fetch(`https://maps.googleapis.com/maps/api/directions/json?origin=${captainLiveCoords.latitude},${captainLiveCoords.longitude}&destination=${pickupCoords.latitude},${pickupCoords.longitude}&key=${GOOGLE_MAPS_APIKEY}&language=ar`)
         .then(res => res.json())
@@ -299,7 +283,7 @@ const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
     if (currentRideId && rideStatus === 'searching' && price) {
       updateDoc(doc(db, 'rides', currentRideId), { 
         price: price.toString(),
-        fairPrice: calculatedBasePrice || parseInt(price), // 👈 إرسال (السعر العادل) الثابت للكابتن ليقارن به
+        fairPrice: calculatedBasePrice || parseInt(price), 
         timestamp: new Date().getTime() 
       }).catch((e) => console.log('Price Sync Error:', e));
     }
@@ -312,7 +296,6 @@ const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
     setIsEditDestModalVisible(false);
     setDestinations(validDests);
     
-    // 👈 حفظ الأسعار اللي الراكب اختارها جوا المودال
     setPrice(modalPrice);
     setCalculatedBasePrice(modalBasePrice);
     setBasePriceForSuggestions(modalBasePrice);
@@ -323,15 +306,16 @@ const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
       await updateDoc(doc(db, 'rides', currentRideId), {
         destinationsList: validDests,
         destinationLocation: validDests.join(' - '),
-        price: modalPrice, // 👈 السعر النهائي اللي اختاره
-        fairPrice: modalBasePrice // 👈 السعر العادل عشان الكابتن يقارن بيه
+        price: modalPrice,
+        fairPrice: modalBasePrice 
       });
       if (rideStatus !== 'searching') {
         Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر بنجاح.');
       }
     }
   };
-const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
+
+  const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
     if (!tiers || tiers.length === 0) return 0;
     const sortedTiers = [...tiers].sort((a, b) => parseFloat(a.upToKm) - parseFloat(b.upToKm));
     
@@ -369,14 +353,12 @@ const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
         let totalDistanceKm = 0;
         let googleSuccess = false;
 
-        // 1. تحويل كل نصوص الوجهات لإحداثيات دقيقة أولاً
         let destsCoords: any[] = [];
         for (let dest of validDests) {
           const coords = await getCoordinatesFromText(dest);
           if (coords) destsCoords.push(coords);
         }
 
-        // 2. الاتصال بجوجل باستخدام الإحداثيات (مستحيل يرجع NOT_FOUND)
         if (destsCoords.length > 0) {
           try {
             let originStr = `${startCoords.latitude},${startCoords.longitude}`;
@@ -397,13 +379,11 @@ const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
                totalDistanceKm = totalMeters / 1000;
                googleSuccess = true;
             } else {
-               // تم إزالة الرسالة المزعجة، التطبيق سيكمل صامتاً أثناء كتابة الراكب
                console.log("Directions Status: ", data.status);
             }
           } catch (e) { console.log("Google Directions API Error"); }
         }
 
-        // 3. بديل الطوارئ لو جوجل فشل
         if (!googleSuccess) {
            let totalDirectMeters = 0;
            let currentPoint = startCoords;
@@ -441,16 +421,16 @@ const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
         } else {
           const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
           const firstTierLimit = appSettings.tuktuk.tiers && appSettings.tuktuk.tiers.length > 0 ? parseFloat(appSettings.tuktuk.tiers[0].upToKm) : 999;
-          let baseForOne = 0;
-          if (totalDistanceKm <= firstTierLimit) baseForOne = Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFare);
-          else baseForOne = Number(appSettings.tuktuk.baseFare) + distanceFare;
-          const count = parseInt(passCountStr) || 1;
-          calculatedPrice = baseForOne * (1 + ((count - 1) * 0.25));
+          
+          if (totalDistanceKm <= firstTierLimit) {
+            calculatedPrice = Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFare);
+          } else {
+            calculatedPrice = Number(appSettings.tuktuk.baseFare) + distanceFare;
+          }
         }
 
         let finalBase = Math.ceil(calculatedPrice);
         
-        // 👈 توجيه السعر المحسوب للمودال أو الشاشة الرئيسية
         if (isTempModal) {
             setModalBasePrice(finalBase);
             setModalPrice(finalBase.toString());
@@ -473,7 +453,8 @@ const calculateTieredPrice = (distanceKm: number, tiers: any[]) => {
       }
     }
   };
-const handleGetCurrentLocation = async () => {
+
+  const handleGetCurrentLocation = async () => {
     setIsFetchingLocation(true);
     try {
       let servicesEnabled = await Location.hasServicesEnabledAsync();
@@ -495,12 +476,10 @@ const handleGetCurrentLocation = async () => {
 
       let addressText = 'موقعي الحالي';
       
-      // 👈 استخدام جوجل ماب API العكسي لجلب العنوان الفعلي بالتفصيل
       try {
         const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${currentCoords.latitude},${currentCoords.longitude}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
         const data = await response.json();
         if (data.results && data.results.length > 0) {
-          // هنأخد العنوان المنسق من جوجل
           addressText = data.results[0].formatted_address;
         }
       } catch (e) {
@@ -509,7 +488,6 @@ const handleGetCurrentLocation = async () => {
 
       setPickup(addressText);
       
-      // 👈 وضع النص في مربع اقتراحات جوجل للانطلاق
       if (pickupRef.current) {
         pickupRef.current.setAddressText(addressText);
       }
@@ -526,6 +504,7 @@ const handleGetCurrentLocation = async () => {
       setIsFetchingLocation(false);
     }
   };
+
   const handlePickupChange = (text: string) => {
     setPickup(text);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -583,14 +562,13 @@ const handleGetCurrentLocation = async () => {
 
   const saveNewPrice = async () => {
     setPrice(tempPrice);
-    // 👈 تم إزالة setBasePriceForSuggestions للحفاظ على (السعر العادل) الأصلي دون تغيير لما الراكب يعدل سعره
     setIsEditModalVisible(false);
     if (currentRideId && ['accepted', 'captain_arrived', 'in_progress'].includes(rideStatus)) {
       await updateDoc(doc(db, 'rides', currentRideId), { price: tempPrice.toString() });
     }
   };
 
- const verifyPromoCode = async () => {
+  const verifyPromoCode = async () => {
     if (!promoCodeInput.trim()) return;
     setIsVerifyingPromo(true);
     try {
@@ -690,13 +668,13 @@ const handleGetCurrentLocation = async () => {
     setIsSubmitting(true); setRideStatus('searching'); setOffers([]); prevOffersCountRef.current = 0; 
     let finalPickupCoords = pickupCoords || { latitude: 30.0444, longitude: 31.2357 };
     try {
-const rideData = {
+      const rideData = {
         passengerId: passengerProfile.id, name: passengerProfile.name, phone: passengerProfile.phone,
         isPhoneHidden: passengerProfile.hidePhoneNumber || false, avatar: passengerProfile.avatar,
         pickupLocation: pickup, pickupCoords: finalPickupCoords, destinationsList: validDests,
         destinationLocation: validDests.join(' '), 
         price: price, 
-        fairPrice: basePriceForSuggestions, // 👈 السعر المقترح بيتبعت هنا
+        fairPrice: basePriceForSuggestions,
         distance: calculatedDistance, 
         numericSecret: Math.floor(1000 + Math.random() * 9000).toString(), qrSecret: Math.random().toString(36).substring(2, 10),
         notes: notes.trim(), requestedVehicleType, paymentMethod: paymentMethod, offers: [], status: 'pending', timestamp: new Date().getTime(),
@@ -785,7 +763,6 @@ const rideData = {
   };
 
   const getCoordinatesFromText = async (text: string) => {
-    // 1. الاعتماد على جوجل أولاً للدقة المتناهية في مصر
     try {
       const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(text + ' مصر')}&key=${GOOGLE_MAPS_APIKEY}&language=ar`);
       const data = await response.json();
@@ -794,7 +771,6 @@ const rideData = {
       }
     } catch (e) { }
 
-    // 2. بديل إكسبو لو جوجل فشل
     try {
       const expoResult = await Location.geocodeAsync(text + ' مصر');
       if (expoResult && expoResult.length > 0) return { latitude: expoResult[0].latitude, longitude: expoResult[0].longitude };
@@ -1013,6 +989,7 @@ const rideData = {
           <Text style={styles.toastText}>رسالة جديدة من الكابتن</Text>
         </Animated.View>
       )}
+      
       <View style={[styles.header, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }, { flexDirection: 'row-reverse' }]}>
         <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity style={[styles.headerMenuBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={openSidebar}>
@@ -1057,11 +1034,31 @@ const rideData = {
             <Animated.Image source={headerImageSource} style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} resizeMode="contain" />
           </View>
 
-          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
-          <View style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10, zIndex: 2000 }]}>
+{/* 👇 تم إرجاع بلوك اختيار نوع المركبة */}
+<Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>نوع المركبة</Text>
+          <View style={styles.vehicleTypeTabs}>
+            {/* 👇 الزرار الأول بقى كيوت 3 راكب */}
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('tuktuk_alt')}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'tuktuk_alt' && styles.vTypeTextActive]}>كيوت 3 راكب</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('car')}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>سيارة</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'scooter' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('scooter')}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
+            </TouchableOpacity>
+          </View>
+                    {requestedVehicleType === 'tuktuk_alt' && (
+            <View style={styles.vehicleTypeTabs}>  
+            </View>
+          )}
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>          
+          <View style={[styles.modernDestContainer, { backgroundColor: '#ffffff', borderColor: '#e2e8f0', marginBottom: 10, zIndex: 2000 }]}>
             <View style={styles.modernDestRight}>
               <Ionicons name="location" size={22} color="#10b981" />
-              <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>من</Text>
+              <Text style={{ color: '#1e293b', fontSize: 16, marginLeft: 5, fontWeight: 'bold' }}>من</Text>
               
               <View style={{ flex: 1, zIndex: 2000, position: 'relative', justifyContent: 'center' }}>
                 <GooglePlacesAutocomplete
@@ -1078,14 +1075,11 @@ const rideData = {
                     if (debounceTimer.current) clearTimeout(debounceTimer.current);
                     debounceTimer.current = setTimeout(() => updatePriceCalculation(text, destinations, requestedVehicleType, passengersCount, coords), 1500);
                   }}
-                  query={{
-                    key: GOOGLE_MAPS_APIKEY,
-                    language: 'ar',
-                    components: 'country:eg',
-                  }}
-textInputProps={{
-                    placeholderTextColor: isDarkMode ? '#64748b' : '#9ca3af',
+                  query={{ key: GOOGLE_MAPS_APIKEY, language: 'ar', components: 'country:eg' }}
+                  textInputProps={{
+                    placeholderTextColor: '#64748b',
                     value: pickup,
+                    style: { color: '#000000', textAlign: 'right', flex: 1, backgroundColor: 'transparent', height: 45 }, 
                     onChangeText: (text: string) => { 
                       setPickup(text);
                       if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -1093,31 +1087,21 @@ textInputProps={{
                     },
                   }}
                   renderRow={(rowData: any) => (
-                    <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                    <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: '#000000', fontSize: 14, lineHeight: 22 }}>
                       {rowData.description}
                     </Text>
                   )}
                   styles={{
                     container: { flex: 0, width: '100%' },
                     textInputContainer: { backgroundColor: 'transparent', width: '100%', borderTopWidth: 0, borderBottomWidth: 0, flexDirection: 'row-reverse', alignItems: 'center' },
-                    textInput: { height: 45, color: isDarkMode ? '#ffffff' : '#0f172a', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', paddingHorizontal: 10, paddingLeft: 35 },
-                    listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
-                    row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
-                    description: { color: isDarkMode ? '#ffffff' : '#0f172a' } 
+                    textInput: { color: '#000000', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', flex: 1, height: 45, paddingHorizontal: 10, paddingLeft: 35 },
+                    listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: '#ffffff', borderRadius: 12, elevation: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+                    row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
                   }}
                 />
                 
-                {/* 👈 زرار الحذف الجديد (يظهر فقط لو فيه كلام مكتوب) */}
                 {pickup ? (
-                  <TouchableOpacity 
-                    style={{ position: 'absolute', left: 5, padding: 5, zIndex: 2001 }}
-                    onPress={() => {
-                      setPickup('');
-                      pickupRef.current?.setAddressText('');
-                      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-                      debounceTimer.current = setTimeout(() => updatePriceCalculation('', destinations, requestedVehicleType, passengersCount, null), 500);
-                    }}
-                  >
+                  <TouchableOpacity style={{ position: 'absolute', left: 5, padding: 5, zIndex: 2001 }} onPress={() => { setPickup(''); pickupRef.current?.setAddressText(''); if (debounceTimer.current) clearTimeout(debounceTimer.current); debounceTimer.current = setTimeout(() => updatePriceCalculation('', destinations, requestedVehicleType, passengersCount, null), 500); }}>
                     <Ionicons name="close-circle" size={20} color="#94a3b8" />
                   </TouchableOpacity>
                 ) : null}
@@ -1130,10 +1114,10 @@ textInputProps={{
 
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الوجهة المطلوبة</Text>
           {destinations.map((dest, index) => (
-            <View key={index} style={[styles.modernDestContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#475569' }, { marginBottom: 10, zIndex: 1000 - index }]}>
+            <View key={index} style={[styles.modernDestContainer, { backgroundColor: '#ffffff', borderColor: '#e2e8f0', marginBottom: 10, zIndex: 1000 - index }]}>
               <View style={styles.modernDestRight}>
                 <Ionicons name="search" size={22} color="#9ca3af" />
-                <Text style={[styles.modernDestToText, isDarkMode && { color: '#cbd5e1' }]}>
+                <Text style={{ color: '#1e293b', fontSize: 16, marginLeft: 5, fontWeight: 'bold' }}>
                   {index === 0 ? 'إلى' : 'ثم'}
                 </Text>
                 
@@ -1147,42 +1131,31 @@ textInputProps={{
                     onPress={(data: any, details: any = null) => {
                       handleDestinationChange(data.description, index);
                     }}
-                    query={{
-                      key: GOOGLE_MAPS_APIKEY,
-                      language: 'ar',
-                      components: 'country:eg',
-                    }}
+                    query={{ key: GOOGLE_MAPS_APIKEY, language: 'ar', components: 'country:eg' }}
                     textInputProps={{
-                      placeholderTextColor: isDarkMode ? '#64748b' : '#9ca3af',
+                      placeholderTextColor: '#64748b',
                       value: destinations[index] || '',
-                      style: { color: isDarkMode ? '#ffffff' : '#0f172a', textAlign: 'right', flex: 1, backgroundColor: 'transparent' },
+                      style: { color: '#000000', textAlign: 'right', flex: 1, backgroundColor: 'transparent', height: 45 },
                       onChangeText: (text: any) => {
                         handleDestinationChange(text, index);
                       }
                     }}
                     renderRow={(rowData: any) => (
-                      <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: isDarkMode ? '#cbd5e1' : '#1e293b', fontSize: 14, lineHeight: 22 }}>
+                      <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: '#000000', fontSize: 14, lineHeight: 22 }}>
                         {rowData.description}
                       </Text>
                     )}
                     styles={{
                       container: { flex: 0, width: '100%' },
                       textInputContainer: { backgroundColor: 'transparent', width: '100%', borderTopWidth: 0, borderBottomWidth: 0, flexDirection: 'row-reverse', alignItems: 'center' }, 
-                      textInput: { height: 45, color: isDarkMode ? '#ffffff' : '#0f172a', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', paddingHorizontal: 10, paddingLeft: 35 },
-                      listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderRadius: 12, elevation: 10 },
-                      row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50 },
+                      textInput: { color: '#000000', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', flex: 1, height: 45, paddingHorizontal: 10, paddingLeft: 35 },
+                      listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: '#ffffff', borderRadius: 12, elevation: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+                      row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
                     }}
                   />
                   
-                  {/* 👈 زرار الحذف الجديد للوجهات */}
                   {destinations[index] ? (
-                    <TouchableOpacity 
-                      style={{ position: 'absolute', left: 5, padding: 5, zIndex: 1000 }}
-                      onPress={() => {
-                        handleDestinationChange('', index);
-                        destRefs.current[index]?.setAddressText('');
-                      }}
-                    >
+                    <TouchableOpacity style={{ position: 'absolute', left: 5, padding: 5, zIndex: 1000 }} onPress={() => { handleDestinationChange('', index); destRefs.current[index]?.setAddressText(''); }}>
                       <Ionicons name="close-circle" size={20} color="#94a3b8" />
                     </TouchableOpacity>
                   ) : null}
@@ -1305,87 +1278,103 @@ textInputProps={{
 
       {rideStatus === 'searching' && (
         <View style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
-          <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
           
-          <View style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#e2e8f0' }}>
-            
-            <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 8 }}>
-              <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🟢 الانطلاق:</Text>
-              <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{pickup}</Text>
-            </View>
-            
-            <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 12 }}>
-              <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🔴 الوجهة:</Text>
-              <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{destinations.join(' - ')}</Text>
-            </View>
-
-            <TouchableOpacity 
-              style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f1f5f9', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', marginBottom: 10, alignItems: 'center' }} 
-              onPress={openEditDestModal}
-            >
-              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 'bold', fontSize: 13 }}>تعديل الوجهة 🗺️</Text>
-            </TouchableOpacity>
-
-            <View style={{ height: 1, backgroundColor: isDarkMode ? '#475569' : '#e2e8f0', marginBottom: 10 }} />
-
-            <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: (basePriceForSuggestions > 0 || parseInt(price) > 0) ? 10 : 0 }}>
-              <View style={{ flexDirection: 'row-reverse', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: '#64748b', marginLeft: 5 }}>سعرك المقترح:</Text>
-                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10b981' }}>{price || calculatedBasePrice || '0'} ج</Text>
-              </View>
-              <TouchableOpacity 
-                style={{ backgroundColor: '#d97706', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, elevation: 1 }}
-                onPress={openEditPriceModal}
-              >
-                <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 'bold' }}>تعديل السعر ✏️</Text>
-              </TouchableOpacity>
-            </View>
-
-            {(basePriceForSuggestions > 0 || parseInt(price) > 0) && (
-              <View style={[styles.suggestionsRow, { marginBottom: 0, marginTop: 5 }]}>
-                {[1.2, 1.4, 1.6].map((multiplier, index) => {
-                  const displayBasePrice = basePriceForSuggestions > 0 ? basePriceForSuggestions : parseInt(price);
-                  const suggestedPrice = Math.round(displayBasePrice * multiplier);
-                  const currentPrice = price || displayBasePrice.toString();
-                  const isSelected = currentPrice === suggestedPrice.toString();
-                  const percentage = Math.round((multiplier - 1) * 100);
-                  return (
-                    <TouchableOpacity 
-                      key={index} 
-                      style={[styles.suggestionBtn, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#475569' }, isSelected && styles.suggestionBtnActive]} 
-                      onPress={async () => { 
-                        const newPriceStr = suggestedPrice.toString();
-                        setPrice(newPriceStr); 
-                        try {
-                          if (currentRideId) await updateDoc(doc(db, 'rides', currentRideId), { price: newPriceStr });
-                          const savedRide = await AsyncStorage.getItem('active_ride');
-                          if (savedRide) {
-                            const data = JSON.parse(savedRide);
-                            data.price = newPriceStr;
-                            await AsyncStorage.setItem('active_ride', JSON.stringify(data));
-                          }
-                        } catch(e) {}
-                      }}
-                    >
-                      <Text style={[styles.suggestionText, isDarkMode && { color: '#cbd5e1' }, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
-                      <Text style={[styles.suggestionSubText, isDarkMode && { color: '#94a3b8' }, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-
+          {/* هيدر استقبال العروض قابل للضغط */}
           <TouchableOpacity 
-            style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: autoAcceptEnabled ? '#ecfdf5' : (isDarkMode ? '#0f172a' : '#ffffff'), padding: 10, borderRadius: 10, borderWidth: 1, borderColor: autoAcceptEnabled ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), marginBottom: 15 }} 
-            onPress={() => setAutoAcceptEnabled(!autoAcceptEnabled)}
+            style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}
+            onPress={() => setIsSearchingDetailsExpanded(!isSearchingDetailsExpanded)}
           >
-            <Ionicons name={autoAcceptEnabled ? "checkmark-circle" : "ellipse-outline"} size={24} color={autoAcceptEnabled ? "#10b981" : "#94a3b8"} />
-            <View style={{ marginRight: 10, flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: 'bold', color: autoAcceptEnabled ? '#064e3b' : (isDarkMode ? '#cbd5e1' : '#475569'), textAlign: 'right' }}>القبول التلقائي ⚡</Text>
-              <Text style={{ fontSize: 11, color: '#64748b', textAlign: 'right' }}>قبول العروض المطابقة لسعرك تلقائياً ورفض الأعلى.</Text>
+            <Text style={[styles.cardTitle, { marginBottom: 0 }, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
+            <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 5 }}>
+              <Text style={{ fontSize: 13, color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 'bold' }}>تفاصيل الرحلة</Text>
+              <Ionicons name={isSearchingDetailsExpanded ? "chevron-up" : "chevron-down"} size={20} color={isDarkMode ? '#94a3b8' : '#64748b'} />
             </View>
           </TouchableOpacity>
+          
+          {/* الجزء المخفي اللي هيتلم (تفاصيل الرحلة والقبول التلقائي) */}
+          {isSearchingDetailsExpanded && (
+            <View>
+              <View style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#e2e8f0' }}>
+                
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🟢 الانطلاق:</Text>
+                  <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{pickup}</Text>
+                </View>
+                
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🔴 الوجهة:</Text>
+                  <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{destinations.join(' - ')}</Text>
+                </View>
+
+                <TouchableOpacity 
+                  style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f1f5f9', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', marginBottom: 10, alignItems: 'center' }} 
+                  onPress={openEditDestModal}
+                >
+                  <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 'bold', fontSize: 13 }}>تعديل الوجهة 🗺️</Text>
+                </TouchableOpacity>
+
+                <View style={{ height: 1, backgroundColor: isDarkMode ? '#475569' : '#e2e8f0', marginBottom: 10 }} />
+
+                <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: (basePriceForSuggestions > 0 || parseInt(price) > 0) ? 10 : 0 }}>
+                  <View style={{ flexDirection: 'row-reverse', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 13, color: '#64748b', marginLeft: 5 }}>سعرك المقترح:</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10b981' }}>{price || calculatedBasePrice || '0'} ج</Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={{ backgroundColor: '#d97706', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, elevation: 1 }}
+                    onPress={openEditPriceModal}
+                  >
+                    <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 'bold' }}>تعديل السعر ✏️</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {(basePriceForSuggestions > 0 || parseInt(price) > 0) && (
+                  <View style={[styles.suggestionsRow, { marginBottom: 0, marginTop: 5 }]}>
+                    {[1.2, 1.4, 1.6].map((multiplier, index) => {
+                      const displayBasePrice = basePriceForSuggestions > 0 ? basePriceForSuggestions : parseInt(price);
+                      const suggestedPrice = Math.round(displayBasePrice * multiplier);
+                      const currentPrice = price || displayBasePrice.toString();
+                      const isSelected = currentPrice === suggestedPrice.toString();
+                      const percentage = Math.round((multiplier - 1) * 100);
+                      return (
+                        <TouchableOpacity 
+                          key={index} 
+                          style={[styles.suggestionBtn, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#475569' }, isSelected && styles.suggestionBtnActive]} 
+                          onPress={async () => { 
+                            const newPriceStr = suggestedPrice.toString();
+                            setPrice(newPriceStr); 
+                            try {
+                              if (currentRideId) await updateDoc(doc(db, 'rides', currentRideId), { price: newPriceStr });
+                              const savedRide = await AsyncStorage.getItem('active_ride');
+                              if (savedRide) {
+                                const data = JSON.parse(savedRide);
+                                data.price = newPriceStr;
+                                await AsyncStorage.setItem('active_ride', JSON.stringify(data));
+                              }
+                            } catch(e) {}
+                          }}
+                        >
+                          <Text style={[styles.suggestionText, isDarkMode && { color: '#cbd5e1' }, isSelected && styles.suggestionTextActive]}>{suggestedPrice}</Text>
+                          <Text style={[styles.suggestionSubText, isDarkMode && { color: '#94a3b8' }, isSelected && styles.suggestionSubTextActive]}>+{percentage}%</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity 
+                style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: autoAcceptEnabled ? '#ecfdf5' : (isDarkMode ? '#0f172a' : '#ffffff'), padding: 10, borderRadius: 10, borderWidth: 1, borderColor: autoAcceptEnabled ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), marginBottom: 15 }} 
+                onPress={() => setAutoAcceptEnabled(!autoAcceptEnabled)}
+              >
+                <Ionicons name={autoAcceptEnabled ? "checkmark-circle" : "ellipse-outline"} size={24} color={autoAcceptEnabled ? "#10b981" : "#94a3b8"} />
+                <View style={{ marginRight: 10, flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: autoAcceptEnabled ? '#064e3b' : (isDarkMode ? '#cbd5e1' : '#475569'), textAlign: 'right' }}>القبول التلقائي ⚡</Text>
+                  <Text style={{ fontSize: 11, color: '#64748b', textAlign: 'right' }}>قبول العروض المطابقة لسعرك تلقائياً ورفض الأعلى.</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {offers.length === 0 ? (<Text style={styles.subText}>يرجى الانتظار قليلاً لتلقي عروض الكباتن...</Text>) : null}
           <ScrollView style={styles.offersContainer} showsVerticalScrollIndicator={false}>
@@ -1984,22 +1973,25 @@ textInputProps={{
               </TouchableOpacity>
 
               {/* التقييمات */}
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); Alert.alert('التقييمات', `تقييمك الحالي: ${passengerProfile.averageRating} نجوم`); }}>
-                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>التقييمات</Text>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/passenger-ratings'); }}>
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>التقييمات ⭐</Text>
               </TouchableOpacity>
 
               {/* الدعم الفني */}
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); Alert.alert('الدعم الفني', 'سيتم تحويلك لصفحة الدعم'); }}>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text>
               </TouchableOpacity>
 
-              <Text style={[styles.sidebarSectionTitle, isDarkMode && { color: '#cbd5e1' }]}>المقترحات والشكاوى</Text>
-              
+              {/* 👈 الزرار الجديد المستقل للشكاوى والمقترحات والمفقودات */}
+              <TouchableOpacity 
+                style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} 
+                onPress={() => { closeSidebar(); router.push('/passenger-complaints' as any); }}
+              >
+                <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات</Text>
+              </TouchableOpacity>
+
               {/* زرار الدعم الفني المباشر الأخضر */}
-              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => {
-                closeSidebar();
-                Linking.openURL('https://wa.me/201017770180?text=محتاج%20مساعدة%20من%20الدعم%20الفني');
-              }}>
+              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { closeSidebar(); router.push('/support-live-chat' as any); }}>
                 <Text style={styles.sidebarSupportBtnText}>💬 محادثة الدعم الفني (مباشر)</Text>
               </TouchableOpacity>
 
