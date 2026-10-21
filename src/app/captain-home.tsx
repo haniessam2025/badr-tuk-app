@@ -2198,29 +2198,19 @@ const notifyArrival = async () => {
         </View>
       </Modal>
 
-      <Modal visible={isCallModalVisible} transparent={true} animationType="fade">        
-        <View style={styles.modalOverlay}>
+ <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modaloverlay}>
           <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
-            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال</Text>
-            
-            {/* 🛡️ التحقق من خصوصية رقم الراكب */}
-            {activeRide?.isPhoneHidden ? (
-              <View style={{ backgroundColor: '#f0fdf4', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#bbf7d0', alignItems: 'center', width: '100%' }}>
-                <Text style={{ fontSize: 30, marginBottom: 5 }}>🛡</Text>
-                <Text style={{ color: '#166534', fontSize: 13, fontWeight: 'bold', textAlign: 'center', lineHeight: 20 }}>
-                  الراكب مفعّل خاصية إخفاء الرقم.
-                  التواصل متاح فقط عبر المكالمة المجانية أو المراسلة داخل التطبيق.
-                </Text>
-              </View>
-            ) : (
-              <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
-                <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#ffffff' }]}>مكالمة عادية (شبكة المحمول)</Text>
-              </TouchableOpacity>
-            )}
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال بالكابتن</Text>
+
+            <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
+              <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#ffffff' }]}>مكالمة عادية (شبكة المحمول)</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
               <Text style={styles.freeCallBtnText}>مكالمة مجانية داخل التطبيق</Text>
             </TouchableOpacity>
+
             <TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}>
               <Text style={styles.cancelCallBtnText}>إلغاء</Text>
             </TouchableOpacity>
