@@ -743,33 +743,43 @@ useEffect(() => {
 
   const handleSendOfferForPopped = async () => {
     if (!closestPoppedRide || !offerPriceForPopped) return;
+    
+    // 1. حفظ رقم الرحلة عشان نتعامل معاه
+    const rideIdToProcess = closestPoppedRide.id;
+    
+    // 2. السر هنا: بنضيف الرحلة لقائمة "التخطي" عشان الشاشة الكبيرة متفتحش تاني
+    setSkippedPoppedRides(prev => [...prev, rideIdToProcess]); 
+    setClosestPoppedRide(null); // إغلاق الشاشة الكبيرة فوراً (استجابة سريعة للكابتن)
+    
+    // 3. تحويل الكارت الصغير في الخلفية لوضع "الانتظار والتحميل"
+    setSentOffers(prev => [...prev, rideIdToProcess]);
+
     try {
-      const rideRef = doc(db, 'rides', closestPoppedRide.id);
+      const rideRef = doc(db, 'rides', rideIdToProcess);
       const rideSnap = await getDoc(rideRef);
       if (rideSnap.exists()) {
          const currentOffers = rideSnap.data().offers || [];
          const newOffer = {
-            captainId: captainProfile.id,
-            captainName: captainProfile.name,
-            captainPhone: captainProfile.phone,
-            captainAvatar: captainProfile.avatar,
-            captainVehicle: captainProfile.vehicle,
-            captainPlateNumber: (captainProfile as any).plateNumber || '',
-            captainRating: (captainProfile as any).averageRating || 5,
-            price: offerPriceForPopped,
-            offerTimestamp: new Date().getTime()
+           captainId: String(captainProfile.id),
+           captainName: String(captainProfile.name),
+           captainPhone: String(captainProfile.phone),
+           captainAvatar: getSafeAvatar(captainProfile.avatar),
+           captainVehicle: String(captainProfile.vehicle),
+           captainPlateNumber: String((captainProfile as any).plateNumber || ''),
+           captainRating: (captainProfile as any).averageRating || 5,
+           price: String(offerPriceForPopped),
+           offerTimestamp: new Date().getTime()
          };
-         // إضافة عرض الكابتن لقاعدة البيانات
-         await updateDoc(rideRef, { offers: [...currentOffers.filter((o:any)=>o.captainId !== captainProfile.id), newOffer] });
-         setSentOffers(prev => [...prev, closestPoppedRide.id]);
-         setClosestPoppedRide(null);
-         Alert.alert("نجاح ✅", "تم إرسال عرضك للراكب بنجاح!");
+         
+         // 4. إرسال العرض لقاعدة البيانات
+         await updateDoc(rideRef, { offers: [...currentOffers.filter((o:any)=>o.captainId !== String(captainProfile.id)), newOffer] });
       }
     } catch(e) {
-      Alert.alert("خطأ", "حدثت مشكلة أثناء إرسال العرض");
+      // لو حصل مشكلة نرجع الشاشة ونلغي وضع الانتظار
+      setSentOffers(prev => prev.filter(id => id !== rideIdToProcess));
+      Alert.alert("خطأ", "حدثت مشكلة أثناء إرسال العرض، تأكد من اتصالك بالإنترنت");
     }
   };
-  // 🚀 ----------------------------------------------------
 
   useEffect(() => {
     if (!captainProfile.id) return;
@@ -1030,7 +1040,12 @@ const notifyArrival = async () => {
       activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
     }
   };
-
+// 🚀 رفع الشاشة تلقائياً للكابتن لو الراكب عدل الوجهة
+  useEffect(() => {
+    if (activeRide?.pendingModification?.status === 'pending_captain_approval') {
+      activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
+    }
+  }, [activeRide?.pendingModification?.status]);
   const completeRide = () => {
     if (!activeRide) return;
     const finalPrice = parseInt(activeRide.price || '0');
@@ -1513,126 +1528,124 @@ const notifyArrival = async () => {
               )}
             </View>
 
-           {/* كارت بيانات الراكب */}
-            <View style={[styles.passengerCard, isDarkMode && { backgroundColor: '#334155' }]}>
-              <Image source={{ uri: activeRide.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.activeAvatar} />
-              <View style={styles.detailsCol}>
-                <Text style={[styles.detailsText, isDarkMode && { color: '#e2e8f0' }]}>الراكب: {activeRide.name}</Text>
-                <View style={{ flexDirection: 'row-reverse', justifyContent: 'flex-start', marginBottom: 4 }}>
-                  {[1, 2, 3, 4, 5].map((star) => (<Text key={star} style={{ color: star <= Math.round(activeRide.passengerRating || 5) ? '#f59e0b' : '#cbd5e1', fontSize: 14 }}>★</Text>))}
-                </View>
-              </View>
-            </View>
-
-            {/* 🚨 إشعار طلب تعديل الوجهة من الراكب 🚨 */}
-            {activeRide.pendingModification?.status === 'pending_captain_approval' && (
-              <View style={{ backgroundColor: isDarkMode ? '#451a03' : '#fffbeb', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 2, borderColor: '#f59e0b', elevation: 4 }}>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#fde68a' : '#d97706', textAlign: 'center', marginBottom: 12 }}>
-                  🗺️ الراكب يرغب في تغيير الوجهة!
-                </Text>
-                
-                <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', padding: 10, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#fde68a' }}>
-                  <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'right', fontWeight: 'bold' }}>الوجهة المطلوبة:</Text>
-                  <Text style={{ color: isDarkMode ? '#ffffff' : '#0f172a', fontSize: 15, fontWeight: 'bold', textAlign: 'right', marginTop: 4 }}>
-                    {activeRide.pendingModification.newDestinationLocation}
-                  </Text>
-                </View>
-
-                <View style={{ backgroundColor: isDarkMode ? '#064e3b' : '#ecfdf5', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#10b981' }}>
-                  <Text style={{ color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 18, fontWeight: '900', textAlign: 'center' }}>
-                    السعر المقترح للراكب: {activeRide.pendingModification.newPrice} ج
-                  </Text>
-                </View>
-
-                {/* 1 و 2: أزرار الموافقة المباشرة أو الرفض النهائي */}
-                <View style={{ flexDirection: 'row-reverse', gap: 10, marginBottom: 15 }}>
-                  <TouchableOpacity 
-                    style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
-                    onPress={async () => {
-                      if (activeRide?.id) {
-                        // الكابتن وافق على الوجهة والسعر الجديد للراكب
-                        await updateDoc(doc(db, 'rides', activeRide.id), {
-                          destinationsList: activeRide.pendingModification.newDestinationsList,
-                          destinationLocation: activeRide.pendingModification.newDestinationLocation,
-                          price: activeRide.pendingModification.newPrice,
-                          fairPrice: activeRide.pendingModification.calculatedBasePrice,
-                          pendingModification: null
-                        });
-                      }
-                    }}
-                  >
-                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>موافق على التعديل ✅</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity 
-                    style={{ flex: 1, backgroundColor: '#ef4444', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
-                    onPress={async () => {
-                      if (activeRide?.id) {
-                        // الكابتن رفض = إخراجه، ورجوع الرحلة للبحث بالوجهة الجديدة وسعر الراكب الأصلي
-                        isEndingRide.current = true;
-                        const currentRide = activeRide;
-                        setActiveRide(null); 
-                        handleDismissRequest(currentRide); // إخفاؤها من أمامه عشان متظهرلوش تاني
+{/* 🚨 إشعار طلب تعديل الوجهة من الراكب (تم نقله للأعلى ليكون مرئياً بالكامل) 🚨 */}
+                    {activeRide.pendingModification?.status === 'pending_captain_approval' && (
+                      <View style={{ backgroundColor: isDarkMode ? '#451a03' : '#fffbeb', padding: 15, borderRadius: 14, marginBottom: 15, borderWidth: 2, borderColor: '#f59e0b', elevation: 4 }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDarkMode ? '#fde68a' : '#d97706', textAlign: 'center', marginBottom: 12 }}>
+                          🗺️ الراكب يرغب في تغيير الوجهة!
+                        </Text>
                         
-                        await updateDoc(doc(db, 'rides', currentRide.id), {
-                          status: 'pending',
-                          captainId: null,
-                          offers: [],
-                          destinationsList: currentRide.pendingModification.newDestinationsList,
-                          destinationLocation: currentRide.pendingModification.newDestinationLocation,
-                          price: currentRide.pendingModification.newPrice.toString(),
-                          fairPrice: currentRide.pendingModification.calculatedBasePrice,
-                          pendingModification: null
-                        });
-                      }
-                    }}
-                  >
-                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>أرفض (إلغاء) ❌</Text>
-                  </TouchableOpacity>
-                </View>
+                        <View style={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', padding: 10, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#fde68a' }}>
+                          <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'right', fontWeight: 'bold' }}>الوجهة المطلوبة:</Text>
+                          <Text style={{ color: isDarkMode ? '#ffffff' : '#0f172a', fontSize: 15, fontWeight: 'bold', textAlign: 'right', marginTop: 4 }}>
+                            {activeRide.pendingModification.newDestinationLocation}
+                          </Text>
+                        </View>
 
-                {/* 3: خيار تعديل السعر */}
-                <Text style={{ color: '#64748b', fontSize: 12, fontWeight: 'bold', textAlign: 'right', marginBottom: 5 }}>أو اقترح سعراً مختلفاً للوجهة الجديدة:</Text>
-                <View style={{ flexDirection: 'row-reverse', gap: 10, alignItems: 'center' }}>
-                  <TextInput 
-                    style={{ flex: 1, backgroundColor: isDarkMode ? '#334155' : '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 8, textAlign: 'center', fontWeight: 'bold', fontSize: 16, color: isDarkMode ? '#ffffff' : '#1e293b' }}
-                    keyboardType="numeric"
-                    placeholder="السعر المقترح"
-                    placeholderTextColor="#94a3b8"
-                    value={tempCaptainPrice}
-                    onChangeText={setTempCaptainPrice}
-                  />
-                  <TouchableOpacity 
-                    style={{ backgroundColor: '#3b82f6', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, alignItems: 'center', elevation: 2 }}
-                    onPress={async () => {
-                      if (activeRide?.id) {
-                        if (tempCaptainPrice && tempCaptainPrice.trim() !== '') {
-                          const updatedMod = {
-                            ...activeRide.pendingModification,
-                            status: 'pending_passenger_approval',
-                            captainSuggestedPrice: tempCaptainPrice
-                          };
-                          await updateDoc(doc(db, 'rides', activeRide.id), {
-                            pendingModification: updatedMod
-                          });
-                          setTempCaptainPrice(''); 
-                        } else {
-                          Alert.alert('تنبيه', 'يرجى إدخال السعر أولاً');
-                        }
-                      }
-                    }}
-                  >
-                    <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>إرسال للراكب 💬</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
+                        <View style={{ backgroundColor: isDarkMode ? '#064e3b' : '#ecfdf5', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#10b981' }}>
+                          <Text style={{ color: isDarkMode ? '#ffffff' : '#1e293b', fontSize: 18, fontWeight: '900', textAlign: 'center' }}>
+                            السعر المقترح للراكب: {activeRide.pendingModification.newPrice} ج
+                          </Text>
+                        </View>
 
-            {activeRide.pendingModification?.status === 'pending_passenger_approval' && (
-              <View style={{ backgroundColor: '#eff6ff', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#bfdbfe' }}>
-                <Text style={{ textAlign: 'center', color: '#1d4ed8', fontWeight: 'bold' }}>⏳ في انتظار موافقة الراكب على السعر الجديد ({activeRide.pendingModification.captainSuggestedPrice} ج)...</Text>
-              </View>
-            )}
+                        {/* حقل تعديل السعر للكابتن */}
+                        <Text style={{ color: '#64748b', fontSize: 12, fontWeight: 'bold', textAlign: 'right', marginBottom: 5 }}>أو اقترح سعراً مختلفاً للوجهة الجديدة:</Text>
+                        <View style={{ flexDirection: 'row-reverse', gap: 10, alignItems: 'center', marginBottom: 15 }}>
+                          <TextInput 
+                            style={{ flex: 1, backgroundColor: isDarkMode ? '#334155' : '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 8, textAlign: 'center', fontWeight: 'bold', fontSize: 16, color: isDarkMode ? '#ffffff' : '#1e293b' }}
+                            keyboardType="numeric"
+                            placeholder="السعر المقترح"
+                            placeholderTextColor="#94a3b8"
+                            value={tempCaptainPrice}
+                            onChangeText={setTempCaptainPrice}
+                          />
+                          <TouchableOpacity 
+                            style={{ backgroundColor: '#3b82f6', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                            onPress={async () => {
+                              if (activeRide?.id) {
+                                if (tempCaptainPrice && tempCaptainPrice.trim() !== '') {
+                                  const updatedMod = {
+                                    ...activeRide.pendingModification,
+                                    status: 'pending_passenger_approval',
+                                    captainSuggestedPrice: tempCaptainPrice
+                                  };
+                                  await updateDoc(doc(db, 'rides', activeRide.id), {
+                                    pendingModification: updatedMod
+                                  });
+                                  setTempCaptainPrice(''); 
+                                } else {
+                                  Alert.alert('تنبيه', 'يرجى إدخال السعر أولاً');
+                                }
+                              }
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>إرسال للراكب 💬</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* أزرار الموافقة المباشرة أو الرفض النهائي */}
+                        <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                          <TouchableOpacity 
+                            style={{ flex: 1, backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                            onPress={async () => {
+                              if (activeRide?.id) {
+                                await updateDoc(doc(db, 'rides', activeRide.id), {
+                                  destinationsList: activeRide.pendingModification.newDestinationsList,
+                                  destinationLocation: activeRide.pendingModification.newDestinationLocation,
+                                  price: activeRide.pendingModification.newPrice,
+                                  fairPrice: activeRide.pendingModification.calculatedBasePrice,
+                                  pendingModification: null
+                                });
+                              }
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>موافق على التعديل ✅</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity 
+                            style={{ flex: 1, backgroundColor: '#ef4444', paddingVertical: 12, borderRadius: 10, alignItems: 'center', elevation: 2 }}
+                            onPress={async () => {
+                              if (activeRide?.id) {
+                                isEndingRide.current = true;
+                                const currentRide = activeRide;
+                                setActiveRide(null); 
+                                handleDismissRequest(currentRide); 
+                                
+                                await updateDoc(doc(db, 'rides', currentRide.id), {
+                                  status: 'pending',
+                                  captainId: null,
+                                  offers: [],
+                                  destinationsList: currentRide.pendingModification.newDestinationsList,
+                                  destinationLocation: currentRide.pendingModification.newDestinationLocation,
+                                  price: currentRide.pendingModification.newPrice.toString(),
+                                  fairPrice: currentRide.pendingModification.calculatedBasePrice,
+                                  pendingModification: null
+                                });
+                              }
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>أرفض (إلغاء) ❌</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+
+                    {activeRide.pendingModification?.status === 'pending_passenger_approval' && (
+                      <View style={{ backgroundColor: '#eff6ff', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                        <Text style={{ textAlign: 'center', color: '#1d4ed8', fontWeight: 'bold' }}>⏳ في انتظار موافقة الراكب على السعر الجديد ({activeRide.pendingModification.captainSuggestedPrice} ج)...</Text>
+                      </View>
+                    )}
+
+                    {/* كارت بيانات الراكب (نزل تحت الإشعار عشان مياخدش مساحة من فوق) */}
+                    <View style={[styles.passengerCard, isDarkMode && { backgroundColor: '#334155' }]}>
+                      <Image source={{ uri: activeRide.avatar || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.activeAvatar} />
+                      <View style={styles.detailsCol}>
+                        <Text style={[styles.detailsText, isDarkMode && { color: '#e2e8f0' }]}>الراكب: {activeRide.name}</Text>
+                        <View style={{ flexDirection: 'row-reverse', justifyContent: 'flex-start', marginBottom: 4 }}>
+                          {[1, 2, 3, 4, 5].map((star) => (<Text key={star} style={{ color: star <= Math.round(activeRide.passengerRating || 5) ? '#f59e0b' : '#cbd5e1', fontSize: 14 }}>★</Text>))}
+                        </View>
+                      </View>
+                    </View>
 
             {/* 🚨 إشعار تعديل الوجهة المدمج في الشاشة للكابتن 🚨 */}
             {activeRide.pendingModification?.status === 'pending' && (
@@ -2199,7 +2212,7 @@ const notifyArrival = async () => {
       </Modal>
 
  <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modaloverlay}>
+        <View style={styles.modalOverlay}>
           <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
             <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال بالكابتن</Text>
 

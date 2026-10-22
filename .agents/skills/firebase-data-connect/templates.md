@@ -202,6 +202,7 @@ generate:
     package: "com.myapp.dataconnect"
   swiftSdk:
     outputDir: "../ios/MyApp/DataConnect"
+    package: "DataConnectGenerated"
   dartSdk:
     outputDir: "../flutter/lib/dataconnect"
     package: myapp_dataconnect
@@ -240,13 +241,13 @@ import { getAuth } from 'firebase/auth';
 import { getDataConnect, connectDataConnectEmulator } from 'firebase/data-connect';
 import { connectorConfig } from '@myapp/dataconnect';
 
-const firebase = {
+const firebaseConfig = {
   apiKey: "...",
   authDomain: "...",
   projectId: "...",
 };
 
-export const app = initializeApp(firebase);
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const dataConnect = getDataConnect(app, connectorConfig);
 
@@ -310,7 +311,7 @@ const unsubscribe = subscribe(liveDashboardRef(), {
     // Called immediately with current data, then on each refresh
     renderDashboard(result.data.items);
   },
-  onError: (error) => console.error('Subscription error:', error)
+  onErr: (error) => console.error('Subscription error:', error) // Observer object property is `onErr` (positional overload parameter is `onError`)
 });
 
 // Cleanup when done

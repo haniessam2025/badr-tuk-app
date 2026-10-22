@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تتبع رحلة بُرَاق</title>
+    <!-- استدعاء Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <!-- استدعاء Google Maps -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg&language=ar"></script>
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f1f5f9; }
+        #map { width: 100%; height: 60vh; }
+        .info-card { background: white; padding: 20px; border-radius: 20px 20px 0 0; margin-top: -20px; position: relative; z-index: 10; box-shadow: 0 -4px 10px rgba(0,0,0,0.1); height: 40vh; overflow-y: auto; }
+        .driver-info { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 15px; }
+        .car-image { width: 80px; }
+        .avatar { width: 50px; height: 50px; border-radius: 25px; margin-left: 10px; }
+        .locations { color: #475569; font-size: 14px; line-height: 1.8; }
+        .dot-green { color: #10b981; font-size: 18px; }
+        .dot-red { color: #ef4444; font-size: 18px; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div class="info-card">
+        <h3 style="margin:0 0 5px 0; color:#1e293b;" id="status-text">جاري تحميل الرحلة...</h3>
+        <p style="margin:0 0 15px 0; color:#64748b;" id="vehicle-text">--</p>
+        
+        <div class="driver-info">
+            <div style="display: flex; align-items: center;">
+                <img id="captain-avatar" class="avatar" src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png">
+                <div>
+                    <strong id="captain-name">--</strong>
+                    <span style="color: #f59e0b; font-size: 14px;">★ <span id="captain-rating">5</span></span>
+                </div>
+            </div>
+            <div style="background: #e2e8f0; padding: 5px 10px; border-radius: 8px; font-weight: bold;" id="plate-number">--</div>
+        </div>
+
+        <div class="locations">
+            <div><span class="dot-green">●</span> <span id="pickup-location">--</span></div>
+            <div style="margin-top: 10px;"><span class="dot-red">●</span> <span id="dropoff-location">--</span></div>
+        </div>
+    </div>
+
+    <script>
+        // إعدادات فايربيز الخاصة بك (انسخها من إعدادات مشروعك)
+        const firebaseConfig = {
+  apiKey: "AIzaSyDq5trvT-Hfw1y7nwIlqe3a2A0uf9AeVOs",
+  authDomain: "badr-cute.firebaseapp.com",
+  projectId: "badr-cute",
+  storageBucket: "badr-cute.firebasestorage.app",
+  messagingSenderId: "520549143229",
+  appId: "1:520549143229:web:dec6116c6f0665483f1dd4",
+  measurementId: "G-Q0YR2GSB2Q"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // جلب رقم الرحلة من الرابط
+        const urlParams = new URLSearchParams(window.location.search);
+        const rideId = urlParams.get('id');
+
+        let map, marker;
+
+        function initMap(lat, lng) {
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: { lat: lat, lng: lng },
+                zoom: 16,
+                disableDefaultUI: true
+            });
+            marker = new google.maps.Marker({
+                position: { lat: lat, lng: lng },
+                map: map,
+                icon: "https://cdn-icons-png.flaticon.com/512/3204/3204933.png" // أيقونة مركبة
+            });
+        }
+
+        if (rideId) {
+            db.collection("rides").doc(rideId).onSnapshot((doc) => {
+                if (doc.exists) {
+                    const ride = doc.data();
+                    
+                    // تعبئة البيانات في الشاشة
+                    document.getElementById('status-text').innerText = ride.status === 'in_progress' ? 'الرحلة جارية الآن' : 'الكابتن في الطريق للراكب';
+                    document.getElementById('vehicle-text').innerText = ride.captainVehicle;
+                    document.getElementById('captain-name').innerText = ride.captainName;
+                    document.getElementById('captain-rating').innerText = ride.captainRating || 5;
+                    document.getElementById('plate-number').innerText = ride.captainPlateNumber || 'بدون لوحة';
+                    document.getElementById('pickup-location').innerText = ride.pickupLocation;
+                    document.getElementById('dropoff-location').innerText = ride.destinationLocation;
+                    if(ride.captainAvatar) document.getElementById('captain-avatar').src = ride.captainAvatar;
+
+                    // تحديث الخريطة
+                    const liveCoords = ride.liveCoords || ride.pickupCoords;
+                    if (liveCoords) {
+                        if (!map) {
+                            initMap(liveCoords.latitude, liveCoords.longitude);
+                        } else {
+                            const newPos = new google.maps.LatLng(liveCoords.latitude, liveCoords.longitude);
+                            marker.setPosition(newPos);
+                            map.panTo(newPos);
+                        }
+                    }
+                }
+            });
+        } else {
+            document.getElementById('status-text').innerText = "رابط الرحلة غير صحيح";
+        }
+    </script>
+</body>
+</html>

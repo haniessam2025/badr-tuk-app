@@ -785,9 +785,13 @@ const saveNewPrice = async () => {
     }
   }, [offers, autoAcceptEnabled, price]);
 
-  const notifyPassengerOnTheWay = async () => {
+const notifyPassengerOnTheWay = async () => {
     if (!currentRideId) return;
-    try { await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); } catch (error) {}
+    try { 
+      await updateDoc(doc(db, 'rides', currentRideId), { status: 'passenger_on_the_way' }); 
+      // 🚀 رفع الشاشة لأعلى فوراً عشان الراكب يشوف العداد
+      activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
+    } catch (error) {}
   };
 
   const handleCancelRide = async () => {
@@ -799,14 +803,53 @@ const saveNewPrice = async () => {
   };
 
   const submitRating = async () => {
-    setRatingSubmitted(true); setTimeout(() => { setIsRatingModalVisible(false); setRideToRate(null); }, 2000);
+    if (rating === 0) {
+      Alert.alert('تنبيه', 'يرجى اختيار عدد النجوم أولاً');
+      return;
+    }
+    
+    try {
+      // 1. جلب آي دي الكابتن من الرحلة المنتهية
+      const capId = rideToRate?.firebaseData?.captainId || 'unknown';
+      
+      // 2. إرسال التقييم لقاعدة البيانات في كوليكشن ratings
+      await addDoc(collection(db, 'ratings'), {
+        rideId: rideToRate?.id,
+        captainId: capId,
+        passengerId: passengerProfile.id,
+        senderName: passengerProfile.name || 'راكب',
+        rating: rating,
+        reason: [...selectedTags, ratingReason.trim()].filter(Boolean).join(' - ') || (rating === 5 ? 'ممتاز' : 'بدون تعليق'),
+        timestamp: new Date().getTime(),
+        type: 'passenger_rating_captain' // 👈 النوع ده هو اللي صفحة الكابتن بتقرأه
+      });
+
+      // 3. تحديث الرحلة نفسها عشان نعرف إنها اتقيمت
+      if (rideToRate?.id) {
+        await updateDoc(doc(db, 'rides', rideToRate.id), { 
+          passengerGivenRating: rating 
+        });
+      }
+
+      setRatingSubmitted(true); 
+      setTimeout(() => { 
+        setIsRatingModalVisible(false); 
+        setRating(0);
+        setRatingReason('');
+        setSelectedTags([]);
+        setRideToRate(null); 
+        setRatingSubmitted(false);
+      }, 2000);
+      
+    } catch (error) {
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال التقييم');
+    }
   };
 
   const handleCallClick = () => {
     if (!captainInfo.phone || captainInfo.phone === 'غير مسجل') return Alert.alert('تنبيه', 'رقم الكابتن غير متوفر');
     setPhoneToCall(captainInfo.phone); setIsCallModalVisible(true);
   };
-
   // 👇 الدوال دي كانت ناقصة وهي اللي بتفتح الاتصال الفعلي
   const makeRegularCall = () => {
     setIsCallModalVisible(false);
@@ -825,13 +868,30 @@ const saveNewPrice = async () => {
   const sendLocationToWhatsApp = async (phoneToUse: string) => {
     setIsSendingLocation(true);
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('تنبيه', 'نحتاج صلاحية الموقع لإرسال مسار الرحلة للطوارئ'); setIsSendingLocation(false); return; }
-      const trackingLink = `https://badr-cute.web.app/?ride=${currentRideId}`;
-      const message = `أنا حالياً في رحلة مع تطبيق براق .\nتتبع مساري (لايف) من هنا لأسباب الأمان :\n${trackingLink}`;
+      // 1. رابط التتبع (هنجهزه عشان يفتح صفحة الويب اللي هنعملها بعدين)
+      const trackingLink = `https://badr-cute.web.app/track?id=${currentRideId}`;
+      
+      // 2. تظهير بيانات الكابتن بشكل شيك
+      const capName = captainInfo.name ? captainInfo.name.split(' ')[0] : 'كابتن';
+      const capVehicle = captainInfo.vehicle ? captainInfo.vehicle.replace('بديل توكتوك', '').replace(/[()\-]/g, '').trim() : 'مركبة';
+      const capPlate = (captainInfo.plateNumber && captainInfo.plateNumber !== 'لم يسجل لوحة') ? captainInfo.plateNumber : '';
+      
+      // تحديد إيموجي المركبة
+      let vehicleEmoji = '🛺';
+      if (requestedVehicleType === 'car') vehicleEmoji = '🚗';
+      else if (requestedVehicleType === 'scooter') vehicleEmoji = '🛵';
+
+      // 3. تنسيق الرسالة لتتطابق مع الصورة المطلوبة
+      const message = `مرحبًا، يمكنك متابعة رحلتي مع بُرَاق عبر الرابط:\n${trackingLink}\n\n👤 الكابتن: ${capName}\n${vehicleEmoji} المركبة: ${capVehicle} ${capPlate}`;
+
+      // 4. فتح الواتساب
       const whatsappUrl = `https://wa.me/${phoneToUse}?text=${encodeURIComponent(message)}`;
       try { await Linking.openURL(whatsappUrl); } catch (err) { Alert.alert('تنبيه', 'تعذر فتح واتساب'); }
-    } catch (error) { Alert.alert('خطأ', 'حدثت مشكلة'); } finally { setIsSendingLocation(false); }
+    } catch (error) { 
+      Alert.alert('خطأ', 'حدثت مشكلة أثناء تجهيز الرسالة'); 
+    } finally { 
+      setIsSendingLocation(false); 
+    }
   };
 
   const sendSafetyLocation = () => {
@@ -1031,7 +1091,16 @@ useEffect(() => {
         Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: false }),
         Animated.timing(pulseAnim, { toValue: 0, duration: 600, useNativeDriver: false })
       ])).start();
-    } else pulseAnim.setValue(0);
+      
+      // 🚀 رفع الشاشة تلقائياً للراكب لإظهار مربع مسح الكود والرقم السري
+      if (rideStatus === 'waiting_for_scan') {
+        setTimeout(() => {
+          activeRideScrollRef.current?.scrollTo({ y: 0, animated: true });
+        }, 100); // تأخير بسيط جداً لضمان رسم المربع أولاً ثم التمرير إليه
+      }
+    } else {
+      pulseAnim.setValue(0);
+    }
   }, [rideStatus]);
 
   useEffect(() => {
@@ -1623,24 +1692,7 @@ useEffect(() => {
               </View>
             )}
 
-            <TouchableOpacity 
-              style={{
-                backgroundColor: '#ef4444', 
-                paddingVertical: 12, 
-                borderRadius: 10, 
-                flexDirection: 'row-reverse', 
-                justifyContent: 'center', 
-                alignItems: 'center', 
-                gap: 10,
-                marginTop: 15,
-                borderWidth: 2,
-                borderColor: '#b91c1c'
-              }}
-            >
-              <Ionicons name="warning" size={24} color="#ffffff" />
-              <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold' }}>أنا في خطر (SOS)</Text>
-            </TouchableOpacity>
-{/* 🚨 عرض حالة تعديل الوجهة وتفاوض الكابتن 🚨 */}
+            {/* 🚨 عرض حالة تعديل الوجهة وتفاوض الكابتن 🚨 */}
             {pendingModification?.status === 'pending_captain_approval' && (
               <View style={{ backgroundColor: '#fffbeb', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#fcd34d' }}>
                 <Text style={{ textAlign: 'center', color: '#d97706', fontWeight: 'bold' }}>⏳ في انتظار رد الكابتن على تعديل الوجهة...</Text>
@@ -1767,6 +1819,8 @@ useEffect(() => {
                   provider={PROVIDER_GOOGLE}
                   style={{ flex: 1, width: '100%', height: '100%' }}
                   customMapStyle={isDarkMode ? darkMapStyle : []} 
+                  scrollEnabled={false} // 👈 السر هنا: يمنع الخريطة من سرقة التاتش ويخلي الشاشة تطلع وتنزل بسلاسة
+                  pitchEnabled={false} // 👈 يمنع ميل الخريطة بالخطأ
                   region={{
                     latitude: (pickupCoords.latitude + captainLiveCoords.latitude) / 2,
                     longitude: (pickupCoords.longitude + captainLiveCoords.longitude) / 2,
@@ -2084,7 +2138,26 @@ useEffect(() => {
           </TouchableOpacity>
         </View>
       </Modal>
+{/* مودال الاتصال */}
+      <Modal visible={isCallModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modaloverlay}>
+          <View style={[styles.callModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
+            <Text style={[styles.modalTitle, isDarkMode && { color: '#ffffff' }]}>اختر طريقة الاتصال</Text>
+            
+            <TouchableOpacity style={[styles.regularCallBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]} onPress={makeRegularCall}>
+              <Text style={[styles.regularCallBtnText, isDarkMode && { color: '#ffffff' }]}>مكالمة عادية (شبكة المحمول)</Text>
+            </TouchableOpacity>
 
+            <TouchableOpacity style={styles.freeCallBtn} onPress={makeFreeCall}>
+              <Text style={styles.freeCallBtnText}>مكالمة مجانية داخل التطبيق</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelCallBtn} onPress={() => setIsCallModalVisible(false)}>
+              <Text style={styles.cancelCallBtnText}>إلغاء</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       {/* مودال التقييم */}
       <Modal visible={isRatingModalVisible} transparent={true} animationType="fade">
         <View style={styles.modaloverlay}>
