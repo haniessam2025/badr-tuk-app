@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ExpoClipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
@@ -11,7 +12,6 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
-
 LogBox.ignoreLogs(['VirtualizedLists should never be nested']);
 
 const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
@@ -227,6 +227,7 @@ export default function PassengerHome() {
   const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0, hidePhoneNumber: false });  
   const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+  const [activeNotification, setActiveNotification] = useState<any>(null);
 
   const vehicleImageAnim = useRef(new Animated.Value(1)).current;
   const prevOffersCountRef = useRef(0);
@@ -592,7 +593,7 @@ export default function PassengerHome() {
       updatePriceCalculation(pickup, newDests, requestedVehicleType, passengersCount, pickupCoords, true);
     }, 1500);
   };
-  const openEditDestModal = () => { 
+   const openEditDestModal = () => { 
     setTempDestinations([...destinations]); 
     setModalBasePrice(basePriceForSuggestions || parseInt(price));
     setModalPrice(price);
@@ -745,7 +746,7 @@ const saveNewPrice = async () => {
     setIsSubmitting(true); setRideStatus('searching'); setOffers([]); prevOffersCountRef.current = 0; 
     let finalPickupCoords = pickupCoords || { latitude: 30.0444, longitude: 31.2357 };
     try {
-      const rideData = {
+      const rideData: any = {
         passengerId: passengerProfile.id, name: passengerProfile.name, phone: passengerProfile.phone,
         isPhoneHidden: passengerProfile.hidePhoneNumber || false, avatar: passengerProfile.avatar,
         pickupLocation: pickup, pickupCoords: finalPickupCoords, destinationsList: validDests,
@@ -756,6 +757,13 @@ const saveNewPrice = async () => {
         numericSecret: Math.floor(1000 + Math.random() * 9000).toString(), qrSecret: Math.random().toString(36).substring(2, 10),
         notes: notes.trim(), requestedVehicleType, paymentMethod: paymentMethod, offers: [], status: 'pending', timestamp: new Date().getTime(),
       };
+
+      // 🎁 السحر هنا: إرفاق بيانات كود الخصم بالرحلة عشان تترفع للداتابيز والكابتن يقدر يقراها ويخصمها
+      if (appliedPromo && appliedPromo.discountValue) {
+        rideData.promoCode = appliedPromo.code;
+        rideData.discountAmount = appliedPromo.discountValue;
+      }
+
       const docRef = await addDoc(collection(db, 'rides'), rideData);
       await AsyncStorage.setItem('active_ride', JSON.stringify({ ...rideData, id: docRef.id }));
       setCurrentRideId(docRef.id);
@@ -868,23 +876,18 @@ const notifyPassengerOnTheWay = async () => {
   const sendLocationToWhatsApp = async (phoneToUse: string) => {
     setIsSendingLocation(true);
     try {
-      // 1. رابط التتبع (هنجهزه عشان يفتح صفحة الويب اللي هنعملها بعدين)
-      const trackingLink = `https://badr-cute.web.app/track?id=${currentRideId}`;
+      const trackingLink = `https://buraq-track.web.app/?id=${currentRideId}`;
       
-      // 2. تظهير بيانات الكابتن بشكل شيك
       const capName = captainInfo.name ? captainInfo.name.split(' ')[0] : 'كابتن';
       const capVehicle = captainInfo.vehicle ? captainInfo.vehicle.replace('بديل توكتوك', '').replace(/[()\-]/g, '').trim() : 'مركبة';
       const capPlate = (captainInfo.plateNumber && captainInfo.plateNumber !== 'لم يسجل لوحة') ? captainInfo.plateNumber : '';
       
-      // تحديد إيموجي المركبة
       let vehicleEmoji = '🛺';
       if (requestedVehicleType === 'car') vehicleEmoji = '🚗';
       else if (requestedVehicleType === 'scooter') vehicleEmoji = '🛵';
 
-      // 3. تنسيق الرسالة لتتطابق مع الصورة المطلوبة
       const message = `مرحبًا، يمكنك متابعة رحلتي مع بُرَاق عبر الرابط:\n${trackingLink}\n\n👤 الكابتن: ${capName}\n${vehicleEmoji} المركبة: ${capVehicle} ${capPlate}`;
 
-      // 4. فتح الواتساب
       const whatsappUrl = `https://wa.me/${phoneToUse}?text=${encodeURIComponent(message)}`;
       try { await Linking.openURL(whatsappUrl); } catch (err) { Alert.alert('تنبيه', 'تعذر فتح واتساب'); }
     } catch (error) { 
@@ -978,7 +981,8 @@ const notifyPassengerOnTheWay = async () => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const notif = change.doc.data();
-            Alert.alert(notif.title || 'رسالة', notif.message, [{ text: 'حسناً', onPress: () => updateDoc(doc(db, 'notifications', change.doc.id), { read: true }) }]);
+            // بدل ما تفتح Alert عادي، هنفتح الشاشة المنبثقة بتاعتنا المخصصة
+            setActiveNotification({ id: change.doc.id, ...notif });
           }
         });
       });
@@ -2337,7 +2341,7 @@ useEffect(() => {
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات</Text>
               </TouchableOpacity>              
               {/* زرار الدعم الفني المباشر الأخضر */}
-              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { closeSidebar(); router.push('/support-live-chat' as any); }}>
+              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { closeSidebar(); router.push('/live-support' as any); }}>
                 <Text style={styles.sidebarSupportBtnText}>💬 محادثة الدعم الفني (مباشر)</Text>
               </TouchableOpacity>
 
@@ -2348,6 +2352,56 @@ useEffect(() => {
               
             </ScrollView>
           </Animated.View>
+        </View>
+      </Modal>
+
+ {/* 🚨 شاشة وضع الصيانة الإجبارية للراكب 🚨 */}
+<Modal visible={isMaintenanceMode && rideStatus === 'idle' && !isRatingModalVisible} transparent={false} animationType="fade">        <View style={{ flex: 1, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
+          <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
+          <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 18, textAlign: 'center', lineHeight: 28, marginBottom: 30, fontWeight: 'bold' }}>
+            نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
+          </Text>
+          <ActivityIndicator size="large" color="#eab308" />
+        </View>
+      </Modal>
+
+    {/* 🔔 مودال الإشعارات وكود الخصم 🔔 */}
+      <Modal visible={!!activeNotification} transparent={true} animationType="fade">
+        <View style={styles.modalOverlayAdmin}>
+          <View style={[styles.adminMsgModalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
+            <Text style={{ fontSize: 50, marginBottom: 10 }}>
+              {activeNotification?.title?.includes('خصم') || activeNotification?.title?.includes('هدية') ? '🎉' : '🔔'}
+            </Text>
+            <Text style={[styles.adminMsgTitle, isDarkMode && { color: '#ffffff' }]}>{activeNotification?.title || 'رسالة من الإدارة'}</Text>
+            <Text style={[styles.adminMsgText, isDarkMode && { color: '#cbd5e1' }]}>{activeNotification?.message}</Text>
+            
+            {/* ✂️ السحر هنا: استخراج كود الخصم (حروف وأرقام وناقص) وإظهار زرار النسخ ✂️ */}
+            {activeNotification?.message?.match(/[A-Z0-9]+-[A-Z0-9]+/i) && (
+              <TouchableOpacity 
+                style={{ backgroundColor: '#fef3c7', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, borderWidth: 2, borderColor: '#f59e0b', marginBottom: 20, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', width: '100%' }}
+                onPress={async () => {
+                  // بيصطاد الكود بالكامل (BURAQ-LVXCW) وينسخه بضغطة
+                  const code = activeNotification.message.match(/[A-Z0-9]+-[A-Z0-9]+/i)[0];
+                  await ExpoClipboard.setStringAsync(code);
+                  Alert.alert('تم النسخ بنجاح ✅', `تم نسخ الكود: ${code}`);
+                }}
+              >
+                <Ionicons name="copy-outline" size={20} color="#d97706" style={{ marginLeft: 8 }} />
+                <Text style={{ color: '#d97706', fontWeight: 'bold', fontSize: 16 }}>نسخ كود الخصم كامل</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity 
+              style={[styles.adminMsgCloseBtn, { backgroundColor: '#3b82f6', borderWidth: 0 }]} 
+              onPress={() => {
+                updateDoc(doc(db, 'notifications', activeNotification.id), { read: true });
+                setActiveNotification(null);
+              }}
+            >
+              <Text style={[styles.adminMsgCloseText, { color: '#ffffff' }]}>حسناً</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
@@ -2559,7 +2613,13 @@ const styles = StyleSheet.create({
   cancelOrderBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', elevation: 1 },
   cancelOrderBtnText: { color: '#dc2626', fontSize: 16, fontWeight: 'bold' },
   editEmergencyBtn: { backgroundColor: '#e2e8f0', paddingVertical: 10, borderRadius: 10, alignItems: 'center', marginBottom: 15 },
-  editEmergencyText: { color: '#475569', fontSize: 13, fontWeight: 'bold' }
+  editEmergencyText: { color: '#475569', fontSize: 13, fontWeight: 'bold' },
+  modalOverlayAdmin: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  adminMsgModalContent: { backgroundColor: '#ffffff', width: '100%', padding: 25, borderRadius: 20, alignItems: 'center', elevation: 10, borderWidth: 2, borderColor: '#eab308' },
+  adminMsgTitle: { color: '#1e293b', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
+  adminMsgText: { color: '#334155', fontSize: 16, textAlign: 'center', lineHeight: 24, marginBottom: 25 },
+  adminMsgCloseBtn: { width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 10 },
+  adminMsgCloseText: { fontSize: 16, fontWeight: 'bold' }
 });
 
 // مصفوفة الاستايل الغامق للخريطة (Dark Mode)

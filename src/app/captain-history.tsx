@@ -83,7 +83,7 @@ export default function CaptainHistory() {
     }
   };
 
-  // دالة إرسال بلاغ المفقودات
+// دالة إرسال بلاغ المفقودات (مربوطة بالداشبورد قسم مفقودات الرحلات)
   const submitLostItem = async () => {
     if (!lostText.trim()) {
       Alert.alert('تنبيه', 'برجاء كتابة تفاصيل الأغراض التي عثرت عليها.');
@@ -91,31 +91,26 @@ export default function CaptainHistory() {
     }
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'support_tickets'), {
-        type: 'lost_item',
-        rideId: selectedRide.id,
-        captainId: captainId || 'unknown',
-        captainName: captainProfile?.name || selectedRide.captainName || 'كابتن',
-        captainPhone: captainProfile?.phone || selectedRide.captainPhone || 'غير مسجل',
-        captainVehicle: captainProfile?.vehicle || selectedRide.vehicle || 'مركبة',
-        userType: 'captain',
-        senderName: captainProfile?.name || 'كابتن',
-        senderPhone: captainProfile?.phone || 'غير مسجل',
-        passengerId: selectedRide.passengerId || 'unknown',
-        passengerName: selectedRide.name || selectedRide.passengerName || 'غير مسجل',
-        passengerPhone: selectedRide.phone || selectedRide.passengerPhone || 'غير مسجل',
-        pickupLocation: selectedRide.pickupLocation || '',
-        destinationLocation: selectedRide.destinationLocation || '',
-        message: `عثرت على أغراض منسية: ${lostText.trim()}`,
-        content: `عثرت على أغراض منسية: ${lostText.trim()}`,
+      await addDoc(collection(db, 'trip_lost_items'), {
+        tripId: selectedRide.id, // الداشبورد بتجمع الرحلة بالـ ID ده
+        tripDate: new Date(selectedRide.timestamp || Date.now()).toLocaleDateString('ar-EG'),
+        pickupLocation: selectedRide.pickupLocation || 'غير محدد',
+        destinationLocation: selectedRide.destinationLocation || (selectedRide.destinationsList ? selectedRide.destinationsList.join(' - ') : 'غير محدد'),
+        
+        reporterType: 'captain', // الكلمة السحرية للمربع الأخضر
+        reporterId: captainId || 'unknown',
+        reporterName: captainProfile?.name || selectedRide.captainName || 'كابتن',
+        reporterPhone: captainProfile?.phone || selectedRide.captainPhone || 'غير مسجل',
+        
+        text: lostText.trim(), // تم توحيدها لـ text
         status: 'pending',
         isReadAdmin: false,
-        timestamp: new Date().getTime()
+        timestamp: new Date().getTime() // تم استخدام getTime بدلاً من serverTimestamp للتوافق
       });
 
       Alert.alert('تم الإرسال ✅', 'تم إبلاغ الإدارة بالعثور على الأغراض بنجاح.');
       setIsLostModalVisible(false);
-setLostText('');
+      setLostText('');
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال البلاغ.');
     } finally {

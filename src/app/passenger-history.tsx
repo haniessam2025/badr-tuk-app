@@ -102,6 +102,7 @@ export default function PassengerHistory() {
   };
 
 // 👈 دالة إرسال البلاغ المحسّنة (تسحب بيانات الراكب والكابتن بدقة)
+  // دالة إرسال البلاغ المحسّنة (تسحب بيانات الراكب والكابتن بدقة)
   const submitLostItem = async () => {
     if (!lostItemText.trim()) {
       Alert.alert('تنبيه', 'برجاء كتابة تفاصيل المفقودات');
@@ -109,7 +110,6 @@ export default function PassengerHistory() {
     }
     setIsSubmittingLost(true);
     try {
-      // 1. جلب بيانات الراكب من ذاكرة الهاتف لضمان وجودها
       let pName = selectedRide.name || selectedRide.passengerName || '';
       let pPhone = selectedRide.phone || selectedRide.passengerPhone || '';
       
@@ -122,39 +122,19 @@ export default function PassengerHistory() {
         }
       } catch (e) {}
 
-      // 2. البحث عن بيانات الكابتن بكل الطرق الممكنة داخل الرحلة
-      let cPhone = selectedRide.captainPhone || selectedRide.driverPhone || selectedRide.captain_phone || '';
-      let cVehicle = selectedRide.captainVehicle || selectedRide.vehicle || '';
-      let cName = getCaptainName(selectedRide);
-
-      if (selectedRide.offers && selectedRide.captainId) {
-        const acceptedOffer = selectedRide.offers.find((o: any) => o.captainId === selectedRide.captainId);
-        if (acceptedOffer) {
-          if (!cPhone && acceptedOffer.captainPhone) cPhone = acceptedOffer.captainPhone;
-          if (!cVehicle && (acceptedOffer.captainVehicle || acceptedOffer.vehicle)) cVehicle = acceptedOffer.captainVehicle || acceptedOffer.vehicle;
-          if (cName === 'غير مسجل' && acceptedOffer.captainName) cName = acceptedOffer.captainName;
-        }
-      }
-
-      await addDoc(collection(db, 'support_tickets'), {
-        type: 'lost_item',
-        rideId: selectedRide.id,
-        // بيانات الراكب
-        passengerId: selectedRide.passengerId || 'unknown',
-        passengerName: pName || 'غير مسجل',
-        passengerPhone: pPhone || 'غير مسجل',
-        userType: 'passenger',
-        // بيانات الكابتن
-        captainId: selectedRide.captainId || 'unknown',
-        captainName: cName,
-        captainPhone: cPhone || 'غير مسجل',
-        captainVehicle: cVehicle || 'مركبة',
-        // بيانات الرحلة
-        pickupLocation: selectedRide.pickupLocation || '',
-        destinationLocation: selectedRide.destinationLocation || selectedRide.destinationsList?.join(' - ') || '',
-        // تفاصيل البلاغ
-        message: lostItemText.trim(),
-        content: lostItemText.trim(),
+      // توجيه البلاغ لمفقودات الرحلات (trip_lost_items) بدلاً من الدعم العادي
+      await addDoc(collection(db, 'trip_lost_items'), {
+        tripId: selectedRide.id,
+        tripDate: new Date(selectedRide.timestamp || Date.now()).toLocaleDateString('ar-EG'),
+        pickupLocation: selectedRide.pickupLocation || 'غير محدد',
+        destinationLocation: selectedRide.destinationLocation || selectedRide.destinationsList?.join(' - ') || 'غير محدد',
+        
+        reporterType: 'passenger', // الكلمة السحرية للمربع الأزرق
+        reporterId: selectedRide.passengerId || 'unknown',
+        reporterName: pName || 'غير مسجل',
+        reporterPhone: pPhone || 'غير مسجل',
+        
+        text: lostItemText.trim(), // تم توحيدها لـ text
         status: 'pending',
         isReadAdmin: false,
         timestamp: new Date().getTime()
@@ -162,6 +142,7 @@ export default function PassengerHistory() {
       
       Alert.alert('تم الإرسال ✅', 'تم إرسال بلاغ المفقودات للإدارة بنجاح.');
       setIsLostItemModalVisible(false);
+      setLostItemText('');
     } catch (error) {
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال البلاغ');
     } finally {

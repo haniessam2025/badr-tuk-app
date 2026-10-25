@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -48,7 +48,7 @@ export default function SupportLiveChat() {
   const [loading, setLoading] = useState(true);
   const [chatId, setChatId] = useState<string | null>(null);
   const [userData, setUserData] = useState<any>(null);
-  const [chatStatus, setChatStatus] = useState('active'); // حالة المحادثة
+  const [chatStatus, setChatStatus] = useState('active'); 
   const [isAdminTyping, setIsAdminTyping] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
@@ -56,31 +56,34 @@ export default function SupportLiveChat() {
 
   useEffect(() => { initChat(); }, []);
 
-  // 1. تحديد هوية المستخدم وسحب اسمه من الداتابيز
   const initChat = async () => {
     let currentId = await AsyncStorage.getItem('currentPassengerId');
     let type = 'passenger';
-    let name = 'راكب';
+    let name = 'مستخدم غير مسجل';
+    let phone = 'غير مسجل';
 
     if (currentId) {
       const docSnap = await getDoc(doc(db, 'passengers', currentId));
-      if (docSnap.exists() && docSnap.data().name) {
-        name = docSnap.data().name;
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.name) name = data.name;
+        if (data.phone) phone = data.phone;
       }
     } else {
       currentId = await AsyncStorage.getItem('currentCaptainId');
       type = 'captain';
-      name = 'كابتن';
       if (currentId) {
         const docSnap = await getDoc(doc(db, 'captains', currentId));
-        if (docSnap.exists() && docSnap.data().name) {
-          name = docSnap.data().name;
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.name) name = data.name;
+          if (data.phone) phone = data.phone;
         }
       }
     }
     
     if (currentId) {
-      setUserData({ id: currentId, type, name });
+      setUserData({ id: currentId, type, name, phone }); // 👈 إضافة رقم الهاتف عشان الداشبورد تعرفه
       
       const q = query(collection(db, 'support_chats'), where('userId', '==', currentId), where('status', '==', 'active'));
       const snap = await getDocs(q);
@@ -95,7 +98,6 @@ export default function SupportLiveChat() {
     }
   };
 
-  // 2. الاستماع للرسايل
   const listenToMessages = (cId: string) => {
     updateDoc(doc(db, 'support_chats', cId), { unreadUser: false }).catch(e=>e);
 
@@ -106,17 +108,14 @@ export default function SupportLiveChat() {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 200);
     });
 
-    // 3. مراقبة حالة المحادثة عشان لو الإدارة قفلته
     onSnapshot(doc(db, 'support_chats', cId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setChatStatus(data.status || 'active');
         
-        // إظهار النقط لو الإدارة بتكتب
         if (data.adminTyping) setIsAdminTyping(true);
         else setIsAdminTyping(false);
 
-        // الإغلاق الآلي
         if (data.status === 'closed') {
           setTimeout(async () => {
             try {
@@ -133,7 +132,6 @@ export default function SupportLiveChat() {
     });
   };
 
-  // تحديث حالة الكتابة الخاصة بالمستخدم في الفايربيز
   const handleTextChange = async (text: string) => {
     setInputText(text);
 
@@ -150,7 +148,6 @@ export default function SupportLiveChat() {
     } catch (error) {}
   };
 
-  // 4. إرسال رسالة جديدة
   const sendMessage = async () => {
     if (!inputText.trim() || !userData) return;
 
@@ -160,25 +157,50 @@ export default function SupportLiveChat() {
     let currentChatId = chatId;
 
     if (!currentChatId) {
-      const chatRef = await addDoc(collection(db, 'support_chats'), {
+      // 👈 السر هنا: لازم نكتب الأسماء زي ما الداشبورد بتقرأها بالظبط عشان متتلخبطش وتودي الشات في حتة تانية
+      const chatRef = doc(db, 'support_chats', userData.id); // نستخدم الـ ID بتاع اليوزر عشان الداشبورد تعرفه بسهولة
+      await updateDoc(chatRef, {
         userId: userData.id,
         userType: userData.type,
-        userName: userData.name, // هيبعت الاسم الحقيقي هنا
+        userName: userData.name, 
+        userPhone: userData.phone, 
+        senderName: userData.name, // 👈 احتياطي
+        senderPhone: userData.phone, // 👈 احتياطي
         status: 'active',
         lastMessage: messageText,
-        lastMessageTime: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(), // 👈 تغييرها عشان الداشبورد بتدور عليها
         unreadAdmin: true,
         unreadUser: false,
         userTyping: false,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        isClosed: false 
+      }).catch(async (e) => {
+         // لو الدوكيومنت مش موجود، ننشئه
+         await setDoc(chatRef, {
+          userId: userData.id,
+          userType: userData.type,
+          userName: userData.name, 
+          userPhone: userData.phone, 
+          senderName: userData.name,
+          senderPhone: userData.phone,
+          status: 'active',
+          lastMessage: messageText,
+          lastUpdatedAt: serverTimestamp(), 
+          unreadAdmin: true,
+          unreadUser: false,
+          userTyping: false,
+          timestamp: serverTimestamp(),
+          isClosed: false 
+         });
       });
+
       currentChatId = chatRef.id;
       setChatId(currentChatId);
       listenToMessages(currentChatId);
     } else {
       await updateDoc(doc(db, 'support_chats', currentChatId), {
         lastMessage: messageText,
-        lastMessageTime: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(), // 👈 تحديث الوقت للترتيب
         unreadAdmin: true,
         status: 'active',
         userTyping: false
@@ -218,7 +240,7 @@ export default function SupportLiveChat() {
         ) : messages.length === 0 ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
             <Text style={{ textAlign: 'center', color: '#64748b', fontSize: 16, lineHeight: 24, fontWeight: 'bold' }}>
-              برجاء ارسال مشكلتك وسيقوم أحد ممثلي خدمة العملاء بالتواصل مع حضرتك في أقرب وقت
+              برجاء إرسال مشكلتك وسيقوم أحد ممثلي خدمة العملاء بالتواصل مع حضرتك في أقرب وقت.
             </Text>
           </View>
         ) : (

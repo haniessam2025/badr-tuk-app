@@ -22,11 +22,11 @@ export default function CaptainNotifications() {
       const captainId = await AsyncStorage.getItem('currentCaptainId');
       if (!captainId) return;
 
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', captainId),
-        orderBy('timestamp', 'desc')
-      );
+ const q = query(
+  collection(db, 'notifications'), 
+  where('userId', '==', captainId), // غيرنا الاسم هنا
+  orderBy('timestamp', 'desc')
+);
 
       const snap = await getDocs(q);
       const notifs: any[] = [];

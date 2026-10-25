@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
-import { useApp } from './AppContext'; // العقل المركزي للوضع الداكن
+import { useApp } from './AppContext';
 
 export default function Support() {
   const router = useRouter();
@@ -13,7 +13,7 @@ export default function Support() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [userData, setUserData] = useState<any>(null);
-  const [myTickets, setMyTickets] = useState<any[]>([]); // 👈 لتخزين التذاكر والردود
+  const [myTickets, setMyTickets] = useState<any[]>([]); 
 
   useEffect(() => {
     checkUserTypeAndLoadTickets();
@@ -44,15 +44,22 @@ export default function Support() {
       if (currentId) {
         setUserData({ id: currentId, type: currentType, name: currentName });
         
-        // 👈 جلب الشكاوى والردود الخاصة بهذا المستخدم لحظياً
+        // 💡 السر الأول: شيلنا orderBy عشان فايربيز ميخفيش الرسايل لو مفيش Index
         const q = query(
-          collection(db, 'support_tickets'), // 👈 توحيد المسار مع لوحة الإدارة
-          where('senderId', '==', currentId),
-          orderBy('timestamp', 'desc')
+          collection(db, 'support_tickets'),
+          where('senderId', '==', currentId)
         );
 
         const unsubscribe = onSnapshot(q, (snap) => {
-          const tickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          let tickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          // 💡 السر التاني: هنرتب الرسايل برمجياً هنا عشان كلها تظهر من الأحدث للأقدم
+          tickets.sort((a: any, b: any) => {
+            const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+            const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+            return timeB - timeA;
+          });
+
           setMyTickets(tickets);
         });
 
@@ -71,17 +78,21 @@ export default function Support() {
 
     setLoading(true);
     try {
-      await addDoc(collection(db, 'support_tickets'), { // 👈 تم التعديل لتسمع في الإدارة فوراً
-        senderId: userData?.id || 'unknown',
+      await addDoc(collection(db, 'support_tickets'), { 
+        senderId: userData?.id || 'unknown', // أساسي للموبايل
         senderType: userData?.type || 'unknown',
         senderName: userData?.name || 'مستخدم غير معروف',
-        text: message.trim(),
+        userId: userData?.id || 'unknown', // أساسي للداشبورد
+        userType: userData?.type || 'unknown', 
+        userName: userData?.name || 'مستخدم غير معروف', 
+        message: message.trim(), 
+        text: message.trim(), 
         status: 'pending',
-        isReadAdmin: false, // 👈 عشان تنور أحمر في الإدارة
+        isReadAdmin: false, 
         timestamp: serverTimestamp()
       });
       
-      setMessage(''); // تفريغ الخانة بعد الإرسال
+      setMessage(''); 
       Alert.alert('تم 📩', 'تم إرسال رسالتك للإدارة بنجاح وسيتم الرد عليك قريباً.');
     } catch (error) {
       Alert.alert('خطأ', 'فشل الإرسال، تأكد من اتصالك بالإنترنت.');
@@ -101,12 +112,11 @@ export default function Support() {
         </Text>
       </View>
       
-      <Text style={[styles.ticketText, isDarkMode && { color: '#e2e8f0' }]}>{item.text}</Text>
+      <Text style={[styles.ticketText, isDarkMode && { color: '#e2e8f0' }]}>{item.message || item.text}</Text>
       
-      {/* 👈 هنا هيظهر رد الإدارة بمجرد ما ترد من لوحة التحكم */}
       {item.reply && (
         <View style={[styles.replyBox, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#064e3b' }]}>
-          <Text style={[styles.replyTitle, isDarkMode && { color: '#10b981' }]}>رد الإدارة الدعم الفني:</Text>
+          <Text style={[styles.replyTitle, isDarkMode && { color: '#10b981' }]}>رد الإدارة (الدعم الفني):</Text>
           <Text style={[styles.replyText, isDarkMode && { color: '#f8fafc' }]}>{item.reply}</Text>
         </View>
       )}
@@ -148,7 +158,7 @@ export default function Support() {
             </TouchableOpacity>
 
             {myTickets.length > 0 && (
-              <Text style={[styles.historyTitle, isDarkMode && { color: '#cbd5e1' }]}>سجل الشكاوى والرسائل السابقة 👇</Text>
+              <Text style={[styles.historyTitle, isDarkMode && { color: '#cbd5e1' }]}>سجل الرسائل السابقة 👇</Text>
             )}
           </View>
         }

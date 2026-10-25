@@ -37,6 +37,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "buildConfig": true
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#0f172a",
@@ -53,12 +61,7 @@
       "expo-image",
       "expo-web-browser",
       [
-        "expo-notifications",
-        {
-          "sounds": [
-            "./assets/sounds/badr_alert.mp3"
-          ]
-        }
+       "expo-notifications"
       ]
     ],
     "experiments": {

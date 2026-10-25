@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تتبع رحلة بُرَاق</title>
+    
+    <!-- ربط Firebase (اكتب بيانات مشروعك الحقيقية هنا) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    
+    <!-- خطوط وجوجل ماب -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap');
+        body { margin: 0; font-family: 'Tajawal', sans-serif; background-color: #f8fafc; color: #1e293b; display: flex; flex-direction: column; height: 100vh; }
+        
+        /* الهيدر زي inDrive */
+        .header { background-color: #1e293b; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { color: #10b981; font-weight: 900; font-size: 24px; text-decoration: none; }
+        .download-btn { background-color: #10b981; color: white; padding: 8px 15px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; }
+        
+        /* مساحة الخريطة */
+        #map { flex: 1; width: 100%; }
+        
+        /* كارت بيانات الكابتن من تحت */
+        .bottom-card { background-color: white; border-top-left-radius: 20px; border-top-right-radius: 20px; padding: 20px; box-shadow: 0 -4px 10px rgba(0,0,0,0.1); margin-top: -20px; z-index: 10; position: relative; }
+        .status-text { font-size: 20px; font-weight: 900; margin-bottom: 5px; color: #0f172a; }
+        .car-model { color: #64748b; font-size: 14px; margin-bottom: 15px; font-weight: bold; }
+        
+        .driver-info { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 15px; }
+        .driver-profile { display: flex; align-items: center; gap: 12px; }
+        .avatar { width: 50px; height: 50px; border-radius: 25px; object-fit: cover; border: 2px solid #e2e8f0; }
+        .driver-name { font-weight: bold; font-size: 18px; }
+        .plate-box { background: #f1f5f9; padding: 8px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-weight: bold; font-size: 16px; letter-spacing: 1px; }
+        
+        /* خط السير */
+        .route-info { display: flex; flex-direction: column; gap: 10px; }
+        .route-item { display: flex; align-items: center; gap: 10px; font-weight: bold; color: #475569; }
+        .dot { width: 12px; height: 12px; border-radius: 6px; }
+        .dot-green { background-color: #10b981; }
+        .dot-red { background-color: #ef4444; }
+        
+        .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 20px; font-weight: bold; color: #10b981; }
+    </style>
+</head>
+<body>
+
+    <div id="loading" class="loading">جاري تحميل مسار الرحلة... ⏳</div>
+
+    <div id="app" style="display: none; height: 100%; flex-direction: column;">
+        <div class="header">
+            <a href="#" class="logo">بُرَاق</a>
+            <a href="#" class="download-btn">حمل التطبيق</a>
+        </div>
+
+        <div id="map"></div>
+
+        <div class="bottom-card">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <div class="status-text" id="ride-status">الرحلة جارية الآن</div>
+                    <div class="car-model" id="car-model">مركبة</div>
+                </div>
+                <div class="plate-box" id="car-plate">...</div>
+            </div>
+
+            <div class="driver-info">
+                <div class="driver-profile">
+                    <img src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" id="driver-avatar" class="avatar">
+                    <div class="driver-name" id="driver-name">كابتن</div>
+                </div>
+                <div style="font-weight: bold; color: #f59e0b;">★ 5.0</div>
+            </div>
+
+            <div class="route-info">
+                <div class="route-item">
+                    <div class="dot dot-green"></div>
+                    <span id="pickup-text">نقطة الانطلاق</span>
+                </div>
+                <div class="route-item">
+                    <div class="dot dot-red"></div>
+                    <span id="dest-text">الوجهة</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- كود جوجل ماب (حط مفتاحك الحقيقي هنا) -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDh901lCbt6rjxgUkFe4X9ns3CLAL4fVHg&language=ar"></script>
+    
+    <script>
+        // إعدادات مشروعك في الفايربيز (انسخها من الفايربيز كونسول بتاعك)
+        const firebaseConfig = {
+  apiKey: "AIzaSyDq5trvT-Hfw1y7nwIlqe3a2A0uf9AeVOs",
+  authDomain: "badr-cute.firebaseapp.com",
+  projectId: "badr-cute",
+  storageBucket: "badr-cute.firebasestorage.app",
+  messagingSenderId: "520549143229",
+  appId: "1:520549143229:web:dec6116c6f0665483f1dd4",
+  measurementId: "G-Q0YR2GSB2Q"
+};
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // سحب الـ ID من اللينك
+        const urlParams = new URLSearchParams(window.location.search);
+        const rideId = urlParams.get('id');
+
+        let map, captainMarker, directionsService, directionsRenderer;
+
+        function initMap(startCoords, endCoords) {
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 14,
+                center: startCoords,
+                disableDefaultUI: true // بيشيل زراير جوجل عشان يبان تطبيق نضيف
+            });
+
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer({
+                map: map,
+                suppressMarkers: true,
+                polylineOptions: { strokeColor: "#3b82f6", strokeWeight: 5 }
+            });
+
+            // دبوس الوجهة (الراكب)
+            new google.maps.Marker({ position: endCoords, map: map, icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#ef4444", fillOpacity: 1, strokeWeight: 2, strokeColor: "white" }});
+
+            // دبوس الكابتن (مبدئي)
+            captainMarker = new google.maps.Marker({
+                position: startCoords,
+                map: map,
+                icon: { url: "https://cdn-icons-png.flaticon.com/512/3204/3204121.png", scaledSize: new google.maps.Size(40, 40) } // أيقونة عربية
+            });
+
+            // رسم المسار
+            directionsService.route({ origin: startCoords, destination: endCoords, travelMode: 'DRIVING' }, (response, status) => {
+                if (status === 'OK') directionsRenderer.setDirections(response);
+            });
+        }
+
+        if (rideId) {
+            db.collection('rides').doc(rideId).onSnapshot((doc) => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('app').style.display = 'flex';
+
+                    // ملء البيانات
+                    document.getElementById('driver-name').innerText = data.captainName || 'كابتن';
+                    document.getElementById('car-model').innerText = (data.captainVehicle || 'مركبة').replace('بديل توكتوك', '').trim();
+                    document.getElementById('car-plate').innerText = data.captainPlateNumber || 'بدون لوحة';
+                    document.getElementById('pickup-text').innerText = data.pickupLocation;
+                    document.getElementById('dest-text').innerText = data.destinationLocation;
+                    
+                    if (data.captainAvatar) document.getElementById('driver-avatar').src = data.captainAvatar;
+
+                    // تحديث الحالة
+                    const statusMap = { 'accepted': 'الكابتن في الطريق', 'captain_arrived': 'الكابتن بالخارج', 'in_progress': 'الرحلة جارية الآن' };
+                    document.getElementById('ride-status').innerText = statusMap[data.status] || 'الرحلة مستمرة';
+
+                    // تحديث الخريطة لايف
+                    const capLoc = data.liveCoords || data.pickupCoords;
+                    const destLoc = data.destinationCoords || (data.pickupCoords); // اختصاراً
+                    
+                    if (!map && capLoc && destLoc) {
+                        initMap({ lat: capLoc.latitude, lng: capLoc.longitude }, { lat: destLoc.latitude, lng: destLoc.longitude });
+                    } else if (captainMarker && capLoc) {
+                        const newPos = new google.maps.LatLng(capLoc.latitude, capLoc.longitude);
+                        captainMarker.setPosition(newPos);
+                        map.panTo(newPos);
+                    }
+                }
+            });
+        } else {
+            document.getElementById('loading').innerText = "عفواً، رابط الرحلة غير صحيح ❌";
+        }
+    </script>
+</body>
+</html>

@@ -166,6 +166,88 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
 
         {isExpanded && (
           <View style={styles.expandedSection}>
+            
+            {/* 🗺️ خريطة معاينة الطلب المصغرة (تظهر فقط عند فتح الكارت) */}
+            {captainLocation && item.pickupCoords && (
+              <View style={{ width: '100%', height: 220, borderRadius: 16, overflow: 'hidden', marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#cbd5e1' }}>
+                <MapView
+                  provider={PROVIDER_GOOGLE}
+                  style={{ flex: 1 }}
+                  liteMode={true} // 👈 مهم جداً لمنع ثقل القائمة (يجعل الخريطة صورة تفاعلية خفيفة)
+                  scrollEnabled={false}
+                  pitchEnabled={false}
+                  zoomEnabled={false}
+                  initialRegion={{
+                    latitude: (captainLocation.latitude + item.pickupCoords.latitude) / 2,
+                    longitude: (captainLocation.longitude + item.pickupCoords.longitude) / 2,
+                    latitudeDelta: Math.abs(captainLocation.latitude - item.pickupCoords.latitude) * 2.5 || 0.02,
+                    longitudeDelta: Math.abs(captainLocation.longitude - item.pickupCoords.longitude) * 2.5 || 0.02,
+                  }}
+                >
+                  {/* 1. مسار الكابتن إلى نقطة الركوب (أزرق) */}
+                  <Polyline 
+                    coordinates={[
+                      { latitude: captainLocation.latitude, longitude: captainLocation.longitude },
+                      { latitude: item.pickupCoords.latitude, longitude: item.pickupCoords.longitude }
+                    ]} 
+                    strokeColor="#3b82f6" 
+                    strokeWidth={4} 
+                  />
+
+                  {/* أيقونة الكابتن والوقت المتوقع للوصول */}
+                  <Marker coordinate={{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }}>
+                    <View style={{ alignItems: 'center' }}>
+                      <View style={{ backgroundColor: '#3b82f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginBottom: 4, elevation: 3, borderWidth: 1, borderColor: '#bfdbfe' }}>
+<Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>{Math.max(1, Math.ceil(((capToPickMeters ?? 0) / 1000) * 2.5))} دقيقة</Text>
+                        <Text style={{ color: '#e0f2fe', fontSize: 10, fontWeight: 'bold', textAlign: 'center' }}>{((capToPickMeters ?? 0) / 1000).toFixed(1)} كم</Text>                        </View>
+                      <View style={{ width: 30, height: 30, backgroundColor: '#1e293b', borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#3b82f6' }}>
+                        <Ionicons name="car" size={16} color="white" />
+                      </View>
+                    </View>
+                  </Marker>
+
+                  {/* نقطة الراكب (A) */}
+                  <Marker coordinate={{ latitude: item.pickupCoords.latitude, longitude: item.pickupCoords.longitude }}>
+                    <View style={{ width: 24, height: 24, backgroundColor: '#3b82f6', borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white', elevation: 3 }}>
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A</Text>
+                    </View>
+                  </Marker>
+
+                  {/* 2. مسار الرحلة إلى الوجهة النهائية (برتقالي) */}
+                  {item.destinationCoords && (
+                    <>
+                      <Polyline 
+                        coordinates={[
+                          { latitude: item.pickupCoords.latitude, longitude: item.pickupCoords.longitude },
+                          { latitude: item.destinationCoords.latitude, longitude: item.destinationCoords.longitude }
+                        ]} 
+                        strokeColor="#f59e0b" // لون برتقالي كما طلبت
+                        strokeWidth={4} 
+                      />
+                      
+                      {/* ملصق الرحلة (برتقالي) */}
+                      <Marker coordinate={{ 
+                        latitude: (item.pickupCoords.latitude + item.destinationCoords.latitude) / 2, 
+                        longitude: (item.pickupCoords.longitude + item.destinationCoords.longitude) / 2 
+                      }}>
+                        <View style={{ backgroundColor: '#3b82f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginBottom: 4, elevation: 3, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                        <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>{Math.max(1, Math.ceil((capToPickMeters! / 1000) * 2.5))} دقيقة</Text>
+                        <Text style={{ color: '#e0f2fe', fontSize: 10, fontWeight: 'bold', textAlign: 'center' }}>{(capToPickMeters! / 1000).toFixed(1)} كم</Text>
+                      </View>
+                      </Marker>
+
+                      {/* نقطة الوصول (B) */}
+                      <Marker coordinate={{ latitude: item.destinationCoords.latitude, longitude: item.destinationCoords.longitude }}>
+                        <View style={{ width: 24, height: 24, backgroundColor: '#f59e0b', borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white', elevation: 3 }}>
+                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>B</Text>
+                        </View>
+                      </Marker>
+                    </>
+                  )}
+                </MapView>
+              </View>
+            )}
+
             <View style={styles.newBadgesRow}>
                <View style={[styles.newSmallBadge, {backgroundColor: item.paymentMethod === 'انستاباي' ? '#e0e7ff' : item.paymentMethod === 'محفظة' ? '#ffedd5' : '#dcfce7'}]}>
                  <Text style={[styles.newSmallBadgeText, {color: item.paymentMethod === 'انستاباي' ? '#3730a3' : item.paymentMethod === 'محفظة' ? '#9a3412' : '#166534'}]}>
@@ -2341,17 +2423,16 @@ const notifyArrival = async () => {
         </TouchableOpacity>
 </Modal>
 
-          {/* 🚨 شاشة وضع الصيانة الإجبارية 🚨 */}
-          {isMaintenanceMode && (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', zIndex: 100000, padding: 20 }}>
+ {/* 🚨 شاشة وضع الصيانة الإجبارية للكابتن 🚨 */}
+<Modal visible={isMaintenanceMode && !activeRide && !isRatingModalVisible} transparent={false} animationType="fade">            <View style={{ flex: 1, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
               <Text style={{ fontSize: 90, marginBottom: 20 }}>🛠️</Text>
               <Text style={{ color: '#ef4444', fontSize: 26, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>التطبيق تحت الصيانة</Text>
-              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 30 }}>
+              <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontSize: 18, textAlign: 'center', lineHeight: 28, marginBottom: 30, fontWeight: 'bold' }}>
                 نعمل حالياً على تطوير وتحديث خوادم بُرَاق لتقديم خدمة أسرع وأفضل. سنعود للعمل خلال وقت قصير، نعتذر عن هذا الإزعاج.
               </Text>
               <ActivityIndicator size="large" color="#eab308" />
             </View>
-          )}
+          </Modal>
 {/* 🛑 شاشة إنهاء الرحلة الضخمة للكابتن */}
       <Modal visible={isEndRideModalVisible} transparent={true} animationType="slide">
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 15 }}>
