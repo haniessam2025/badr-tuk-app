@@ -1,3 +1,4 @@
+
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
@@ -584,7 +585,26 @@ useFocusEffect(useCallback(() => {
         }
       }
     } catch(e) {}
-  };  const getInitialCaptainLocation = async () => {
+  };  // 💓 نبضة الكابتن (Heartbeat): تحديث الوقت باستمرار عشان رادار الإدارة ميفصلوش
+  useEffect(() => {
+    let intervalId: any;
+    if (isOnline && captainProfile?.id) {
+      // تحديث الوقت فوراً عند الاتصال
+      updateDoc(doc(db, 'captains', captainProfile.id), { timestamp: new Date().getTime() }).catch(() => {});
+      
+      // إرسال تحديث كل 3 دقائق (180000 مللي ثانية)
+      intervalId = setInterval(() => {
+        updateDoc(doc(db, 'captains', captainProfile.id), {
+          timestamp: new Date().getTime()
+        }).catch(() => {});
+      }, 180000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isOnline, captainProfile?.id]);
+
+  const getInitialCaptainLocation = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
     if (status === 'granted') { 
       try { 

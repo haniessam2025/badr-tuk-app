@@ -20,7 +20,7 @@ export default function CaptainComplaints() {
     try {
       // 👈 تحديد 50 تذكرة فقط لتقليل القراءات
       const q = query(
-        collection(db, 'support_tickets'), 
+        collection(db, 'complaints_tickets'), 
         where('captainId', '==', captainId), 
         orderBy('timestamp', 'desc'), 
         limit(50)
@@ -90,7 +90,7 @@ export default function CaptainComplaints() {
         timestamp: new Date().getTime() // 🕒 استخدام الوقت الرقمي لتجنب أي أخطاء في الترتيب
       };
       
-      const docRef = await addDoc(collection(db, 'support_tickets'), newTicket);
+      const docRef = await addDoc(collection(db, 'complaints_tickets'), newTicket);
       
       setTickets(prev => [{ id: docRef.id, ...newTicket }, ...prev]);
       

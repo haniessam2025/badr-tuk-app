@@ -324,6 +324,23 @@ setPhone(data.phone || '');
             ) : null}
           </View>
 
+          {/* 🆕 رسالة حالة الكابتن (موافق عليه / قيد المراجعة) */}
+          {(originalData?.vehicleCategory === 'tuktuk_alt' || originalData?.vehicleCategory === 'كيوت') && (
+            originalData?.vehicleSequenceNumber ? (
+              <View style={[{ backgroundColor: '#ecfdf5', padding: 15, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#10b981' }, isDarkMode && { backgroundColor: '#064e3b', borderColor: '#047857' }]}>
+                <Text style={[{ color: '#059669', fontSize: 14, fontWeight: 'bold', textAlign: 'center', lineHeight: 22 }, isDarkMode && { color: '#a7f3d0' }]}>
+                  🎉 مبروك لقد تمت الموافقة على حسابك ورقمك الكودي هو ({originalData.vehicleSequenceNumber}) يمكنك الآن استقبال الرحلات بنجاح.
+                </Text>
+              </View>
+            ) : (
+              <View style={[{ backgroundColor: '#fffbeb', padding: 15, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#f59e0b' }, isDarkMode && { backgroundColor: '#78350f', borderColor: '#b45309' }]}>
+                <Text style={[{ color: '#d97706', fontSize: 14, fontWeight: 'bold', textAlign: 'center', lineHeight: 22 }, isDarkMode && { color: '#fde68a' }]}>
+                  ⏳ بياناتك قيد المراجعة من الإدارة. سيتم تخصيص رقم كودي لك فور الموافقة.
+                </Text>
+              </View>
+            )
+          )}
+
           <View style={[styles.formContainer, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
             <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>الاسم الرباعي</Text>
             <TextInput

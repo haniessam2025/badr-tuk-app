@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, LogBox, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, AppStateStatus, Dimensions, Image, KeyboardAvoidingView, Linking, LogBox, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
@@ -136,7 +136,48 @@ export default function PassengerHome() {
     });
     return () => unsubSettings();
   }, []);
+// يوضع هذا الكود داخل المكون الرئيسي (Component) لصفحة الراكب
+useEffect(() => {
+  let intervalId: any;
 
+  // تحديد نوع isOnlineState كـ boolean لحل خطأ TypeScript
+  const setOnlineStatus = async (isOnlineState: boolean) => {
+    try {
+      const passengerId = await AsyncStorage.getItem('currentPassengerId');
+      if (passengerId) {
+        await updateDoc(doc(db, 'passengers', passengerId), {
+          isOnline: isOnlineState,
+          timestamp: new Date().getTime()
+        });
+      }
+    } catch (error) {
+      console.log("خطأ في تحديث حالة اتصال الراكب:", error);
+    }
+  };
+
+  // 1. تحويل الراكب لأونلاين فور فتح الشاشة
+  setOnlineStatus(true);
+
+  // 2. إرسال نبضة كل 3 دقائق لتأكيد التواجد
+  intervalId = setInterval(() => {
+    setOnlineStatus(true);
+  }, 180000);
+
+  // 3. مراقبة حالة التطبيق مع تحديد نوع nextAppState
+  const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+    if (nextAppState === 'background' || nextAppState === 'inactive') {
+      setOnlineStatus(false);
+    } else if (nextAppState === 'active') {
+      setOnlineStatus(true);
+    }
+  });
+
+  return () => {
+    if (intervalId) clearInterval(intervalId);
+    subscription.remove();
+    setOnlineStatus(false); 
+  };
+}, []);
   const pathname = usePathname();
 
   const flashAnim = useRef(new Animated.Value(0)).current;
@@ -226,6 +267,47 @@ export default function PassengerHome() {
 
   const [passengerProfile, setPassengerProfile] = useState({ id: '', name: 'جار التحميل...', phone: '', avatar: DEFAULT_AVATAR, averageRating: 5, ratingCount: 0, hidePhoneNumber: false });  
   const [captainInfo, setCaptainInfo] = useState({ name: '', vehicle: 'توكتوك', phone: '', avatar: DEFAULT_AVATAR, vehicleImage: '', plateNumber: '' });
+
+  // --- النبضة الذكية لتحديث حالة الراكب (أونلاين/أوفلاين) ---
+  useEffect(() => {
+    let intervalId: any;
+    let currentId = passengerProfile?.id;
+
+    const setOnlineStatus = async (isOnlineState: boolean) => {
+      try {
+        const idToUse = currentId || await AsyncStorage.getItem('currentPassengerId');
+        if (idToUse) {
+          await updateDoc(doc(db, 'passengers', idToUse), {
+            isOnline: isOnlineState,
+            timestamp: new Date().getTime()
+          });
+        }
+      } catch (error) {
+        console.log("خطأ في تحديث حالة اتصال الراكب:", error);
+      }
+    };
+
+    if (currentId) {
+      setOnlineStatus(true);
+      intervalId = setInterval(() => {
+        setOnlineStatus(true);
+      }, 120000); 
+    }
+
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        setOnlineStatus(false);
+      } else if (nextAppState === 'active') {
+        setOnlineStatus(true);
+      }
+    });
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      subscription.remove();
+      if (currentId) setOnlineStatus(false); 
+    };
+  }, [passengerProfile?.id]);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
   const [activeNotification, setActiveNotification] = useState<any>(null);
 
