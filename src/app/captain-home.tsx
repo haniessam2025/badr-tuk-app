@@ -404,6 +404,7 @@ export default function CaptainHome() {
   const [phoneToCall, setPhoneToCall] = useState('');
   const [isRatingModalVisible, setIsRatingModalVisible] = useState(false);
   const [useInternalMap, setUseInternalMap] = useState(true); // 👈 متغير التحكم في عرض الخريطة الداخلية
+  const [isMapFullScreen, setIsMapFullScreen] = useState(false); // 👈 حالة ملء الشاشة للخريطة
   const [rating, setRating] = useState(0);
   const [ratingReason, setRatingReason] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
@@ -415,6 +416,26 @@ export default function CaptainHome() {
   const prevRequestsCountRef = useRef(0);
   
   const [enlargedAvatar, setEnlargedAvatar] = useState<string | null>(null);
+  const mapRef = useRef<any>(null); // 👈 مرجع الخريطة
+
+  // 🎯 دالة التوسيط الذكية (بتعمل زูم وتجيب الكابتن والهدف في نص الشاشة)
+  const reCenterMap = () => {
+    if (mapRef.current && captainLocation && activeRide) {
+      const targetCoords = activeRide.status !== 'in_progress' 
+        ? activeRide.pickupCoords 
+        : (activeRide.liveCoords || activeRide.destinationCoords);
+
+      if (targetCoords && targetCoords.latitude) {
+        mapRef.current.fitToCoordinates([
+          { latitude: captainLocation.latitude, longitude: captainLocation.longitude },
+          { latitude: targetCoords.latitude, longitude: targetCoords.longitude }
+        ], {
+          edgePadding: { top: 80, right: 80, bottom: 80, left: 80 },
+          animated: true,
+        });
+      }
+    }
+  };
   // 💡 متغيرات فلاش تنبيه نزول الراكب
   const passengerOnWayFlashAnim = useRef(new Animated.Value(0)).current;
   const hasFlashedPassengerOnWayRef = useRef(false);
@@ -974,7 +995,9 @@ pendingRequests.sort((a, b) => b.timestamp - a.timestamp);
         } else {
           setActiveRide((prev: any) => { 
             if (prev && !isEndingRide.current) {
-              Alert.alert("تنبيه", "الرحلة الحالية غير موجودة أو قام الراكب بإلغائها."); 
+              Vibration.vibrate([0, 1000, 500, 1000, 500, 1000]); // 📳 اهتزاز طوارئ قوي جداً
+              Alert.alert("تنبيه هام 🚨", "قام الراكب بإلغاء الرحلة للتو! يرجى التوقف عن التوجه إليه."); 
+              setIsMapFullScreen(false); // 👈 إغلاق خريطة ملء الشاشة فوراً إن كانت مفتوحة
             }
             isEndingRide.current = false; 
             AsyncStorage.removeItem('active_ride_captain'); // 👈 مسح الرحلة لو خلصت أو اتلغت
@@ -1888,25 +1911,80 @@ const notifyArrival = async () => {
 
                 {/* 🗺️ عرض الخريطة الداخلية لو الزرار مفعل وموقع الراكب موجود */}
                 {useInternalMap && captainLocation && activeRide.pickupCoords && activeRide.pickupCoords.latitude ? (
-                  <View style={{ width: '100%', height: 200, borderRadius: 12, overflow: 'hidden', marginBottom: 15, borderWidth: 2, borderColor: '#10b981' }}>
-                    <MapView
-                      provider={PROVIDER_GOOGLE}
-                      style={{ width: '100%', height: '100%' }}
-                      scrollEnabled={false} // 👈 يمنع الخريطة من سرقة التاتش (عشان الشاشة تترفع لفوق)
-                      pitchEnabled={false}
-                      zoomEnabled={true}
-                      initialRegion={{
-                        latitude: (captainLocation.latitude + activeRide.pickupCoords.latitude) / 2,
-                        longitude: (captainLocation.longitude + activeRide.pickupCoords.longitude) / 2,
-                        latitudeDelta: Math.abs(captainLocation.latitude - activeRide.pickupCoords.latitude) * 2 || 0.01,
-                        longitudeDelta: Math.abs(captainLocation.longitude - activeRide.pickupCoords.longitude) * 2 || 0.01,
-                      }}
-                    >
-                      <Marker coordinate={{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }} title="موقعك الحالي" pinColor="blue" />
-                      <Marker coordinate={{ latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }} title="نقطة الركوب" pinColor="red" />
-                      <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }]} strokeColor="#10b981" strokeWidth={4} />
-                    </MapView>
-                  </View>
+                  <>
+                    <View style={{ width: '100%', height: Dimensions.get('window').height * 0.55, borderRadius: 16, overflow: 'hidden', marginBottom: 15, borderWidth: 3, borderColor: '#10b981', position: 'relative', elevation: 4 }}>
+                      <MapView
+                        ref={isMapFullScreen ? null : mapRef}
+                        provider={PROVIDER_GOOGLE}
+                        style={{ width: '100%', height: '100%' }}
+                        scrollEnabled={true}
+                        pitchEnabled={false}
+                        zoomEnabled={true}
+                        showsUserLocation={true}
+                        followsUserLocation={true}
+                        initialRegion={{
+                          latitude: (captainLocation.latitude + activeRide.pickupCoords.latitude) / 2,
+                          longitude: (captainLocation.longitude + activeRide.pickupCoords.longitude) / 2,
+                          latitudeDelta: Math.abs(captainLocation.latitude - activeRide.pickupCoords.latitude) * 2 || 0.01,
+                          longitudeDelta: Math.abs(captainLocation.longitude - activeRide.pickupCoords.longitude) * 2 || 0.01,
+                        }}
+                        onMapReady={reCenterMap}
+                      >
+                        <Marker coordinate={{ latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }} title="نقطة الركوب" pinColor="red" />
+                        <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }]} strokeColor="#10b981" strokeWidth={4} />
+                      </MapView>
+
+                      <View style={{ position: 'absolute', bottom: 20, right: 20, gap: 15 }}>
+                        <TouchableOpacity onPress={reCenterMap} style={{ backgroundColor: '#ffffff', width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 6, borderWidth: 2, borderColor: '#3b82f6' }}>
+                          <Ionicons name="locate" size={26} color="#3b82f6" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => setIsMapFullScreen(true)} style={{ backgroundColor: '#10b981', width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 6, borderWidth: 2, borderColor: '#059669' }}>
+                          <Ionicons name="expand" size={26} color="#ffffff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* الخريطة المكبرة ملء الشاشة */}
+                    <Modal visible={isMapFullScreen} transparent={false} animationType="fade">
+                      <View style={{ flex: 1, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc' }}>
+                        <MapView
+                          ref={isMapFullScreen ? mapRef : null}
+                          provider={PROVIDER_GOOGLE}
+                          style={{ width: '100%', height: '100%' }}
+                          scrollEnabled={true}
+                          pitchEnabled={false}
+                          zoomEnabled={true}
+                          showsUserLocation={true}
+                          followsUserLocation={true}
+                          initialRegion={{
+                            latitude: (captainLocation.latitude + activeRide.pickupCoords.latitude) / 2,
+                            longitude: (captainLocation.longitude + activeRide.pickupCoords.longitude) / 2,
+                            latitudeDelta: Math.abs(captainLocation.latitude - activeRide.pickupCoords.latitude) * 2 || 0.01,
+                            longitudeDelta: Math.abs(captainLocation.longitude - activeRide.pickupCoords.longitude) * 2 || 0.01,
+                          }}
+                          onMapReady={reCenterMap}
+                        >
+                          <Marker coordinate={{ latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }} title="نقطة الركوب" pinColor="red" />
+                          <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.pickupCoords.latitude, longitude: activeRide.pickupCoords.longitude }]} strokeColor="#10b981" strokeWidth={5} />
+                        </MapView>
+
+                        {/* لوحة تحكم الخريطة المكبرة */}
+                        <View style={{ position: 'absolute', top: 50, left: 20, right: 20, backgroundColor: 'rgba(255,255,255,0.9)', padding: 15, borderRadius: 12, elevation: 5 }}>
+                           <Text style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 16, color: '#10b981' }}>تتبع المسار إلى الراكب 📍</Text>
+                           <Text style={{ textAlign: 'center', fontSize: 13, color: '#64748b' }}>الراكب في انتظارك، اتبع الخريطة.</Text>
+                        </View>
+
+                        <View style={{ position: 'absolute', bottom: 40, right: 20, gap: 15 }}>
+                          <TouchableOpacity onPress={reCenterMap} style={{ backgroundColor: '#ffffff', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 8, borderWidth: 2, borderColor: '#3b82f6' }}>
+                            <Ionicons name="locate" size={32} color="#3b82f6" />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => setIsMapFullScreen(false)} style={{ backgroundColor: '#ef4444', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 8, borderWidth: 2, borderColor: '#b91c1c' }}>
+                            <Ionicons name="contract" size={32} color="#ffffff" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </Modal>
+                  </>
                 ) : null}
 
                 {/* 📍 زرار فتح جوجل ماب (في حالة اختياره) */}
@@ -1950,26 +2028,79 @@ const notifyArrival = async () => {
 
                 {/* 🗺️ عرض الخريطة الداخلية لو الزرار مفعل وموقع الراكب موجود */}
                 {useInternalMap && captainLocation && activeRide.liveCoords && activeRide.liveCoords.latitude ? (
-                  <View style={{ width: '100%', height: 250, borderRadius: 12, overflow: 'hidden', marginBottom: 15, borderWidth: 2, borderColor: '#10b981' }}>
-                    <MapView
-                      provider={PROVIDER_GOOGLE}
-                      style={{ width: '100%', height: '100%' }}
-                      scrollEnabled={false} // 👈 يمنع الخريطة من سرقة التاتش (عشان الشاشة تترفع لفوق)
-                      pitchEnabled={false}
-                      zoomEnabled={true}
-                      initialRegion={{
-                        latitude: (captainLocation.latitude + activeRide.liveCoords.latitude) / 2,
-                        longitude: (captainLocation.longitude + activeRide.liveCoords.longitude) / 2,
-                        latitudeDelta: Math.abs(captainLocation.latitude - activeRide.liveCoords.latitude) * 2 || 0.02,
-                        longitudeDelta: Math.abs(captainLocation.longitude - activeRide.liveCoords.longitude) * 2 || 0.02,
-                      }}
-                      showsUserLocation={true}
-                      followsUserLocation={true}
-                    >
-                      <Marker coordinate={{ latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }} title="نقطة الوصول النهائية" pinColor="red" />
-                      <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }]} strokeColor="#10b981" strokeWidth={5} />
-                    </MapView>
-                  </View>
+                  <>
+                    <View style={{ width: '100%', height: Dimensions.get('window').height * 0.55, borderRadius: 16, overflow: 'hidden', marginBottom: 15, borderWidth: 3, borderColor: '#10b981', position: 'relative', elevation: 4 }}>
+                      <MapView
+                        ref={isMapFullScreen ? null : mapRef}
+                        provider={PROVIDER_GOOGLE}
+                        style={{ width: '100%', height: '100%' }}
+                        scrollEnabled={true}
+                        pitchEnabled={false}
+                        zoomEnabled={true}
+                        showsUserLocation={true}
+                        followsUserLocation={true}
+                        initialRegion={{
+                          latitude: (captainLocation.latitude + activeRide.liveCoords.latitude) / 2,
+                          longitude: (captainLocation.longitude + activeRide.liveCoords.longitude) / 2,
+                          latitudeDelta: Math.abs(captainLocation.latitude - activeRide.liveCoords.latitude) * 2 || 0.02,
+                          longitudeDelta: Math.abs(captainLocation.longitude - activeRide.liveCoords.longitude) * 2 || 0.02,
+                        }}
+                        onMapReady={reCenterMap}
+                      >
+                        <Marker coordinate={{ latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }} title="نقطة الوصول النهائية" pinColor="red" />
+                        <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }]} strokeColor="#10b981" strokeWidth={5} />
+                      </MapView>
+
+                      <View style={{ position: 'absolute', bottom: 20, right: 20, gap: 15 }}>
+                        <TouchableOpacity onPress={reCenterMap} style={{ backgroundColor: '#ffffff', width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 6, borderWidth: 2, borderColor: '#3b82f6' }}>
+                          <Ionicons name="locate" size={26} color="#3b82f6" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => setIsMapFullScreen(true)} style={{ backgroundColor: '#10b981', width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 6, borderWidth: 2, borderColor: '#059669' }}>
+                          <Ionicons name="expand" size={26} color="#ffffff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* الخريطة المكبرة ملء الشاشة أثناء الرحلة */}
+                    <Modal visible={isMapFullScreen} transparent={false} animationType="fade">
+                      <View style={{ flex: 1, backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc' }}>
+                        <MapView
+                          ref={isMapFullScreen ? mapRef : null}
+                          provider={PROVIDER_GOOGLE}
+                          style={{ width: '100%', height: '100%' }}
+                          scrollEnabled={true}
+                          pitchEnabled={false}
+                          zoomEnabled={true}
+                          showsUserLocation={true}
+                          followsUserLocation={true}
+                          initialRegion={{
+                            latitude: (captainLocation.latitude + activeRide.liveCoords.latitude) / 2,
+                            longitude: (captainLocation.longitude + activeRide.liveCoords.longitude) / 2,
+                            latitudeDelta: Math.abs(captainLocation.latitude - activeRide.liveCoords.latitude) * 2 || 0.02,
+                            longitudeDelta: Math.abs(captainLocation.longitude - activeRide.liveCoords.longitude) * 2 || 0.02,
+                          }}
+                          onMapReady={reCenterMap}
+                        >
+                          <Marker coordinate={{ latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }} title="نقطة الوصول النهائية" pinColor="red" />
+                          <Polyline coordinates={[{ latitude: captainLocation.latitude, longitude: captainLocation.longitude }, { latitude: activeRide.liveCoords.latitude, longitude: activeRide.liveCoords.longitude }]} strokeColor="#10b981" strokeWidth={6} />
+                        </MapView>
+
+                        <View style={{ position: 'absolute', top: 50, left: 20, right: 20, backgroundColor: 'rgba(255,255,255,0.9)', padding: 15, borderRadius: 12, elevation: 5 }}>
+                           <Text style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 16, color: '#10b981' }}>الرحلة جارية الآن 🚗</Text>
+                           <Text style={{ textAlign: 'center', fontSize: 13, color: '#64748b' }}>اتبع المسار إلى الوجهة النهائية.</Text>
+                        </View>
+
+                        <View style={{ position: 'absolute', bottom: 40, right: 20, gap: 15 }}>
+                          <TouchableOpacity onPress={reCenterMap} style={{ backgroundColor: '#ffffff', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 8, borderWidth: 2, borderColor: '#3b82f6' }}>
+                            <Ionicons name="locate" size={32} color="#3b82f6" />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => setIsMapFullScreen(false)} style={{ backgroundColor: '#ef4444', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 8, borderWidth: 2, borderColor: '#b91c1c' }}>
+                            <Ionicons name="contract" size={32} color="#ffffff" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </Modal>
+                  </>
                 ) : null}
 
                 {/* 🟢 نقطة الانطلاق */}

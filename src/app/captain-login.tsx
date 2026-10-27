@@ -48,7 +48,7 @@ export default function CaptainLogin() {
     }
 
     if (trimmedInput.toLowerCase() === 'admin' && trimmedPassword === 'admin123') {
-      router.replace('/admin-dashboard');
+router.replace('/admin-dashboard' as any);
       return;
     }
 
