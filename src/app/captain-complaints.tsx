@@ -1,20 +1,22 @@
+
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
 
 export default function UserComplaints() {
+  const [newTicket, setNewTicket] = useState('');
+const [content, setContent] = useState('');
   const router = useRouter();
   const { isDarkMode } = useApp();
   
   const [activeTab, setActiveTab] = useState<'complaint' | 'suggestion' | 'lost'>('complaint');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-<<<<<<< HEAD
   const [tickets, setTickets] = useState<any[]>([]);
   const [captainData, setCaptainData] = useState<any>(null);
   const [fetching, setFetching] = useState(true);
@@ -40,10 +42,8 @@ export default function UserComplaints() {
       setRefreshing(false);
     }
   };
-=======
   const [userData, setUserData] = useState<any>(null);
   const [myTickets, setMyTickets] = useState<any[]>([]);
->>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
 
   useEffect(() => {
     loadData();
@@ -110,17 +110,8 @@ export default function UserComplaints() {
         timestamp: serverTimestamp()
       });
       
-<<<<<<< HEAD
-      const docRef = await addDoc(collection(db, 'complaints_tickets'), newTicket);
-      
-      setTickets(prev => [{ id: docRef.id, ...newTicket }, ...prev]);
-      
       Alert.alert('نجاح ✅', 'تم إرسال رسالتك للإدارة بنجاح وسيتم التواصل معك قريباً.');
-      setContent('');
-=======
       setMessage('');
-      Alert.alert('تم 📩', 'تم إرسال رسالتك للإدارة بنجاح.');
->>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
     } catch (error) {
       Alert.alert('خطأ', 'فشل الإرسال، تأكد من اتصالك بالإنترنت.');
     } finally {
