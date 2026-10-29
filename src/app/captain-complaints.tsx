@@ -1,15 +1,20 @@
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
+import { useApp } from './AppContext';
 
-export default function CaptainComplaints() {
+export default function UserComplaints() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'suggestion' | 'complaint' | 'lost_item'>('suggestion');
-  const [content, setContent] = useState('');
+  const { isDarkMode } = useApp();
+  
+  const [activeTab, setActiveTab] = useState<'complaint' | 'suggestion' | 'lost'>('complaint');
+  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+<<<<<<< HEAD
   const [tickets, setTickets] = useState<any[]>([]);
   const [captainData, setCaptainData] = useState<any>(null);
   const [fetching, setFetching] = useState(true);
@@ -35,185 +40,240 @@ export default function CaptainComplaints() {
       setRefreshing(false);
     }
   };
+=======
+  const [userData, setUserData] = useState<any>(null);
+  const [myTickets, setMyTickets] = useState<any[]>([]);
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        const id = await AsyncStorage.getItem('currentCaptainId');
-        if (!id) return;
-        
-        const docRef = doc(db, 'captains', id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setCaptainData({ id, ...docSnap.data() });
-        }
-
-        // جلب التذاكر مرة واحدة عند الفتح
-        await fetchTickets(id);
-      } catch (error) {
-        console.log('Error init:', error);
-        setFetching(false);
-      }
-    };
-
-    init();
+    loadData();
   }, []);
 
-  // 👈 دالة التحديث عند السحب للأسفل
-  const onRefresh = () => {
-    if (captainData?.id) {
-      setRefreshing(true);
-      fetchTickets(captainData.id);
+  // 👈 دالة ذكية بتعرف إذا كان اللي فاتح راكب ولا كابتن وتجيب داتا السجل بتاعه
+  const loadData = async () => {
+    try {
+      let currentId = await AsyncStorage.getItem('currentPassengerId');
+      let type = 'passenger';
+      let collectionName = 'passengers';
+
+      if (!currentId) {
+        currentId = await AsyncStorage.getItem('currentCaptainId');
+        type = 'captain';
+        collectionName = 'captains';
+      }
+
+      if (!currentId) return;
+
+      const docSnap = await getDoc(doc(db, collectionName, currentId));
+      const userName = docSnap.exists() ? docSnap.data().name : (type === 'passenger' ? 'راكب' : 'كابتن');
+
+      setUserData({ id: currentId, type, name: userName });
+      
+// جلب الرسائل السابقة الخاصة بالمستخدم (بدون orderBy عشان نتفادى خطأ الفايربيز)
+      const q = query(
+        collection(db, 'complaints_tickets'),
+        where('senderId', '==', currentId)
+      );
+
+      const unsubscribe = onSnapshot(q, (snap) => {
+        const tickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        
+        // 👈 ترتيب الرسايل من الأحدث للأقدم جوه التطبيق عشان الفايربيز ميعترضش
+        tickets.sort((a: any, b: any) => {
+          const timeA = a.timestamp?.seconds || 0;
+          const timeB = b.timestamp?.seconds || 0;
+          return timeB - timeA;
+        });
+
+        setMyTickets(tickets);
+      });
+
+      return () => unsubscribe();
+    } catch (e) {
+      console.log('Error loading data:', e);
     }
   };
 
-  const submitTicket = async () => {
-    if (content.trim().length < 5) {
-      Alert.alert('تنبيه', 'برجاء كتابة تفاصيل واضحة (5 أحرف على الأقل).');
-      return;
-    }
+  const submitComplaint = async () => {
+    if (!message.trim()) return Alert.alert('تنبيه', 'برجاء كتابة رسالتك أولاً.');
+
     setLoading(true);
     try {
-      // 💡 توحيد البيانات عشان الأدمن يقرأها بنفس طريقة الراكب بالظبط
-      const newTicket = {
-        captainId: captainData.id,
-        senderName: captainData.name || 'غير مسجل', 
-        senderPhone: captainData.phone || 'غير مسجل', 
-        userType: 'captain', 
-        pushToken: captainData.pushToken || '',
-        type: activeTab,
-        message: content.trim(), // الحقل الموحد للنص
-        content: content.trim(), // للاحتياط
+      await addDoc(collection(db, 'complaints_tickets'), {
+        senderId: userData?.id || 'unknown',
+        senderType: userData?.type || 'unknown',
+        senderName: userData?.name || 'مستخدم غير معروف',
+        text: message.trim(),
         status: 'pending',
-        isReadAdmin: false, // عشان تظهر كـ "جديد" عند الإدارة
-        adminReply: '', 
-        timestamp: new Date().getTime() // 🕒 استخدام الوقت الرقمي لتجنب أي أخطاء في الترتيب
-      };
+        isReadAdmin: false,
+        ticketType: activeTab, // (complaint, suggestion, lost)
+        timestamp: serverTimestamp()
+      });
       
+<<<<<<< HEAD
       const docRef = await addDoc(collection(db, 'complaints_tickets'), newTicket);
       
       setTickets(prev => [{ id: docRef.id, ...newTicket }, ...prev]);
       
       Alert.alert('نجاح ✅', 'تم إرسال رسالتك للإدارة بنجاح وسيتم التواصل معك قريباً.');
       setContent('');
+=======
+      setMessage('');
+      Alert.alert('تم 📩', 'تم إرسال رسالتك للإدارة بنجاح.');
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
     } catch (error) {
-      Alert.alert('خطأ', 'حدثت مشكلة أثناء الإرسال.');
+      Alert.alert('خطأ', 'فشل الإرسال، تأكد من اتصالك بالإنترنت.');
     } finally {
       setLoading(false);
     }
   };
-  const renderTicket = ({ item }: { item: any }) => (
-    <View style={styles.ticketCard}>
-      <View style={styles.ticketHeader}>
-        <Text style={[
-          styles.ticketType, 
-          item.type === 'lost_item' ? { color: '#2563eb' } : item.type === 'suggestion' ? { color: '#eab308' } : { color: '#ef4444' }
-        ]}>
-          {item.type === 'lost_item' ? '🔍 مفقودات' : item.type === 'suggestion' ? '💡 مقترح' : '⚠️ شكوى'}
-        </Text>
-        <Text style={[styles.ticketStatus, { color: (item.status === 'replied' || item.adminReply) ? '#10b981' : '#f59e0b' }]}>
-          {(item.status === 'replied' || item.adminReply) ? 'تم الرد ✔️' : 'قيد المراجعة ⏳'}
-        </Text>
-      </View>
-      <Text style={styles.ticketContent}>{item.content || item.message}</Text>
-      
-      {/* 💡 قراءة رد الإدارة الجديد لخدمة العملاء */}
-      {(item.adminReply || item.reply) ? (
-        <View style={styles.replyBox}>
-          <Text style={styles.replyTitle}>رد الإدارة (خدمة العملاء):</Text>
-          <Text style={styles.replyContent}>{item.adminReply || item.reply}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
+
+  // فلترة السجل عشان يعرض رسايل التابة المفتوحة بس
+  const filteredTickets = myTickets.filter(t => t.ticketType === activeTab);
 
   const getPlaceholderText = () => {
-    if (activeTab === 'lost_item') return 'عثرت على شيء في مركبتك؟ أو فقدت شيئاً؟ اكتب التفاصيل هنا...';
+    if (activeTab === 'complaint') return 'اكتب تفاصيل شكواك هنا...';
     if (activeTab === 'suggestion') return 'اكتب مقترحك هنا لتطوير التطبيق...';
-    return 'اكتب تفاصيل شكواك هنا...';
+    return 'عثرت على شيء في مركبتك؟ أو فقدت شيئاً؟ اكتب التفاصيل هنا...';
+  };
+
+  const getTabTitleText = () => {
+    if (activeTab === 'complaint') return 'سجل الشكاوى السابقة';
+    if (activeTab === 'suggestion') return 'سجل المقترحات السابقة';
+    return 'سجل المفقودات السابقة';
+  };
+
+  // 👈 تصميم كارت السجل (الرسالة + رد الإدارة)
+  const renderTicket = ({ item }: { item: any }) => {
+    return (
+      <View style={[styles.ticketCard, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+        <View style={styles.ticketHeader}>
+          <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 5 }}>
+            {item.ticketType === 'lost' ? <Ionicons name="search" size={16} color="#3b82f6" /> : 
+             item.ticketType === 'complaint' ? <Ionicons name="alert-circle" size={16} color="#ef4444" /> : 
+             <Ionicons name="bulb" size={16} color="#10b981" />}
+            <Text style={{ fontSize: 14, fontWeight: 'bold', color: item.ticketType === 'complaint' ? '#ef4444' : item.ticketType === 'lost' ? '#3b82f6' : '#10b981' }}>
+              {item.timestamp ? new Date(item.timestamp.seconds * 1000).toLocaleDateString('ar-EG') : 'الآن'}
+            </Text>
+          </View>
+          <Text style={[styles.ticketStatus, item.reply ? { color: '#10b981' } : { color: '#f59e0b' }]}>
+            {item.reply ? 'تم الرد ✔️' : 'قيد المراجعة ⏳'}
+          </Text>
+        </View>
+        
+        <Text style={[styles.ticketText, isDarkMode && { color: '#e2e8f0' }]}>{item.text}</Text>
+        
+        {/* 👈 صندوق عرض رد الإدارة (بيظهر أول ما الداشبورد ترد) */}
+        {item.reply && (
+          <View style={[styles.replyBox, isDarkMode && { backgroundColor: '#0f172a', borderColor: '#064e3b' }]}>
+            <Text style={[styles.replyTitle, isDarkMode && { color: '#10b981' }]}>رد الإدارة (خدمة العملاء):</Text>
+            <Text style={[styles.replyText, isDarkMode && { color: '#f8fafc' }]}>{item.reply}</Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backBtnText}>رجوع ⬅️</Text></TouchableOpacity>
-        <Text style={styles.headerTitle}>المقترحات والشكاوى</Text>
+    <KeyboardAvoidingView style={[styles.container, isDarkMode && { backgroundColor: '#0f172a' }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[styles.header, isDarkMode && { borderBottomColor: '#334155' }]}>
+        <TouchableOpacity style={[styles.backBtn, isDarkMode && { backgroundColor: '#334155' }]} onPress={() => router.back()}>
+          <Text style={[styles.backBtnText, isDarkMode && { color: '#e2e8f0' }]}>رجوع ➔</Text>
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, isDarkMode && { color: '#ffffff' }]}>المقترحات والشكاوى</Text>
       </View>
 
-      <View style={styles.tabsRow}>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'complaint' && styles.tabBtnActive]} onPress={() => setActiveTab('complaint')}>
-          <Text style={[styles.tabText, activeTab === 'complaint' && styles.tabTextActive]}>شكوى</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'suggestion' && styles.tabBtnActive]} onPress={() => setActiveTab('suggestion')}>
-          <Text style={[styles.tabText, activeTab === 'suggestion' && styles.tabTextActive]}>مقترح</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, activeTab === 'lost_item' && styles.tabBtnActiveLost]} onPress={() => setActiveTab('lost_item')}>
-          <Text style={[styles.tabText, activeTab === 'lost_item' && styles.tabTextActive]}>مفقودات 🔍</Text>
-        </TouchableOpacity>
-      </View>
+      <FlatList
+        data={filteredTickets}
+        keyExtractor={item => item.id}
+        renderItem={renderTicket}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 20 }}
+        ListHeaderComponent={
+          <View style={styles.content}>
+            
+            {/* التابات الثلاثة */}
+            <View style={styles.tabsContainer}>
+              <TouchableOpacity 
+                style={[styles.tabBtn, activeTab === 'lost' && styles.tabActive, isDarkMode && activeTab !== 'lost' && { backgroundColor: '#1e293b' }]} 
+                onPress={() => { setActiveTab('lost'); setMessage(''); }}
+              >
+                <Text style={[styles.tabText, activeTab === 'lost' && { color: '#ffffff' }, isDarkMode && activeTab !== 'lost' && { color: '#94a3b8' }]}>مفقودات 🔍</Text>
+              </TouchableOpacity>
 
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.inputArea}
-          placeholder={getPlaceholderText()}
-          placeholderTextColor="#94a3b8"
-          multiline
-          value={content}
-          onChangeText={setContent}
-          textAlign="right"
-        />
-        <TouchableOpacity style={styles.submitBtn} onPress={submitTicket} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>إرسال للإدارة</Text>}
-        </TouchableOpacity>
-      </View>
+              <TouchableOpacity 
+                style={[styles.tabBtn, activeTab === 'suggestion' && styles.tabActive, isDarkMode && activeTab !== 'suggestion' && { backgroundColor: '#1e293b' }]} 
+                onPress={() => { setActiveTab('suggestion'); setMessage(''); }}
+              >
+                <Text style={[styles.tabText, activeTab === 'suggestion' && { color: '#ffffff' }, isDarkMode && activeTab !== 'suggestion' && { color: '#94a3b8' }]}>مقترح</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.tabBtn, activeTab === 'complaint' && styles.tabActive, isDarkMode && activeTab !== 'complaint' && { backgroundColor: '#1e293b' }]} 
+                onPress={() => { setActiveTab('complaint'); setMessage(''); }}
+              >
+                <Text style={[styles.tabText, activeTab === 'complaint' && { color: '#ffffff' }, isDarkMode && activeTab !== 'complaint' && { color: '#94a3b8' }]}>شكوى</Text>
+              </TouchableOpacity>
+            </View>
 
-      <Text style={styles.sectionTitle}>
-        سجل {activeTab === 'lost_item' ? 'المفقودات' : activeTab === 'suggestion' ? 'المقترحات' : 'الشكاوى'} السابقة
-      </Text>
-      {fetching ? (
-        <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 20 }} />
-      ) : (
-        <FlatList
-          // 👈 تطبيق الفلتر هنا ليعرض الرسائل المرتبطة بالتبويب النشط فقط
-          data={tickets.filter(ticket => ticket.type === activeTab)}
-          keyExtractor={(item) => item.id}
-          renderItem={renderTicket}
-          showsVerticalScrollIndicator={false}
-          /* 👈 إضافة ميزة السحب للتحديث هنا */
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2563eb']} tintColor="#2563eb" />
-          }
-          ListEmptyComponent={<Text style={styles.emptyText}>لا توجد رسائل سابقة.</Text>}
-        />
-      )}
+            {/* صندوق الكتابة */}
+            <View style={[styles.inputBox, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+              <TextInput
+                style={[styles.input, isDarkMode && { color: '#ffffff' }]}
+                placeholder={getPlaceholderText()}
+                placeholderTextColor={isDarkMode ? "#64748b" : "#94a3b8"}
+                multiline
+                value={message}
+                onChangeText={setMessage}
+                textAlign="right"
+              />
+
+              <TouchableOpacity style={[styles.submitBtn, { backgroundColor: '#10b981' }]} onPress={submitComplaint} disabled={loading}>
+                {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.submitBtnText}>إرسال للإدارة</Text>}
+              </TouchableOpacity>
+            </View>
+
+            {/* عنوان السجل */}
+            <Text style={[styles.historyTitle, isDarkMode && { color: '#cbd5e1' }]}>
+              {getTabTitleText()}
+            </Text>
+
+            {/* رسالة لو مفيش سجل */}
+            {filteredTickets.length === 0 && (
+              <Text style={{ textAlign: 'center', color: '#94a3b8', marginTop: 10, fontSize: 15 }}>لا توجد رسائل سابقة في هذا القسم.</Text>
+            )}
+
+          </View>
+        }
+      />
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1f5f9', padding: 15, paddingTop: 45 },
-  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  container: { flex: 1, backgroundColor: '#f8fafc', padding: 15, paddingTop: 45 },
+  header: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderColor: '#e2e8f0' },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1e293b' },
   backBtn: { backgroundColor: '#e2e8f0', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   backBtnText: { color: '#334155', fontWeight: 'bold' },
-  tabsRow: { flexDirection: 'row-reverse', marginBottom: 15, gap: 8 },
-  tabBtn: { flex: 1, paddingVertical: 12, backgroundColor: '#e2e8f0', borderRadius: 10, alignItems: 'center' },
-  tabBtnActive: { backgroundColor: '#2563eb' },
-  tabBtnActiveLost: { backgroundColor: '#0284c7' },
-  tabText: { fontSize: 13, fontWeight: 'bold', color: '#475569' },
-  tabTextActive: { color: '#ffffff' },
-  inputContainer: { backgroundColor: '#ffffff', padding: 15, borderRadius: 12, elevation: 2, marginBottom: 20 },
-  inputArea: { height: 100, backgroundColor: '#f8fafc', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#cbd5e1', textAlignVertical: 'top', color: '#1e293b', marginBottom: 15 },
-  submitBtn: { backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  submitBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#334155', marginBottom: 10, textAlign: 'right' },
-  ticketCard: { backgroundColor: '#ffffff', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 1, borderWidth: 1, borderColor: '#e2e8f0' },
-  ticketHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 8 },
-  ticketType: { fontWeight: 'bold', color: '#1e293b' },
-  ticketStatus: { fontWeight: 'bold', fontSize: 12 },
-  ticketContent: { color: '#475569', textAlign: 'right', lineHeight: 22 },
-  replyBox: { marginTop: 10, backgroundColor: '#ecfdf5', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#a7f3d0' },
-  replyTitle: { fontWeight: 'bold', color: '#065f46', textAlign: 'right', marginBottom: 5 },
-  replyContent: { color: '#064e3b', textAlign: 'right', fontSize: 14, lineHeight: 22 },
-  emptyText: { textAlign: 'center', color: '#94a3b8', marginTop: 20 }
+  content: { marginBottom: 10 },
+  
+  tabsContainer: { flexDirection: 'row-reverse', gap: 10, marginBottom: 20 },
+  tabBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#e2e8f0', alignItems: 'center' },
+  tabActive: { backgroundColor: '#3b82f6' },
+  tabText: { fontSize: 15, fontWeight: 'bold', color: '#475569' },
+
+  inputBox: { backgroundColor: '#ffffff', borderRadius: 16, padding: 15, elevation: 2, marginBottom: 30, borderWidth: 1, borderColor: '#e2e8f0' },
+  input: { fontSize: 15, color: '#1e293b', minHeight: 120, textAlignVertical: 'top', marginBottom: 15 },
+  submitBtn: { paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
+  submitBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  
+  historyTitle: { textAlign: 'right', fontSize: 17, fontWeight: 'bold', color: '#1e293b', marginBottom: 15 },
+  ticketCard: { backgroundColor: '#ffffff', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#e2e8f0', elevation: 1 },
+  ticketHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 10, alignItems: 'center' },
+  ticketStatus: { fontSize: 12, fontWeight: 'bold' },
+  ticketText: { fontSize: 15, color: '#334155', textAlign: 'right', lineHeight: 24 },
+  replyBox: { marginTop: 15, backgroundColor: '#ecfdf5', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#a7f3d0' },
+  replyTitle: { fontSize: 13, fontWeight: 'bold', color: '#059669', marginBottom: 5, textAlign: 'right' },
+  replyText: { fontSize: 14, color: '#064e3b', textAlign: 'right', lineHeight: 22, fontWeight: 'bold' }
 });

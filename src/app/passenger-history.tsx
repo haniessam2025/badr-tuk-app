@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -14,7 +14,6 @@ export default function PassengerHistory() {
   const [loading, setLoading] = useState(true);
   const [totalRides, setTotalRides] = useState(0);
 
-  // 👈 متغيرات المفقودات
   const [isLostItemModalVisible, setIsLostItemModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState<any>(null);
   const [lostItemText, setLostItemText] = useState('');
@@ -48,7 +47,7 @@ export default function PassengerHistory() {
 
       snap.docs.forEach(d => {
         const data = d.data();
-        data.id = d.id; // حفظ ID الرحلة
+        data.id = d.id; 
         if (data.status === 'completed' || data.status === 'canceled' || data.status === 'cancelled_by_passenger') {
           dailyRides.push(data);
         }
@@ -79,30 +78,28 @@ export default function PassengerHistory() {
 
   const getCaptainName = (item: any) => {
     let name = item.captainName || item.driverName || item.captain_name || item.captainInfo?.name;
-    
-    if (typeof name === 'string' && name.trim() === '') {
-      name = null;
-    }
-
+    if (typeof name === 'string' && name.trim() === '') name = null;
     if (!name && item.offers && item.captainId) {
       const acceptedOffer = item.offers.find((o: any) => o.captainId === item.captainId);
       if (acceptedOffer && acceptedOffer.captainName && acceptedOffer.captainName.trim() !== '') {
         name = acceptedOffer.captainName.trim();
       }
     }
-
     return name ? name : 'غير مسجل';
   };
 
-  // 👈 دالة فتح نافذة المفقودات
   const openLostItemModal = (ride: any) => {
     setSelectedRide(ride);
     setLostItemText('');
     setIsLostItemModalVisible(true);
   };
 
+<<<<<<< HEAD
 // 👈 دالة إرسال البلاغ المحسّنة (تسحب بيانات الراكب والكابتن بدقة)
   // دالة إرسال البلاغ المحسّنة (تسحب بيانات الراكب والكابتن بدقة)
+=======
+  // 👈 دالة إرسال البلاغ الصحيحة والمنظفة 100%
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
   const submitLostItem = async () => {
     if (!lostItemText.trim()) {
       Alert.alert('تنبيه', 'برجاء كتابة تفاصيل المفقودات');
@@ -110,18 +107,23 @@ export default function PassengerHistory() {
     }
     setIsSubmittingLost(true);
     try {
+<<<<<<< HEAD
       let pName = selectedRide.name || selectedRide.passengerName || '';
+=======
+      let pName = selectedRide.name || selectedRide.passengerName || 'راكب';
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
       let pPhone = selectedRide.phone || selectedRide.passengerPhone || '';
       
       try {
         const profileStr = await AsyncStorage.getItem('passenger_profile');
         if (profileStr) {
           const profile = JSON.parse(profileStr);
-          if (!pName) pName = profile.name || '';
+          if (!pName) pName = profile.name || 'راكب';
           if (!pPhone) pPhone = profile.phone || '';
         }
       } catch (e) {}
 
+<<<<<<< HEAD
       // توجيه البلاغ لمفقودات الرحلات (trip_lost_items) بدلاً من الدعم العادي
       await addDoc(collection(db, 'trip_lost_items'), {
         tripId: selectedRide.id,
@@ -135,21 +137,57 @@ export default function PassengerHistory() {
         reporterPhone: pPhone || 'غير مسجل',
         
         text: lostItemText.trim(), // تم توحيدها لـ text
+=======
+      let cPhone = selectedRide.captainPhone || selectedRide.driverPhone || selectedRide.captain_phone || '';
+      let cName = getCaptainName(selectedRide);
+
+      if (selectedRide.offers && selectedRide.captainId) {
+        const acceptedOffer = selectedRide.offers.find((o: any) => o.captainId === selectedRide.captainId);
+        if (acceptedOffer) {
+          if (!cPhone && acceptedOffer.captainPhone) cPhone = acceptedOffer.captainPhone;
+          if (cName === 'غير مسجل' && acceptedOffer.captainName) cName = acceptedOffer.captainName;
+        }
+      }
+
+      await addDoc(collection(db, 'trip_lost_items'), {
+        reporterId: selectedRide.passengerId || await AsyncStorage.getItem('currentPassengerId') || 'unknown',
+        reporterType: 'passenger', 
+        reporterName: pName,
+        reporterPhone: pPhone || 'بدون رقم',
+        tripId: selectedRide.id,
+        tripDate: selectedRide.timestamp ? new Date(selectedRide.timestamp).toLocaleDateString('ar-EG') : 'رحلة سابقة',
+        captainName: cName,
+        captainPhone: cPhone || 'غير مسجل',
+        pickupLocation: selectedRide.pickupLocation || '',
+        destinationLocation: selectedRide.destinationLocation || selectedRide.destinationsList?.join(' - ') || '',
+        text: lostItemText.trim(),
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
         status: 'pending',
-        isReadAdmin: false,
-        timestamp: new Date().getTime()
+        isReadAdmin: false, 
+        timestamp: serverTimestamp()
+      });
+
+      await addDoc(collection(db, 'notifications'), {
+        userId: 'admin',
+        userType: 'admin',
+        title: 'بلاغ مفقودات رحلة جديد 🔍',
+        message: `بلاغ جديد من الراكب: ${pName}`,
+        read: false,
+        timestamp: serverTimestamp()
       });
       
-      Alert.alert('تم الإرسال ✅', 'تم إرسال بلاغ المفقودات للإدارة بنجاح.');
+      Alert.alert('تم الإرسال ✅', 'تم إرسال بلاغ المفقودات للإدارة بنجاح وسيتم التواصل معك.');
       setIsLostItemModalVisible(false);
       setLostItemText('');
     } catch (error) {
+      console.log('Error submitting lost item:', error);
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال البلاغ');
     } finally {
       setIsSubmittingLost(false);
     }
   };
-      const renderItem = ({ item }: { item: any }) => (
+
+  const renderItem = ({ item }: { item: any }) => (
     <View style={[styles.rideCard, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
       <View style={[styles.rideHeader, isDarkMode && { borderBottomColor: '#334155' }]}>
         <Text style={[styles.dateText, isDarkMode && { color: '#94a3b8' }]}>
@@ -166,7 +204,6 @@ export default function PassengerHistory() {
         <Text style={styles.priceText}>{item.price ? `${item.price} جنيه` : '---'}</Text>
       </View>
       
-      {/* 👈 زرار الإبلاغ عن مفقودات الجديد */}
       {item.status === 'completed' && (
         <TouchableOpacity style={[styles.lostItemBtn, isDarkMode && { backgroundColor: '#334155' }]} onPress={() => openLostItemModal(item)}>
           <Text style={[styles.lostItemBtnText, isDarkMode && { color: '#fbbf24' }]}>الإبلاغ عن مفقودات 🎒</Text>
@@ -210,7 +247,6 @@ export default function PassengerHistory() {
         />
       )}
 
-      {/* 👈 نافذة الإبلاغ عن المفقودات */}
       <Modal visible={isLostItemModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, isDarkMode && { backgroundColor: '#1e293b' }]}>
@@ -248,8 +284,8 @@ const styles = StyleSheet.create({
   backButtonText: { color: '#0f172a', fontWeight: 'bold', fontSize: 13 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { color: '#64748b', fontSize: 16, fontWeight: 'bold' },
-  summaryCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 15, marginHorizontal: 15, marginTop: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+emptyText: { color: '#64748b', fontSize: 16, fontWeight: 'bold' },  
+summaryCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 15, marginHorizontal: 15, marginTop: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
   summaryLabel: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold', marginBottom: 5 },
   summaryValue: { color: '#eab308', fontSize: 24, fontWeight: 'bold' },
   rideCard: { backgroundColor: '#ffffff', padding: 15, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#e2e8f0', elevation: 2 },
@@ -260,8 +296,6 @@ const styles = StyleSheet.create({
   rideFooter: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderColor: '#f1f5f9' },
   captainText: { flex: 1, fontSize: 14, color: '#64748b', textAlign: 'right', fontWeight: 'bold', marginRight: 5 },
   priceText: { fontSize: 16, color: '#10b981', fontWeight: 'bold', marginLeft: 10 },
-  
-  // تصميمات المفقودات
   lostItemBtn: { marginTop: 12, paddingVertical: 10, backgroundColor: '#fffbeb', borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#fde68a' },
   lostItemBtnText: { color: '#d97706', fontWeight: 'bold', fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },

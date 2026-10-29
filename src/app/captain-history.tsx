@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -83,7 +83,11 @@ export default function CaptainHistory() {
     }
   };
 
+<<<<<<< HEAD
 // دالة إرسال بلاغ المفقودات (مربوطة بالداشبورد قسم مفقودات الرحلات)
+=======
+// 👈 دالة إرسال بلاغ المفقودات للكابتن لتروح مباشرة على قسم "بلاغات الكباتن" في الداشبورد
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
   const submitLostItem = async () => {
     if (!lostText.trim()) {
       Alert.alert('تنبيه', 'برجاء كتابة تفاصيل الأغراض التي عثرت عليها.');
@@ -92,6 +96,7 @@ export default function CaptainHistory() {
     setIsSubmitting(true);
     try {
       await addDoc(collection(db, 'trip_lost_items'), {
+<<<<<<< HEAD
         tripId: selectedRide.id, // الداشبورد بتجمع الرحلة بالـ ID ده
         tripDate: new Date(selectedRide.timestamp || Date.now()).toLocaleDateString('ar-EG'),
         pickupLocation: selectedRide.pickupLocation || 'غير محدد',
@@ -106,12 +111,43 @@ export default function CaptainHistory() {
         status: 'pending',
         isReadAdmin: false,
         timestamp: new Date().getTime() // تم استخدام getTime بدلاً من serverTimestamp للتوافق
+=======
+        reporterId: captainId || 'unknown',
+        reporterType: 'captain', // 👈 دي اللي بتخليه يروح في تابة (بلاغات الكباتن) في الداشبورد
+        reporterName: captainProfile?.name || selectedRide.captainName || 'كابتن',
+        reporterPhone: captainProfile?.phone || selectedRide.captainPhone || 'بدون رقم',
+        
+        tripId: selectedRide.id,
+        tripDate: selectedRide.timestamp ? new Date(selectedRide.timestamp).toLocaleDateString('ar-EG') : 'رحلة سابقة',
+        
+        captainName: captainProfile?.name || selectedRide.captainName || 'كابتن',
+        captainPhone: captainProfile?.phone || selectedRide.captainPhone || 'غير مسجل',
+        
+        pickupLocation: selectedRide.pickupLocation || '',
+        destinationLocation: selectedRide.destinationLocation || selectedRide.destinationsList?.join(' - ') || '',
+        
+        text: `عثرت على أغراض منسية: ${lostText.trim()}`,
+        status: 'pending',
+        isReadAdmin: false, // 👈 بتنور اللمبة الصفراء في الداشبورد
+        timestamp: serverTimestamp()
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
       });
 
-      Alert.alert('تم الإرسال ✅', 'تم إبلاغ الإدارة بالعثور على الأغراض بنجاح.');
+      // 👈 إرسال إشعار فوري للإدارة
+      await addDoc(collection(db, 'notifications'), {
+        userId: 'admin',
+        userType: 'admin',
+        title: 'بلاغ مفقودات رحلة من كابتن 🔍',
+        message: `بلاغ عثور على أغراض من الكابتن: ${captainProfile?.name || 'كابتن'}`,
+        read: false,
+        timestamp: serverTimestamp()
+      });
+
+      Alert.alert('تم الإرسال ✅', 'تم إبلاغ الإدارة بالعثور على الأغراض بنجاح وسيتم التواصل معك.');
       setIsLostModalVisible(false);
       setLostText('');
     } catch (error) {
+      console.log('Error submitting captain lost item:', error);
       Alert.alert('خطأ', 'حدثت مشكلة أثناء إرسال البلاغ.');
     } finally {
       setIsSubmitting(false);

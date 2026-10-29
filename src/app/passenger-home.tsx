@@ -6,12 +6,18 @@ import * as Location from 'expo-location';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
+<<<<<<< HEAD
 import { ActivityIndicator, Alert, Animated, AppState, AppStateStatus, Dimensions, Image, KeyboardAvoidingView, Linking, LogBox, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+=======
+import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, LogBox, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import { db } from '../firebase';
 import { useApp } from './AppContext';
+LogBox.ignoreLogs(['VirtualizedLists should never be nested']);
+
 LogBox.ignoreLogs(['VirtualizedLists should never be nested']);
 
 const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
@@ -122,10 +128,17 @@ export default function PassengerHome() {
   
   const { isDarkMode, toggleTheme, isVibrationEnabled, toggleVibration } = useApp(); 
   const [localVibration, setLocalVibration] = useState(true);
+<<<<<<< HEAD
 
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   const [liveSettings, setLiveSettings] = useState<any>(null); 
 
+=======
+  const [isRideDetailsExpanded, setIsRideDetailsExpanded] = useState(false); // 👈 للتحكم في كارت التفاصيل
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [liveSettings, setLiveSettings] = useState<any>(null); 
+  const [isSearchingDetailsExpanded, setIsSearchingDetailsExpanded] = useState(false); // 👈 ده اللي هيقفل ويفتح تفاصيل استقبال العروض
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'app_settings', 'pricing'), (docSnap) => {
       if (docSnap.exists()) {
@@ -140,6 +153,7 @@ export default function PassengerHome() {
 useEffect(() => {
   let intervalId: any;
 
+<<<<<<< HEAD
   // تحديد نوع isOnlineState كـ boolean لحل خطأ TypeScript
   const setOnlineStatus = async (isOnlineState: boolean) => {
     try {
@@ -178,6 +192,8 @@ useEffect(() => {
     setOnlineStatus(false); 
   };
 }, []);
+=======
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
   const pathname = usePathname();
 
   const flashAnim = useRef(new Animated.Value(0)).current;
@@ -394,6 +410,7 @@ useEffect(() => {
     
     setIsEditDestModalVisible(false);
     
+<<<<<<< HEAD
     if (currentRideId && ['searching', 'accepted', 'captain_arrived', 'in_progress', 'passenger_on_the_way'].includes(rideStatus)) {
       if (rideStatus === 'searching') {
         setDestinations(validDests);
@@ -418,6 +435,23 @@ useEffect(() => {
           }
         });
         Alert.alert('تم الإرسال ⏳', 'تم إرسال طلب تغيير الوجهة للكابتن، في انتظار موافقته.');
+=======
+    setPrice(modalPrice);
+    setCalculatedBasePrice(modalBasePrice);
+    setBasePriceForSuggestions(modalBasePrice);
+    
+    updatePriceCalculation(pickup, validDests, requestedVehicleType, passengersCount, pickupCoords);
+    
+    if (currentRideId && ['searching', 'accepted', 'captain_arrived', 'in_progress'].includes(rideStatus)) {
+      await updateDoc(doc(db, 'rides', currentRideId), {
+        destinationsList: validDests,
+        destinationLocation: validDests.join(' - '),
+        price: modalPrice,
+        fairPrice: modalBasePrice 
+      });
+      if (rideStatus !== 'searching') {
+        Alert.alert('تم التحديث ✅', 'تم تحديث الوجهة والسعر بنجاح.');
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
       }
     }
   };
@@ -558,11 +592,12 @@ useEffect(() => {
         } else {
           const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
           const firstTierLimit = appSettings.tuktuk.tiers && appSettings.tuktuk.tiers.length > 0 ? parseFloat(appSettings.tuktuk.tiers[0].upToKm) : 999;
-          let baseForOne = 0;
-          if (totalDistanceKm <= firstTierLimit) baseForOne = Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFare);
-          else baseForOne = Number(appSettings.tuktuk.baseFare) + distanceFare;
-          const count = parseInt(passCountStr) || 1;
-          calculatedPrice = baseForOne * (1 + ((count - 1) * 0.25));
+          
+          if (totalDistanceKm <= firstTierLimit) {
+            calculatedPrice = Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFare);
+          } else {
+            calculatedPrice = Number(appSettings.tuktuk.baseFare) + distanceFare;
+          }
         }
 
         let finalBase = Math.ceil(calculatedPrice);
@@ -828,7 +863,11 @@ const saveNewPrice = async () => {
     setIsSubmitting(true); setRideStatus('searching'); setOffers([]); prevOffersCountRef.current = 0; 
     let finalPickupCoords = pickupCoords || { latitude: 30.0444, longitude: 31.2357 };
     try {
+<<<<<<< HEAD
       const rideData: any = {
+=======
+      const rideData = {
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
         passengerId: passengerProfile.id, name: passengerProfile.name, phone: passengerProfile.phone,
         isPhoneHidden: passengerProfile.hidePhoneNumber || false, avatar: passengerProfile.avatar,
         pickupLocation: pickup, pickupCoords: finalPickupCoords, destinationsList: validDests,
@@ -1290,8 +1329,32 @@ useEffect(() => {
             <Animated.Image source={headerImageSource} style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} resizeMode="contain" />
           </View>
 
+<<<<<<< HEAD
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>
           
+=======
+{/* 👇 تم إرجاع بلوك اختيار نوع المركبة */}
+<Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>نوع المركبة</Text>
+          <View style={styles.vehicleTypeTabs}>
+            {/* 👇 الزرار الأول بقى كيوت 3 راكب */}
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('tuktuk_alt')}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'tuktuk_alt' && styles.vTypeTextActive]}>كيوت 3 راكب</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('car')}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>سيارة</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'scooter' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('scooter')}>
+              <Text style={[styles.vTypeText, requestedVehicleType === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
+            </TouchableOpacity>
+          </View>
+                    {requestedVehicleType === 'tuktuk_alt' && (
+            <View style={styles.vehicleTypeTabs}>  
+            </View>
+          )}
+          <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>          
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
           <View style={[styles.modernDestContainer, { backgroundColor: '#ffffff', borderColor: '#e2e8f0', marginBottom: 10, zIndex: 2000 }]}>
             <View style={styles.modernDestRight}>
               <Ionicons name="location" size={22} color="#10b981" />
@@ -1370,12 +1433,22 @@ useEffect(() => {
                     }}
                     query={{ key: GOOGLE_MAPS_APIKEY, language: 'ar', components: 'country:eg' }}
                     textInputProps={{
+<<<<<<< HEAD
                           placeholderTextColor: isDarkMode ? '#64748b' : '#94a3b8',
                           defaultValue: dest, // 👈 دي اللي هترجع اقتراحات جوجل تشتغل زي الصاروخ
                           onChangeText: (text: string) => {
                             handleTempDestChange(text, index);
                           }
                         }}
+=======
+                      placeholderTextColor: '#64748b',
+                      value: destinations[index] || '',
+                      style: { color: '#000000', textAlign: 'right', flex: 1, backgroundColor: 'transparent', height: 45 },
+                      onChangeText: (text: any) => {
+                        handleDestinationChange(text, index);
+                      }
+                    }}
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
                     renderRow={(rowData: any) => (
                       <Text style={{ flex: 1, flexWrap: 'wrap', textAlign: 'right', writingDirection: 'rtl', color: '#000000', fontSize: 14, lineHeight: 22 }}>
                         {rowData.description}
@@ -1598,6 +1671,7 @@ useEffect(() => {
 
       {rideStatus === 'searching' && (
         <View style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+<<<<<<< HEAD
           
           {/* 👈 هيدر الاستقبال قابل للضغط (عشان يلم الشاشة) */}
           <TouchableOpacity 
@@ -1629,6 +1703,38 @@ useEffect(() => {
               <>
                 <TouchableOpacity 
                   style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f1f5f9', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', marginBottom: 10, marginTop: 10, alignItems: 'center' }} 
+=======
+          
+          {/* هيدر استقبال العروض قابل للضغط */}
+          <TouchableOpacity 
+            style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}
+            onPress={() => setIsSearchingDetailsExpanded(!isSearchingDetailsExpanded)}
+          >
+            <Text style={[styles.cardTitle, { marginBottom: 0 }, isDarkMode && { color: '#ffffff' }]}>جاري استقبال العروض ...</Text>
+            <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 5 }}>
+              <Text style={{ fontSize: 13, color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 'bold' }}>تفاصيل الرحلة</Text>
+              <Ionicons name={isSearchingDetailsExpanded ? "chevron-up" : "chevron-down"} size={20} color={isDarkMode ? '#94a3b8' : '#64748b'} />
+            </View>
+          </TouchableOpacity>
+          
+          {/* الجزء المخفي اللي هيتلم (تفاصيل الرحلة والقبول التلقائي) */}
+          {isSearchingDetailsExpanded && (
+            <View>
+              <View style={{ backgroundColor: isDarkMode ? '#334155' : '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#e2e8f0' }}>
+                
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🟢 الانطلاق:</Text>
+                  <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{pickup}</Text>
+                </View>
+                
+                <View style={{ flexDirection: 'row-reverse', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>🔴 الوجهة:</Text>
+                  <Text style={{ flex: 1, fontSize: 14, fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#1e293b', textAlign: 'right', marginRight: 5 }} numberOfLines={2}>{destinations.join(' - ')}</Text>
+                </View>
+
+                <TouchableOpacity 
+                  style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f1f5f9', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: isDarkMode ? '#475569' : '#cbd5e1', marginBottom: 10, alignItems: 'center' }} 
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
                   onPress={openEditDestModal}
                 >
                   <Text style={{ color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 'bold', fontSize: 13 }}>تعديل الوجهة 🗺️</Text>
@@ -1650,7 +1756,11 @@ useEffect(() => {
                 </View>
 
                 {(basePriceForSuggestions > 0 || parseInt(price) > 0) && (
+<<<<<<< HEAD
                   <View style={[styles.suggestionsRow, { marginBottom: 15, marginTop: 5 }]}>
+=======
+                  <View style={[styles.suggestionsRow, { marginBottom: 0, marginTop: 5 }]}>
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
                     {[1.2, 1.4, 1.6].map((multiplier, index) => {
                       const displayBasePrice = basePriceForSuggestions > 0 ? basePriceForSuggestions : parseInt(price);
                       const suggestedPrice = Math.round(displayBasePrice * multiplier);
@@ -1682,6 +1792,7 @@ useEffect(() => {
                     })}
                   </View>
                 )}
+<<<<<<< HEAD
 
                 <TouchableOpacity 
                   style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: autoAcceptEnabled ? '#ecfdf5' : (isDarkMode ? '#0f172a' : '#ffffff'), padding: 10, borderRadius: 10, borderWidth: 1, borderColor: autoAcceptEnabled ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), marginBottom: 5 }} 
@@ -1696,6 +1807,22 @@ useEffect(() => {
               </>
             )}
           </View>
+=======
+              </View>
+
+              <TouchableOpacity 
+                style={{ flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: autoAcceptEnabled ? '#ecfdf5' : (isDarkMode ? '#0f172a' : '#ffffff'), padding: 10, borderRadius: 10, borderWidth: 1, borderColor: autoAcceptEnabled ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), marginBottom: 15 }} 
+                onPress={() => setAutoAcceptEnabled(!autoAcceptEnabled)}
+              >
+                <Ionicons name={autoAcceptEnabled ? "checkmark-circle" : "ellipse-outline"} size={24} color={autoAcceptEnabled ? "#10b981" : "#94a3b8"} />
+                <View style={{ marginRight: 10, flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: autoAcceptEnabled ? '#064e3b' : (isDarkMode ? '#cbd5e1' : '#475569'), textAlign: 'right' }}>القبول التلقائي ⚡</Text>
+                  <Text style={{ fontSize: 11, color: '#64748b', textAlign: 'right' }}>قبول العروض المطابقة لسعرك تلقائياً ورفض الأعلى.</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
 
           {offers.length === 0 ? (<Text style={styles.subText}>يرجى الانتظار قليلاً لتلقي عروض الكباتن...</Text>) : null}
           <ScrollView style={styles.offersContainer} showsVerticalScrollIndicator={false}>
@@ -2415,15 +2542,26 @@ useEffect(() => {
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text>
               </TouchableOpacity>
 
+<<<<<<< HEAD
 {/* 👈 الزرار الجديد المستقل للشكاوى والمقترحات والمفقودات */}
+=======
+              {/* 👈 الزرار الجديد المستقل للشكاوى والمقترحات والمفقودات */}
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
               <TouchableOpacity 
                 style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} 
                 onPress={() => { closeSidebar(); router.push('/passenger-complaints' as any); }}
               >
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات</Text>
+<<<<<<< HEAD
               </TouchableOpacity>              
               {/* زرار الدعم الفني المباشر الأخضر */}
               <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { closeSidebar(); router.push('/live-support' as any); }}>
+=======
+              </TouchableOpacity>
+
+              {/* زرار الدعم الفني المباشر الأخضر */}
+              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { closeSidebar(); router.push('/support-live-chat' as any); }}>
+>>>>>>> 7eaf9b23637fb2e1b5307422b17a1122f47b8ae9
                 <Text style={styles.sidebarSupportBtnText}>💬 محادثة الدعم الفني (مباشر)</Text>
               </TouchableOpacity>
 
