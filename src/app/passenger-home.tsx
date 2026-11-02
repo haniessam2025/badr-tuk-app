@@ -1027,7 +1027,7 @@ export default function PassengerHome() {
       </View>     
       
       {rideStatus === 'idle' && (
-        <ScrollView style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]} contentContainerStyle={{ paddingBottom: 90 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" overScrollMode="never">
+        <ScrollView style={[styles.card, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]} contentContainerStyle={{ paddingBottom: 90 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" overScrollMode="never" nestedScrollEnabled={true}>
           
           <View style={styles.requestHeaderRow}>
             <Text style={[styles.cardTitle, isDarkMode && { color: '#ffffff' }]}>اطلب مشوارك الآن</Text>
@@ -1095,7 +1095,7 @@ export default function PassengerHome() {
                     container: { flex: 0, width: '100%' },
                     textInputContainer: { backgroundColor: 'transparent', width: '100%', borderTopWidth: 0, borderBottomWidth: 0, flexDirection: 'row-reverse', alignItems: 'center' },
                     textInput: { color: '#000000', backgroundColor: 'transparent', fontSize: 15, textAlign: 'right', flex: 1, height: 45, paddingHorizontal: 10, paddingLeft: 35 },
-                    listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: '#ffffff', borderRadius: 12, elevation: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+                    listView: { position: 'absolute', top: 48, width: SCREEN_WIDTH - 30, right: -45, zIndex: 9999, backgroundColor: '#ffffff', borderRadius: 12, elevation: 10, borderWidth: 1, borderColor: '#e2e8f0', maxHeight: 200 },
                     row: { paddingVertical: 12, paddingHorizontal: 15, flexDirection: 'row-reverse', alignItems: 'center', width: '100%', minHeight: 50, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
                   }}
                 />

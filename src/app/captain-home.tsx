@@ -1257,7 +1257,7 @@ const notifyArrival = async () => {
             {unreadNotifsCount > 0 && <View style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: 6, backgroundColor: '#ef4444', borderWidth: 2, borderColor: isDarkMode ? '#1e293b' : '#ffffff' }} />}
           </TouchableOpacity>
           
-          <TouchableOpacity style={[styles.headerSettingsBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={() => router.push('/captain-notifications')}>
+          <TouchableOpacity style={[styles.headerSettingsBtn, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }, { position: 'relative' }]} onPress={() => router.push('/captain-notifications'as any)}>
             <Ionicons name="notifications-outline" size={24} color={isDarkMode ? "#e2e8f0" : "#64748b"} />
             {/* رقم الإشعارات باللون الأحمر */}
             {unreadNotifsCount > 0 && (
@@ -1997,7 +1997,7 @@ const notifyArrival = async () => {
             </View>
             <ScrollView style={styles.sidebarLinks}>
               {/* زر الإشعارات المضاف حديثاً */}
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }, { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }]} onPress={() => { closeSidebar(); router.push('/captain-notifications'); }}>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }, { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' }]} onPress={() => { closeSidebar(); router.push('/captain-notifications' as any); }}>
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الإشعارات 🔔</Text>
                 {unreadNotifsCount > 0 && (
                   <View style={{ backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 26, alignItems: 'center' }}>
@@ -2010,12 +2010,12 @@ const notifyArrival = async () => {
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-history'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>سجل الرحلات</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-ratings'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>التقييمات</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/support'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>الدعم الفني</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-complaints'); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات </Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.sidebarLink, isDarkMode && { borderBottomColor: '#334155' }]} onPress={() => { closeSidebar(); router.push('/captain-complaints'as any); }}><Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات </Text></TouchableOpacity>
             </ScrollView>
             
             <TouchableOpacity 
               style={{ backgroundColor: '#10b981', padding: 15, marginHorizontal: 20, borderRadius: 12, alignItems: 'center', marginBottom: 5, elevation: 2 }} 
-              onPress={() => { closeSidebar(); router.push('/live-support'); }}
+              onPress={() => { closeSidebar(); router.push('/live-support'as any); }}
             >
               <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>💬 محادثة الدعم الفني (مباشر)</Text>
             </TouchableOpacity>
