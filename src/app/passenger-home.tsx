@@ -112,7 +112,7 @@ const PassengerOfferCard = ({ offer, onAcceptOffer, onRejectOffer, isDarkMode, r
 export default function PassengerHome() {
   const router = useRouter();
   
-  const { isDarkMode, toggleTheme, isVibrationEnabled, toggleVibration } = useApp(); 
+  const { isDarkMode, toggleDarkMode, isVibrationEnabled, toggleVibration } = useApp(); 
   const [localVibration, setLocalVibration] = useState(true);
   const [isRideDetailsExpanded, setIsRideDetailsExpanded] = useState(false); // 👈 للتحكم في كارت التفاصيل
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
@@ -154,6 +154,7 @@ export default function PassengerHome() {
   const [basePriceForSuggestions, setBasePriceForSuggestions] = useState(0);
   const [calculatedDistance, setCalculatedDistance] = useState('0');
   const [destinationsPrices, setDestinationsPrices] = useState<number[]>([]); 
+  const [allVehiclePrices, setAllVehiclePrices] = useState({ tuktuk_alt: 0, car: 0, scooter: 0 }); // 👈 ستيت جديدة لأسعار المركبات 
   const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const debounceTimer = useRef<any>(null);
 
@@ -407,27 +408,30 @@ export default function PassengerHome() {
            appSettings = { car: liveSettings.car || appSettings.car, tuktuk: liveSettings.tuktuk || appSettings.tuktuk, scooter: liveSettings.scooter || appSettings.scooter };
         }
 
-        let calculatedPrice = 0;
-        if (vType === 'car') {
-          const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.car.tiers);
-          const firstTierLimit = appSettings.car.tiers && appSettings.car.tiers.length > 0 ? parseFloat(appSettings.car.tiers[0].upToKm) : 999;
-          if (totalDistanceKm <= firstTierLimit) calculatedPrice = Math.max(Number(appSettings.car.minFare), Number(appSettings.car.baseFare) + distanceFare);
-          else calculatedPrice = Number(appSettings.car.baseFare) + distanceFare;
-        } else if (vType === 'scooter') {
-          const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.scooter.tiers);
-          const firstTierLimit = appSettings.scooter.tiers && appSettings.scooter.tiers.length > 0 ? parseFloat(appSettings.scooter.tiers[0].upToKm) : 999;
-          if (totalDistanceKm <= firstTierLimit) calculatedPrice = Math.max(Number(appSettings.scooter.minFare), Number(appSettings.scooter.baseFare) + distanceFare);
-          else calculatedPrice = Number(appSettings.scooter.baseFare) + distanceFare;
-        } else {
-          const distanceFare = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
-          const firstTierLimit = appSettings.tuktuk.tiers && appSettings.tuktuk.tiers.length > 0 ? parseFloat(appSettings.tuktuk.tiers[0].upToKm) : 999;
-          
-          if (totalDistanceKm <= firstTierLimit) {
-            calculatedPrice = Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFare);
-          } else {
-            calculatedPrice = Number(appSettings.tuktuk.baseFare) + distanceFare;
-          }
+        // حساب سعر السيارة
+        const distanceFareCar = calculateTieredPrice(totalDistanceKm, appSettings.car.tiers);
+        const firstTierLimitCar = appSettings.car.tiers && appSettings.car.tiers.length > 0 ? parseFloat(appSettings.car.tiers[0].upToKm) : 999;
+        let carPrice = (totalDistanceKm <= firstTierLimitCar) ? Math.max(Number(appSettings.car.minFare), Number(appSettings.car.baseFare) + distanceFareCar) : Number(appSettings.car.baseFare) + distanceFareCar;
+
+        // حساب سعر الاسكوتر
+        const distanceFareScooter = calculateTieredPrice(totalDistanceKm, appSettings.scooter.tiers);
+        const firstTierLimitScooter = appSettings.scooter.tiers && appSettings.scooter.tiers.length > 0 ? parseFloat(appSettings.scooter.tiers[0].upToKm) : 999;
+        let scooterPrice = (totalDistanceKm <= firstTierLimitScooter) ? Math.max(Number(appSettings.scooter.minFare), Number(appSettings.scooter.baseFare) + distanceFareScooter) : Number(appSettings.scooter.baseFare) + distanceFareScooter;
+
+        // حساب سعر التوكتوك
+        const distanceFareTuktuk = calculateTieredPrice(totalDistanceKm, appSettings.tuktuk.tiers);
+        const firstTierLimitTuktuk = appSettings.tuktuk.tiers && appSettings.tuktuk.tiers.length > 0 ? parseFloat(appSettings.tuktuk.tiers[0].upToKm) : 999;
+        let tuktukPrice = (totalDistanceKm <= firstTierLimitTuktuk) ? Math.max(Number(appSettings.tuktuk.minFare), Number(appSettings.tuktuk.baseFare) + distanceFareTuktuk) : Number(appSettings.tuktuk.baseFare) + distanceFareTuktuk;
+
+        if (!isTempModal) {
+          setAllVehiclePrices({
+            car: Math.ceil(carPrice),
+            scooter: Math.ceil(scooterPrice),
+            tuktuk_alt: Math.ceil(tuktukPrice)
+          });
         }
+
+        let calculatedPrice = vType === 'car' ? carPrice : vType === 'scooter' ? scooterPrice : tuktukPrice;
 
         let finalBase = Math.ceil(calculatedPrice);
         
@@ -1034,26 +1038,6 @@ export default function PassengerHome() {
             <Animated.Image source={headerImageSource} style={[styles.vehicleHeaderImg, { transform: [{ scale: vehicleImageAnim }] }]} resizeMode="contain" />
           </View>
 
-{/* 👇 تم إرجاع بلوك اختيار نوع المركبة */}
-<Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>نوع المركبة</Text>
-          <View style={styles.vehicleTypeTabs}>
-            {/* 👇 الزرار الأول بقى كيوت 3 راكب */}
-            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'tuktuk_alt' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('tuktuk_alt')}>
-              <Text style={[styles.vTypeText, requestedVehicleType === 'tuktuk_alt' && styles.vTypeTextActive]}>كيوت 3 راكب</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'car' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('car')}>
-              <Text style={[styles.vTypeText, requestedVehicleType === 'car' && styles.vTypeTextActive]}>سيارة</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.vTypeBtn, requestedVehicleType === 'scooter' && styles.vTypeBtnActive]} onPress={() => setRequestedVehicleType('scooter')}>
-              <Text style={[styles.vTypeText, requestedVehicleType === 'scooter' && styles.vTypeTextActive]}>سكوتر</Text>
-            </TouchableOpacity>
-          </View>
-                    {requestedVehicleType === 'tuktuk_alt' && (
-            <View style={styles.vehicleTypeTabs}>  
-            </View>
-          )}
           <Text style={[styles.label, isDarkMode && { color: '#cbd5e1' }]}>موقع الانطلاق الحالي</Text>          
           <View style={[styles.modernDestContainer, { backgroundColor: '#ffffff', borderColor: '#e2e8f0', marginBottom: 10, zIndex: 2000 }]}>
             <View style={styles.modernDestRight}>
@@ -1214,7 +1198,69 @@ export default function PassengerHome() {
              </View>
           )}
 
-          <Text style={[styles.label, {marginTop: 10}, isDarkMode && { color: '#cbd5e1' }]}>أجرة الرحلة المقترحة</Text>
+          {/* 👇 الكروت الجديدة لاختيار المركبة والأسعار */}
+          {basePriceForSuggestions > 0 && (
+            <>
+              <Text style={[styles.label, {marginTop: 10, textAlign: 'center'}, isDarkMode && { color: '#cbd5e1' }]}>اختر نوع المركبة</Text>
+              <View style={{ flexDirection: 'row-reverse', justifyContent: 'space-between', gap: 10, marginBottom: 20 }}>
+                {/* اسكوتر */}
+                <TouchableOpacity
+                  style={[
+                    { flex: 1, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 2, borderColor: requestedVehicleType === 'scooter' ? '#f59e0b' : (isDarkMode ? '#334155' : '#e2e8f0'), elevation: requestedVehicleType === 'scooter' ? 4 : 1 },
+                    requestedVehicleType === 'scooter' && { backgroundColor: isDarkMode ? '#78350f' : '#fffbeb' }
+                  ]}
+                  onPress={() => {
+                    setRequestedVehicleType('scooter');
+                    setPrice(allVehiclePrices.scooter.toString());
+                    setCalculatedBasePrice(allVehiclePrices.scooter);
+                    setBasePriceForSuggestions(allVehiclePrices.scooter);
+                  }}
+                >
+                  <Image source={require('../../assets/images/scooter.png')} style={{ width: 45, height: 35, marginBottom: 5 }} resizeMode="contain" />
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#475569', marginBottom: 5 }}>اسكوتر</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#f59e0b' }}>{allVehiclePrices.scooter} ج</Text>
+                </TouchableOpacity>
+
+                {/* سيارة */}
+                <TouchableOpacity
+                  style={[
+                    { flex: 1, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 2, borderColor: requestedVehicleType === 'car' ? '#3b82f6' : (isDarkMode ? '#334155' : '#e2e8f0'), elevation: requestedVehicleType === 'car' ? 4 : 1 },
+                    requestedVehicleType === 'car' && { backgroundColor: isDarkMode ? '#1e3a8a' : '#eff6ff' }
+                  ]}
+                  onPress={() => {
+                    setRequestedVehicleType('car');
+                    setPrice(allVehiclePrices.car.toString());
+                    setCalculatedBasePrice(allVehiclePrices.car);
+                    setBasePriceForSuggestions(allVehiclePrices.car);
+                  }}
+                >
+                  <Image source={require('../../assets/images/car.png')} style={{ width: 45, height: 35, marginBottom: 5 }} resizeMode="contain" />
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#475569', marginBottom: 5 }}>سيارة</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#3b82f6' }}>{allVehiclePrices.car} ج</Text>
+                </TouchableOpacity>
+
+                {/* كيوت 3 راكب */}
+                <TouchableOpacity
+                  style={[
+                    { flex: 1, backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 2, borderColor: requestedVehicleType === 'tuktuk_alt' ? '#10b981' : (isDarkMode ? '#334155' : '#e2e8f0'), elevation: requestedVehicleType === 'tuktuk_alt' ? 4 : 1 },
+                    requestedVehicleType === 'tuktuk_alt' && { backgroundColor: isDarkMode ? '#064e3b' : '#ecfdf5' }
+                  ]}
+                  onPress={() => {
+                    setRequestedVehicleType('tuktuk_alt');
+                    setPrice(allVehiclePrices.tuktuk_alt.toString());
+                    setCalculatedBasePrice(allVehiclePrices.tuktuk_alt);
+                    setBasePriceForSuggestions(allVehiclePrices.tuktuk_alt);
+                  }}
+                >
+                  <Image source={require('../../assets/images/cute.png')} style={{ width: 45, height: 35, marginBottom: 5 }} resizeMode="contain" />
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#475569', marginBottom: 5 }}>كيوت 3 راكب</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#10b981' }}>{allVehiclePrices.tuktuk_alt} ج</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          <Text style={[styles.label, {marginTop: 0, textAlign: 'center'}, isDarkMode && { color: '#cbd5e1' }]}>أجرة الرحلة المقترحة</Text>
           <View style={[styles.priceDisplayContainer, isDarkMode && { backgroundColor: '#422006', borderColor: '#d97706' }, { marginBottom: (basePriceForSuggestions > 0 && pickup && destinations[0]) ? 10 : 20 }]}>
             {isCalculatingPrice ? (
               <Text style={[styles.priceTextDisplay, {color: isDarkMode ? '#94a3b8' : '#94a3b8', fontSize: 15}]}>جاري حساب المسافة...</Text>

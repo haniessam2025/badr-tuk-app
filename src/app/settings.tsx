@@ -15,7 +15,7 @@ export default function Settings() {
   const [loginRoute, setLoginRoute] = useState<any>('/');
 
   // سحب الإعدادات من العقل المركزي
-  const { isDarkMode, isVibrationEnabled, toggleTheme, toggleVibration } = useApp();
+  const { isDarkMode, toggleDarkMode, isVibrationEnabled, toggleVibration } = useApp();
 
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -120,20 +120,20 @@ export default function Settings() {
         <Text style={styles.sectionTitle}>تفضيلات التطبيق</Text>
         <View style={[styles.sectionCard, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
           <View style={styles.settingRow}>
-            <View style={styles.settingTextCol}>
+            <Switch trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} thumbColor={isDarkMode ? '#60a5fa' : '#f8fafc'} onValueChange={toggleDarkMode} value={isDarkMode} />
+            <View style={[styles.settingTextCol, { alignItems: 'flex-end', marginLeft: 15 }]}>
               <Text style={[styles.settingTitle, isDarkMode && { color: '#ffffff' }]}>المظهر الداكن (Dark Mode)</Text>
               <Text style={styles.settingSubtitle}>تفعيل الوضع الليلي لإراحة العين</Text>
             </View>
-            <Switch trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} thumbColor={isDarkMode ? '#60a5fa' : '#f8fafc'} onValueChange={toggleTheme} value={isDarkMode} />
           </View>
           <View style={[styles.divider, isDarkMode && { backgroundColor: '#334155' }]} />
           
           <View style={styles.settingRow}>
-            <View style={styles.settingTextCol}>
+            <Switch trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} thumbColor={isVibrationEnabled ? '#60a5fa' : '#f8fafc'} onValueChange={toggleVibration} value={isVibrationEnabled} />
+            <View style={[styles.settingTextCol, { alignItems: 'flex-end', marginLeft: 15 }]}>
               <Text style={[styles.settingTitle, isDarkMode && { color: '#ffffff' }]}>الاهتزاز (Vibration)</Text>
               <Text style={styles.settingSubtitle}>تفعيل الهزاز عند وصول إشعار</Text>
             </View>
-            <Switch trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} thumbColor={isVibrationEnabled ? '#60a5fa' : '#f8fafc'} onValueChange={toggleVibration} value={isVibrationEnabled} />
           </View>
         </View>
 

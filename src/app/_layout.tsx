@@ -1,9 +1,8 @@
 import { Stack, router } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LogBox } from 'react-native';
-import { AppContext, AppProvider } from './AppContext'; // 👈 استدعاء العقل المركزي والسياق
-
+import { AppProvider, useApp } from './AppContext'; // 👈 استدعاء العقل المركزي والسياق
 // 🔴 مهم جداً: لازم تفك الكومنت عن الفايربيز وتستدعي db عشان يقرأ زرار الصيانة
 import { db } from '../firebase'; // (تأكد إن ده مسار ملف الفايربيز الصحيح عندك)
 
@@ -14,8 +13,8 @@ LogBox.ignoreAllLogs(true);
 function MaintenanceGuard({ children }: { children: React.ReactNode }) {
   const [isMaintenanceEnabled, setIsMaintenanceEnabled] = useState(false);
   
-  // حلينا مشكلة قراءة البيانات بإضافة (as any) عشان TypeScript ميزعلش
-  const context = useContext(AppContext as any); 
+  // حلينا مشكلة قراءة البيانات باستخدام الهوك الجديد (useApp)
+  const context = useApp(); 
   const activeRide = (context as any)?.activeRide; 
 
   // 1. المراقبة المباشرة لزرار الصيانة في الفايربيز
