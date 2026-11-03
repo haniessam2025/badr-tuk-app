@@ -48,10 +48,9 @@ export default function PassengerHistory() {
       snap.docs.forEach(d => {
         const data = d.data();
         data.id = d.id; 
-        if (data.status === 'completed' || data.status === 'canceled' || data.status === 'cancelled_by_passenger') {
-          dailyRides.push(data);
-        }
+        // 👈 تم اقتصار الشرط على الرحلات المكتملة فقط لعدم إظهار الملغاة نهائياً
         if (data.status === 'completed') {
+          dailyRides.push(data);
           dailyCompleted++;
         }
       });

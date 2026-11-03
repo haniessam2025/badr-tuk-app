@@ -123,44 +123,61 @@ const SwipeableRequestItem = ({ item, onSendOffer, onEditPrice, onDismiss, hasSe
         <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: cardBackgroundColor, borderRadius: 12, zIndex: -1 }} />
 
         <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} activeOpacity={0.8}>
-          <View style={styles.newCardRow}>
+          <View style={[styles.newCardRow, { flexDirection: 'row-reverse', alignItems: 'center' }]}>
+            
+            {/* 1️⃣ اليمين: بيانات الكابتن ومسافة التقابل فقط */}
             <View style={styles.newUserCol}>
               <TouchableOpacity onPress={() => onImagePress(getSafeAvatar(item.avatar))}>
-                <Image source={{ uri: getSafeAvatar(item.avatar) }} style={styles.newAvatar} />
+                <Image source={{ uri: getSafeAvatar(item.avatar) }} style={[styles.newAvatar, { marginBottom: 2 }]} />
               </TouchableOpacity>
-              <Text style={styles.newUserName} numberOfLines={1}>{item.name}</Text>
-              <View style={styles.newDistanceBadge}>
-                <Text style={styles.newDistanceBadgeText}>📍 {capToPickDisplay}</Text>
+              <Text style={[styles.newUserName, { marginBottom: 2 }, isDarkMode && { color: '#ffffff' }]} numberOfLines={1}>{item.name}</Text>
+              
+              <View style={[styles.newDistanceBadge, { marginTop: 0, paddingVertical: 0 }, isDarkMode && { backgroundColor: '#334155', borderColor: '#475569' }]}>
+                <Text style={[styles.newDistanceBadgeText, isDarkMode && { color: '#e2e8f0' }]}>📍 {capToPickDisplay}</Text>
               </View>
             </View>
-            <View style={styles.newAddressCol}>
-              <Text style={styles.newPickupText} numberOfLines={2}>{item.pickupLocation}</Text>
-              <Text style={styles.newDropoffText} numberOfLines={2}>{destinationsList.join(' - ')}</Text>
+
+            {/* 2️⃣ الوسط: العناوين مفرودة بدون مسافات زيادة وكل عنوان في سطر */}
+            <View style={[styles.newAddressCol, { flex: 1, paddingHorizontal: 4 }]}>
+              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={{ fontSize: 10, marginLeft: 4 }}>🟢</Text>
+                <Text style={[styles.newPickupText, { flex: 1, marginBottom: 0, lineHeight: 18 }, isDarkMode && { color: '#ffffff' }]} numberOfLines={1}>
+                  {item.pickupLocation}
+                </Text>
+              </View>
+
+              {destinationsList.map((dest: string, index: number) => (
+                <View key={index} style={{ flexDirection: 'row-reverse', alignItems: 'center', marginBottom: index === destinationsList.length - 1 ? 0 : 4 }}>
+                  <Text style={{ fontSize: 10, marginLeft: 4 }}>🔴</Text>
+                  <Text style={[styles.newDropoffText, { flex: 1, marginBottom: 0, lineHeight: 18 }, isDarkMode && { color: '#86efac' }]} numberOfLines={1}>
+                    {dest}
+                  </Text>
+                </View>
+              ))}
             </View>
-            
-            {/* 👈 المكان الوحيد المخصص لشارة السعر العادل تحت السعر */}
-<View style={styles.newPriceCol}>
-              <Text style={styles.newTripDistanceText}>{tripDistanceDisplay} ~</Text>
-              <Text style={styles.newPriceText}>{activePrice} ج</Text>
+
+            {/* 3️⃣ اليسار: السعر، الشارة، المسافة الكلية للرحلة، ثم السهم */}
+            <View style={{ width: 85, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={[styles.newPriceText, { fontSize: 24, marginBottom: 2 }]}>{activePrice} ج</Text>
               
-              {/* 👈 شارة السعر العادل لو السعرين متطابقين */}
               {item.fairPrice != null && Number(item.price) === Number(item.fairPrice) && (
-                <View style={{backgroundColor: '#dcfce7', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 1, borderWidth: 1, borderColor: '#86efac'}}>
+                <View style={{backgroundColor: '#dcfce7', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4, marginBottom: 2, borderWidth: 1, borderColor: '#86efac'}}>
                   <Text style={{color: '#059669', fontSize: 10, fontWeight: 'bold'}}>السعر العادل ⚖️</Text>
                 </View>
               )}
 
-              {/* 👈 شارة سعر عالي لو الراكب مزود السعر */}
               {item.fairPrice != null && Number(item.price) > Number(item.fairPrice) && (
-                <View style={{backgroundColor: '#fef08a', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginTop: 4, flexDirection: 'row-reverse', alignItems: 'center', elevation: 1, borderWidth: 1, borderColor: '#facc15'}}>
+                <View style={{backgroundColor: '#fef08a', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4, marginBottom: 2, borderWidth: 1, borderColor: '#facc15'}}>
                   <Text style={{color: '#ca8a04', fontSize: 10, fontWeight: 'bold'}}>سعر عالي 🚀</Text>
                 </View>
               )}
+
+              {/* مسافة الرحلة الكلية اتنقلت هنا تحت الشارة */}
+              <Text style={[styles.newTripDistanceText, { marginTop: 2, marginBottom: 0, fontSize: 11 }, isDarkMode && { color: '#cbd5e1' }]}>🛣️ {tripDistanceDisplay}</Text>
+
+              <Text style={[styles.newArrowIcon, { marginTop: -4 }]}>{isExpanded ? '▴' : '▾'}</Text>
             </View>
 
-            <View style={styles.newActionDotsCol}>
-              <Text style={styles.newArrowIcon}>{isExpanded ? '▴' : '▾'}</Text>
-            </View>
           </View>
         </TouchableOpacity>
 
@@ -2564,15 +2581,15 @@ const notifyArrival = async () => {
   newStarIcon: { fontSize: 10, color: '#f59e0b' },
   newTimeText: { fontSize: 10, color: '#94a3b8', marginTop: 2 },
   
-  newAddressCol: { flex: 1, justifyContent: 'center' },
-  newPickupText: { fontSize: 15, fontWeight: 'bold', color: '#0f172a', textAlign: 'right', marginBottom: 6 },
-  newDropoffText: { fontSize: 14, color: '#475569', textAlign: 'right', marginBottom: 2 },
-  
-  newPriceCol: { width: 85, alignItems: 'center', justifyContent: 'center', marginRight: 5 },
-  newTripDistanceText: { fontSize: 13, color: '#64748b', fontWeight: 'bold', marginBottom: 4 },  
-  newPriceText: { fontSize: 20, fontWeight: '900', color: '#10b981' },
-  
-  newActionDotsCol: { width: 15, alignItems: 'center', justifyContent: 'center' },
+  newAddressCol: { flex: 1, justifyContent: 'center', paddingHorizontal: 8 }, // 👈 زودنا مسافة أفقية عشان الكلام ميكتمش في بعضه
+  newPickupText: { fontSize: 15, fontWeight: 'bold', color: '#0f172a', textAlign: 'right', marginBottom: 4, lineHeight: 20 }, // 👈 ضبط الـ lineHeight 
+  newDropoffText: { fontSize: 13, color: '#475569', textAlign: 'right', marginBottom: 0, lineHeight: 18 }, // 👈 ضبط الحجم والارتفاع
+
+  newPriceCol: { width: 85, alignItems: 'flex-end', justifyContent: 'center', marginLeft: 5 }, // 👈 نقلنا المحاذاة لليمين وخلينا فيه مسافة أمان
+  newTripDistanceText: { fontSize: 12, color: '#64748b', fontWeight: 'bold', marginBottom: 2 }, // 👈 صغرنا الحجم شوية عشان ميخبطش في السعر
+  newPriceText: { fontSize: 18, fontWeight: '900', color: '#10b981' }, // 👈 صغرنا السعر سيكا عشان يظبط مع المسافة
+
+  newActionDotsCol: { width: 25, alignItems: 'center', justifyContent: 'center' }, // 👈 عرضنا العمود ده شوية عشان السهم ميكتمش في السعر
   newArrowIcon: { fontSize: 22, color: '#94a3b8', fontWeight: 'bold' },
   
   expandedSection: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#f1f5f9' },

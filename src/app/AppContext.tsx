@@ -5,10 +5,37 @@ export const useApp = () => useContext(AppContext);
 // 1. تعريف شكل البيانات عشان TypeScript
 export const AppContext = createContext<any>(null);
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   // متغيراتك الحالية (زي بيانات الرحلة أو الكابتن)
   const [activeRide, setActiveRide] = useState(null);
   const [user, setUser] = useState(null);
+
+  // 🌟 إعدادات التطبيق الأساسية (الوضع الداكن والاهتزاز) 🌟
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
+
+  useEffect(() => {
+    AsyncStorage.getItem('isDarkMode').then(v => { if (v) setIsDarkMode(JSON.parse(v)); });
+    AsyncStorage.getItem('isVibrationEnabled').then(v => { if (v) setIsVibrationEnabled(JSON.parse(v)); });
+  }, []);
+
+  const toggleTheme = () => {
+    setIsDarkMode(prev => {
+      const newVal = !prev;
+      AsyncStorage.setItem('isDarkMode', JSON.stringify(newVal)).catch(() => {});
+      return newVal;
+    });
+  };
+
+  const toggleVibration = () => {
+    setIsVibrationEnabled(prev => {
+      const newVal = !prev;
+      AsyncStorage.setItem('isVibrationEnabled', JSON.stringify(newVal)).catch(() => {});
+      return newVal;
+    });
+  };
 
   // 🌟 هنا المتغير الجديد اللي هيشيل كل إعدادات اللوحة 🌟
   const [appSettings, setAppSettings] = useState({
@@ -53,7 +80,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setActiveRide, 
       user, 
       setUser, 
-      appSettings // 👈 ضفنا الإعدادات هنا عشان التطبيق كله يشوفها
+      appSettings,
+      isDarkMode,      // 👈 تم الإضافة
+      toggleTheme,     // 👈 تم الإضافة
+      isVibrationEnabled, // 👈 تم الإضافة
+      toggleVibration  // 👈 تم الإضافة
     }}>
       {children}
     </AppContext.Provider>

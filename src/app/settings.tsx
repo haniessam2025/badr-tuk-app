@@ -14,8 +14,8 @@ export default function Settings() {
   const [userType, setUserType] = useState<'passengers' | 'captains' | null>(null);
   const [loginRoute, setLoginRoute] = useState<any>('/');
 
-  // سحب الإعدادات من العقل المركزي
-  const { isDarkMode, toggleDarkMode, isVibrationEnabled, toggleVibration } = useApp();
+  // 👈 هنا الاستدعاء الصحيح والمطابق للدوال اللي تحت
+  const { isDarkMode, toggleTheme, isVibrationEnabled, toggleVibration } = useApp();
 
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -91,7 +91,7 @@ export default function Settings() {
 
       await addDoc(collection(db, 'notifications'), {
         title: 'حذف حساب 🚨',
-        message: `قام ${userType === 'captains' ? 'الكابتن' : 'الراكب'} (${userName} - ${userPhone}) بحذف حسابه نهائياً.`,
+        message: `قام ${userType === 'captains' ? 'الكابتن' : 'الراكب'} (${userName}\n${userPhone}) بحذف حسابه نهائياً.`,
         type: 'account_deleted', userId: userId, userType: userType, timestamp: new Date().getTime(), read: false
       });
 
@@ -119,22 +119,35 @@ export default function Settings() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>تفضيلات التطبيق</Text>
         <View style={[styles.sectionCard, isDarkMode && { backgroundColor: '#1e293b', borderColor: '#334155' }]}>
+          
           <View style={styles.settingRow}>
-            <Switch trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} thumbColor={isDarkMode ? '#60a5fa' : '#f8fafc'} onValueChange={toggleDarkMode} value={isDarkMode} />
+            <Switch 
+              trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} 
+              thumbColor={isDarkMode ? '#60a5fa' : '#f8fafc'} 
+              onValueChange={toggleTheme} 
+              value={isDarkMode} 
+            />
             <View style={[styles.settingTextCol, { alignItems: 'flex-end', marginLeft: 15 }]}>
               <Text style={[styles.settingTitle, isDarkMode && { color: '#ffffff' }]}>المظهر الداكن (Dark Mode)</Text>
               <Text style={styles.settingSubtitle}>تفعيل الوضع الليلي لإراحة العين</Text>
             </View>
           </View>
+
           <View style={[styles.divider, isDarkMode && { backgroundColor: '#334155' }]} />
           
           <View style={styles.settingRow}>
-            <Switch trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} thumbColor={isVibrationEnabled ? '#60a5fa' : '#f8fafc'} onValueChange={toggleVibration} value={isVibrationEnabled} />
+            <Switch 
+              trackColor={{ false: '#cbd5e1', true: '#3b82f6' }} 
+              thumbColor={isVibrationEnabled ? '#60a5fa' : '#f8fafc'} 
+              onValueChange={toggleVibration} 
+              value={isVibrationEnabled} 
+            />
             <View style={[styles.settingTextCol, { alignItems: 'flex-end', marginLeft: 15 }]}>
               <Text style={[styles.settingTitle, isDarkMode && { color: '#ffffff' }]}>الاهتزاز (Vibration)</Text>
               <Text style={styles.settingSubtitle}>تفعيل الهزاز عند وصول إشعار</Text>
             </View>
           </View>
+          
         </View>
 
         <Text style={styles.sectionTitle}>إعدادات الحساب والأمان</Text>

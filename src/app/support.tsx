@@ -18,7 +18,24 @@ export default function Support() {
   useEffect(() => {
     checkUserTypeAndLoadTickets();
   }, []);
+const [previousMessages, setPreviousMessages] = useState<any[]>([]);
 
+useEffect(() => {
+  const fetchMySupportMessages = async () => {
+    const userId = await AsyncStorage.getItem('currentCaptainId') || await AsyncStorage.getItem('currentPassengerId');
+    if (!userId) return;
+    
+    // مراقبة رسائل الدعم الخاصة بالمستخدم الحالي
+    const q = query(collection(db, 'support_messages'), where('userId', '==', userId));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      msgs.sort((a: any, b: any) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+      setPreviousMessages(msgs);
+    });
+    return () => unsubscribe();
+  };
+  fetchMySupportMessages();
+}, []);
   const checkUserTypeAndLoadTickets = async () => {
     try {
       let currentId = null;
@@ -146,9 +163,21 @@ export default function Support() {
             <TouchableOpacity style={styles.submitBtn} onPress={submitComplaint} disabled={loading}>
               {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.submitBtnText}>إرسال للإدارة 🚀</Text>}
             </TouchableOpacity>
-
+            <Text style={{ fontSize: 16, fontWeight: 'bold', marginTop: 20, textAlign: 'right', color: isDarkMode ? '#ffffff' : '#1e293b' }}>
+  سجل رسائل الدعم السابقة 📋
+</Text>
+{previousMessages.map((msg, index) => (
+  <View key={index} style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc', padding: 12, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0' }}>
+    سؤالك: <Text style={{ fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#0f172a' }}>{msg.text || msg.message}</Text>
+    {msg.adminReply ? (
+      <Text style={{ color: '#10b981', marginTop: 5, fontWeight: 'bold' }}>رد الإدارة: {msg.adminReply}</Text>
+    ) : (
+      <Text style={{ color: '#f59e0b', marginTop: 5, fontSize: 12 }}>جاري المراجعة من الإدارة...</Text>
+    )}
+  </View>
+))}
             {myTickets.length > 0 && (
-              <Text style={[styles.historyTitle, isDarkMode && { color: '#cbd5e1' }]}>سجل الشكاوى والرسائل السابقة 👇</Text>
+              <Text style={[styles.historyTitle, isDarkMode && { color: '#cbd5e1' }]}>سجل رسائل الدعم السابقة 👇</Text>
             )}
           </View>
         }
