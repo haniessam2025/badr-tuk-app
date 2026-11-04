@@ -2032,7 +2032,7 @@ const notifyArrival = async () => {
             
             <TouchableOpacity 
               style={{ backgroundColor: '#10b981', padding: 15, marginHorizontal: 20, borderRadius: 12, alignItems: 'center', marginBottom: 5, elevation: 2 }} 
-              onPress={() => { closeSidebar(); router.push('/live-support'as any); }}
+              onPress={() => { closeSidebar(); router.push({ pathname: '/live-support', params: { role: 'captain' } } as any); }}
             >
               <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>💬 محادثة الدعم الفني (مباشر)</Text>
             </TouchableOpacity>
@@ -2564,8 +2564,8 @@ const notifyArrival = async () => {
   sidebarAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#eab308', marginBottom: 10 },
   sidebarName: { fontSize: 18, fontWeight: 'bold', color: '#ffffff' },
   sidebarPhone: { fontSize: 14, color: '#94a3b8', marginTop: 5 },
-  sidebarLinks: { padding: 20 },
-  sidebarLink: { paddingVertical: 18, borderBottomWidth: 1, borderColor: '#f1f5f9' },
+  sidebarLinks: { padding: 10 }, // تقليل الحشو العام
+  sidebarLink: { paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f1f5f9' }, // تقليل المسافة بين العناصر لتظهر كاملة
   sidebarLinkText: { fontSize: 16, color: '#334155', fontWeight: 'bold', textAlign: 'right' },
   sidebarLogoutBtn: { backgroundColor: '#fee2e2', padding: 15, margin: 20, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#fca5a5' },
   sidebarLogoutText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },

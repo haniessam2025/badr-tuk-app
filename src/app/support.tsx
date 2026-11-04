@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { db } from '../firebase';
@@ -18,58 +18,68 @@ export default function Support() {
   useEffect(() => {
     checkUserTypeAndLoadTickets();
   }, []);
-const [previousMessages, setPreviousMessages] = useState<any[]>([]);
 
-useEffect(() => {
-  const fetchMySupportMessages = async () => {
-    const userId = await AsyncStorage.getItem('currentCaptainId') || await AsyncStorage.getItem('currentPassengerId');
-    if (!userId) return;
-    
-    // مراقبة رسائل الدعم الخاصة بالمستخدم الحالي
-    const q = query(collection(db, 'support_messages'), where('userId', '==', userId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      msgs.sort((a: any, b: any) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
-      setPreviousMessages(msgs);
-    });
-    return () => unsubscribe();
-  };
-  fetchMySupportMessages();
-}, []);
   const checkUserTypeAndLoadTickets = async () => {
     try {
       let currentId = null;
       let currentType = null;
       let currentName = null;
+      let currentPhone = 'غير مسجل';
+      let currentVehicleDetails = null;
 
       const captainId = await AsyncStorage.getItem('currentCaptainId');
       if (captainId) {
         const docSnap = await getDoc(doc(db, 'captains', captainId));
-        currentId = captainId;
-        currentType = 'captain';
-        currentName = docSnap.data()?.name;
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          currentId = captainId;
+          currentType = 'captain';
+          currentName = data.name || data.fullName || 'كابتن';
+          currentPhone = data.phone || data.phoneNumber || data.mobile || 'غير مسجل';
+          
+          const vType = data.vehicle || data.vehicleCategory || data.vehicleDetails?.type || 'مركبة';
+          const vPlate = data.plateNumber || data.carPlate || data.vehicleDetails?.plateNumber || 'بدون لوحة';
+          currentVehicleDetails = `${vType} - لوحة/كودي: ${vPlate}`;
+        }
       } else {
         const passengerId = await AsyncStorage.getItem('currentPassengerId');
         if (passengerId) {
           const docSnap = await getDoc(doc(db, 'passengers', passengerId));
-          currentId = passengerId;
-          currentType = 'passenger';
-          currentName = docSnap.data()?.name;
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            currentId = passengerId;
+            currentType = 'passenger';
+            currentName = data.name || data.fullName || 'راكب';
+            currentPhone = data.phone || data.phoneNumber || data.mobile || 'غير مسجل';
+          }
         }
       }
 
       if (currentId) {
-        setUserData({ id: currentId, type: currentType, name: currentName });
+        setUserData({ 
+          id: currentId, 
+          type: currentType, 
+          name: currentName,
+          phone: currentPhone,
+          vehicleDetails: currentVehicleDetails 
+        });
         
-        // 👈 جلب الشكاوى والردود الخاصة بهذا المستخدم لحظياً
+      // 👈 جلب الشكاوى بدون orderBy لتجنب مشكلة الـ Index في فايربيز
         const q = query(
-          collection(db, 'support_tickets'), // 👈 توحيد المسار مع لوحة الإدارة
-          where('senderId', '==', currentId),
-          orderBy('timestamp', 'desc')
+          collection(db, 'support_tickets'),
+          where('senderId', '==', currentId)
         );
 
         const unsubscribe = onSnapshot(q, (snap) => {
           const tickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          // الترتيب برمجياً من الأحدث للأقدم عشان نعالج مشكلة فايربيز
+          tickets.sort((a: any, b: any) => {
+            const timeA = a.timestamp?.toMillis?.() || Date.now();
+            const timeB = b.timestamp?.toMillis?.() || Date.now();
+            return timeB - timeA;
+          });
+          
           setMyTickets(tickets);
         });
 
@@ -89,9 +99,16 @@ useEffect(() => {
     setLoading(true);
     try {
       await addDoc(collection(db, 'support_tickets'), { // 👈 تم التعديل لتسمع في الإدارة فوراً
+        userId: userData?.id || 'unknown',
         senderId: userData?.id || 'unknown',
+        userType: userData?.type || 'unknown',
         senderType: userData?.type || 'unknown',
+        userName: userData?.name || 'مستخدم غير معروف',
         senderName: userData?.name || 'مستخدم غير معروف',
+        userPhone: userData?.phone || 'غير مسجل',
+        senderPhone: userData?.phone || 'غير مسجل',
+        captainVehicleDetails: userData?.type === 'captain' ? userData?.vehicleDetails : null,
+        message: message.trim(),
         text: message.trim(),
         status: 'pending',
         isReadAdmin: false, // 👈 عشان تنور أحمر في الإدارة
@@ -160,25 +177,11 @@ useEffect(() => {
               textAlign="right"
             />
 
-            <TouchableOpacity style={styles.submitBtn} onPress={submitComplaint} disabled={loading}>
+          <TouchableOpacity style={styles.submitBtn} onPress={submitComplaint} disabled={loading}>
               {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.submitBtnText}>إرسال للإدارة 🚀</Text>}
             </TouchableOpacity>
-            <Text style={{ fontSize: 16, fontWeight: 'bold', marginTop: 20, textAlign: 'right', color: isDarkMode ? '#ffffff' : '#1e293b' }}>
-  سجل رسائل الدعم السابقة 📋
-</Text>
-{previousMessages.map((msg, index) => (
-  <View key={index} style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc', padding: 12, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: isDarkMode ? '#334155' : '#e2e8f0' }}>
-    سؤالك: <Text style={{ fontWeight: 'bold', color: isDarkMode ? '#e2e8f0' : '#0f172a' }}>{msg.text || msg.message}</Text>
-    {msg.adminReply ? (
-      <Text style={{ color: '#10b981', marginTop: 5, fontWeight: 'bold' }}>رد الإدارة: {msg.adminReply}</Text>
-    ) : (
-      <Text style={{ color: '#f59e0b', marginTop: 5, fontSize: 12 }}>جاري المراجعة من الإدارة...</Text>
-    )}
-  </View>
-))}
-            {myTickets.length > 0 && (
-              <Text style={[styles.historyTitle, isDarkMode && { color: '#cbd5e1' }]}>سجل رسائل الدعم السابقة 👇</Text>
-            )}
+
+            <Text style={[styles.historyTitle, isDarkMode && { color: '#ffffff' }]}>سجل رسائل الدعم السابقة 📋</Text>
           </View>
         }
       />

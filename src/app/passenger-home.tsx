@@ -2149,8 +2149,8 @@ export default function PassengerHome() {
                 <Text style={[styles.sidebarLinkText, isDarkMode && { color: '#e2e8f0' }]}>المقترحات والشكاوى والمفقودات</Text>
               </TouchableOpacity>
 
-              {/* زرار الدعم الفني المباشر الأخضر */}
-              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { closeSidebar(); router.push('/support-live-chat' as any); }}>
+{/* زرار الدعم الفني المباشر الأخضر */}
+              <TouchableOpacity style={styles.sidebarSupportBtn} onPress={() => { AsyncStorage.setItem('current_chat_role', 'passenger'); closeSidebar(); router.push('/live-support' as any); }}>
                 <Text style={styles.sidebarSupportBtnText}>💬 محادثة الدعم الفني (مباشر)</Text>
               </TouchableOpacity>
 

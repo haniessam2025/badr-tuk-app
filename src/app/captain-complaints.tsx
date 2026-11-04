@@ -24,9 +24,9 @@ export default function UserComplaints() {
   // 👈 دالة ذكية بتعرف إذا كان اللي فاتح راكب ولا كابتن وتجيب داتا السجل بتاعه
   const loadData = async () => {
     try {
-      let currentId = await AsyncStorage.getItem('currentPassengerId');
-      let type = 'passenger';
-      let collectionName = 'passengers';
+      let currentId = await AsyncStorage.getItem('currentcaptainId');
+      let type = 'captain';
+      let collectionName = 'captains';
 
       if (!currentId) {
         currentId = await AsyncStorage.getItem('currentCaptainId');
@@ -37,7 +37,7 @@ export default function UserComplaints() {
       if (!currentId) return;
 
       const docSnap = await getDoc(doc(db, collectionName, currentId));
-      const userName = docSnap.exists() ? docSnap.data().name : (type === 'passenger' ? 'راكب' : 'كابتن');
+      const userName = docSnap.exists() ? docSnap.data().name : (type === 'captain' ? 'راكب' : 'كابتن');
 
       setUserData({ id: currentId, type, name: userName });
       

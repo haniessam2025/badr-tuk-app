@@ -52,21 +52,45 @@ export default function LiveSupportChat() {
   const flatListRef = useRef<FlatList>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 1. تحديد هوية المستخدم
+ // إضافة States جديدة لبيانات المستخدم
+  const [userPhone, setUserPhone] = useState<string>('غير مسجل');
+  const [captainVehicleDetails, setCaptainVehicleDetails] = useState<string>('');
+
+  // 1. تحديد هوية المستخدم بدقة فائقة وجلب البيانات من الداتابيز مباشرة 
   useEffect(() => {
     const identifyUser = async () => {
       try {
-        let id = await AsyncStorage.getItem('currentCaptainId');
-        if (id) {
-          setUserId(id); setUserType('captain');
-          const profileStr = await AsyncStorage.getItem('captain_profile');
-          if (profileStr) setUserName(JSON.parse(profileStr).name);
-        } else {
-          id = await AsyncStorage.getItem('currentPassengerId');
-          if (id) {
-            setUserId(id); setUserType('passenger');
-            const profileStr = await AsyncStorage.getItem('passenger_profile');
-            if (profileStr) setUserName(JSON.parse(profileStr).name);
+        const role = await AsyncStorage.getItem('current_chat_role');
+        const passId = await AsyncStorage.getItem('currentPassengerId');
+        const capId = await AsyncStorage.getItem('currentCaptainId');
+
+        // لو الرول مش موجود لأي سبب (زي التِست السريع)، نعتمد على الآي دي المتاح
+        const finalRole = role || (passId ? 'passenger' : 'captain');
+
+        if (finalRole === 'passenger' && passId) {
+          setUserId(passId); 
+          setUserType('passenger');
+          
+          const docSnap = await getDoc(doc(db, 'passengers', passId));
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserName(data.name || data.fullName || 'راكب');
+            // 👈 قراءة الرقم من أكثر من حقل محتمل لضمان عدم ضياعه نهائياً
+            setUserPhone(data.phone || data.phoneNumber || data.mobile || 'غير مسجل');
+          }
+        } else if (finalRole === 'captain' && capId) {
+          setUserId(capId); 
+          setUserType('captain');
+          
+          const docSnap = await getDoc(doc(db, 'captains', capId));
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserName(data.name || data.fullName || 'كابتن');
+            setUserPhone(data.phone || data.phoneNumber || data.mobile || 'غير مسجل');
+            
+            const vType = data.vehicle || data.vehicleCategory || data.vehicleDetails?.type || 'مركبة';
+            const vPlate = data.plateNumber || data.carPlate || data.vehicleDetails?.plateNumber || 'بدون لوحة';
+            setCaptainVehicleDetails(`${vType} - لوحة/كودي: ${vPlate}`);
           }
         }
       } catch (error) {}
@@ -148,7 +172,7 @@ export default function LiveSupportChat() {
     } catch (error) {}
   };
 
-  // 4. إرسال رسالة جديدة
+// 4. إرسال رسالة جديدة للداشبورد وتحديث البيانات القديمة
   const sendMessage = async () => {
     if (!inputText.trim() || !userId) return;
 
@@ -159,31 +183,42 @@ export default function LiveSupportChat() {
       const chatDocRef = doc(db, 'support_chats', userId);
       const chatDoc = await getDoc(chatDocRef);
 
+      // تجميع كل البيانات المطلوبة للداشبورد في أوبجكت واحد
+      const commonData = {
+        userId: userId,
+        senderId: userId,
+        userName: userName,
+        senderName: userName,
+        userPhone: userPhone,
+        senderPhone: userPhone,
+        phone: userPhone,
+        userType: userType,
+        senderType: userType,
+        captainVehicleDetails: userType === 'captain' ? captainVehicleDetails : null,
+        lastMessage: messageText,
+        lastMessageTime: serverTimestamp(),
+        timestamp: serverTimestamp(),
+        status: 'open',
+        userTyping: false
+      };
+
       if (!chatDoc.exists()) {
         await setDoc(chatDocRef, {
-          userId,
-          userName,
-          userType,
-          lastMessage: messageText,
-          lastMessageTime: serverTimestamp(),
+          ...commonData,
           unreadAdminCount: 1,
           unreadUserCount: 0,
-          status: 'open',
-          userTyping: false
         });
       } else {
+        // تحديث المحادثة القديمة عشان تاخد رقم التليفون وبيانات المركبة اللي كانت ناقصة!
         await updateDoc(chatDocRef, {
-          lastMessage: messageText,
-          lastMessageTime: serverTimestamp(),
+          ...commonData,
           unreadAdminCount: (chatDoc.data()?.unreadAdminCount || 0) + 1,
-          status: 'open',
-          userTyping: false // إيقاف علامة الكتابة فور الإرسال
         });
       }
 
       await addDoc(collection(db, 'support_chats', userId, 'messages'), {
         text: messageText,
-        sender: 'user',
+        sender: userType, 
         timestamp: serverTimestamp()
       });
 
@@ -206,9 +241,10 @@ export default function LiveSupportChat() {
   return (
     <KeyboardAvoidingView 
       style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-      keyboardVerticalOffset={0}
-    >
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 25}
+    > 
+        
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>رجوع</Text>
@@ -278,8 +314,7 @@ const styles = StyleSheet.create({
   userText: { color: '#ffffff', textAlign: 'right' },
   adminText: { color: '#1e293b', textAlign: 'right' },
 
-  inputContainer: { flexDirection: 'row-reverse', alignItems: 'flex-end', padding: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 35, backgroundColor: '#ffffff', borderTopWidth: 1, borderColor: '#e2e8f0' },  
-  input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, paddingTop: 12, maxHeight: 100, minHeight: 45, fontSize: 15, color: '#1e293b' },
+inputContainer: { flexDirection: 'row-reverse', alignItems: 'flex-end', padding: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 10, marginBottom: Platform.OS === 'android' ? 25 : 0, backgroundColor: '#ffffff', borderTopWidth: 1, borderColor: '#e2e8f0' },  input: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, paddingTop: 12, maxHeight: 100, minHeight: 45, fontSize: 15, color: '#1e293b' },
   sendBtn: { backgroundColor: '#3b82f6', width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   sendBtnIcon: { color: '#ffffff', fontSize: 18, transform: [{ rotateY: '180deg' }] }
 });
